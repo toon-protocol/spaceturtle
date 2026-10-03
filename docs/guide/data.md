@@ -40,8 +40,12 @@ Only free, read-only `toon` commands:
 - `toon route list`
 - `toon limit show`
 - `toon logs`
+- `toon message list`
 
-None of them opens the wallet's keystore, so nothing needs its passphrase.
+None of them opens the wallet's keystore, so nothing needs its passphrase. `toon message
+list` prints the private messages the node's supervisor already opened, with the agent
+identity's secret that the agent node keeps for it. A `toon` without that command leaves
+the Messages section locked and the rest as it is.
 
 It also runs `curl`, to fetch the relay's NIP-11 document from the relay's read address,
 and `wl-copy`, to copy a value.

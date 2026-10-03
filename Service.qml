@@ -63,6 +63,14 @@ Item {
   // Every Request, newest first; the agent answers them in its next session.
   property var requests: []
   readonly property int waitingCount: requests.filter(function(r) { return r.state === "waiting" }).length
+  // The agent identity's private messages, as `toon message list` prints what
+  // the supervisor opened: the conversations, newest first, each with its
+  // messages oldest first. While they cannot be read, why not.
+  property var conversations: []
+  property bool messagesReadable: false
+  property string messagesReason: ""
+  // False while the supervisor is stopped, and so opening nothing new.
+  property bool messagesSupervisor: false
   // The node's state as `relay-events` reports it; null when there is no agent
   // node. Each group in it is null when its command failed.
   property var nodeState: null
@@ -85,9 +93,10 @@ Item {
   property bool lookedDuringFetch: false
 
   // Where the panel was, kept here because the panel is unloaded when it closes.
-  // Sections are numbered as their keys are, from 1; Activity is 1, Network 2, Requests 4 and Node 5.
+  // Sections are numbered as their keys are, from 1; Activity is 1, Network 2, Messages 3, Requests 4 and Node 5.
   readonly property int activitySection: 1
   readonly property int networkSection: 2
+  readonly property int messagesSection: 3
   readonly property int requestsSection: 4
   readonly property int nodeSection: 5
   readonly property int personaSection: 6
@@ -97,6 +106,12 @@ Item {
   property int activityCursor: 0
   // The Requests section's cursor.
   property int requestCursor: 0
+  // What Messages shows: one conversation (its id), or, while empty, the list
+  // of them. The cursor is on a message or on a conversation, and
+  // `conversationCursor` is where it was in the list, for Esc.
+  property string conversationId: ""
+  property int messageCursor: 0
+  property int conversationCursor: 0
   // What Network shows: a thread (the id of the event it was opened on), an
   // author page (a pubkey), or, while both are empty, the feed.
   property string threadId: ""
@@ -193,6 +208,7 @@ Item {
     reqs.sort(function(a, b) { return b.created_at - a.created_at })
     root.requestCursor = indexAfter(root.requests, reqs, root.requestCursor)
     root.requests = reqs
+    applyMessages(report.messages)
     root.nodeState = report.state && typeof report.state === "object" ? report.state : null
     root.online = report.online === true
     root.relayName = report.name || ""
@@ -201,6 +217,55 @@ Item {
       ? report.attention : "none"
     // Nothing is "new" before the Observer has ever looked, nor while the panel is showing it.
     if (report.looked_at === null || root.looking) root.markSeen()
+  }
+
+  // The cursor stays on its conversation or message when newer ones arrive,
+  // except at the end of a conversation, where it follows the newest message.
+  function applyMessages(messages) {
+    var report = messages && typeof messages === "object" ? messages : ({})
+    var list = Array.isArray(report.conversations) ? report.conversations : []
+    var open = conversationById(root.conversationId)
+    var next = null
+    for (var i = 0; i < list.length; i++)
+      if (list[i].id === root.conversationId) next = list[i]
+    if (open && next) {
+      var atEnd = root.messageCursor >= open.messages.length - 1
+      root.messageCursor = atEnd ? next.messages.length - 1 : indexAfter(open.messages, next.messages, root.messageCursor)
+      root.conversationCursor = indexAfter(root.conversations, list, root.conversationCursor)
+    } else {
+      // The conversation showing is gone: back to the list.
+      if (open) { root.conversationId = ""; root.messageCursor = root.conversationCursor }
+      root.messageCursor = indexAfter(root.conversations, list, root.messageCursor)
+    }
+    root.conversations = list
+    root.messagesReadable = report.readable === true
+    root.messagesReason = typeof report.reason === "string" ? report.reason : ""
+    root.messagesSupervisor = report.supervisor === true
+  }
+
+  // The conversation with this id, or null.
+  function conversationById(id) {
+    if (id === "") return null
+    for (var i = 0; i < conversations.length; i++)
+      if (conversations[i].id === id) return conversations[i]
+    return null
+  }
+
+  // Shows a conversation, with the cursor on its newest message.
+  function openConversation(id) {
+    var conversation = conversationById(id)
+    if (!conversation) return
+    conversationCursor = messageCursor
+    conversationId = id
+    messageCursor = Math.max(0, conversation.messages.length - 1)
+  }
+
+  // Esc in Messages: back to the conversations. False when they are showing.
+  function closeConversation() {
+    if (conversationId === "") return false
+    conversationId = ""
+    messageCursor = conversationCursor
+    return true
   }
 
   // Where the event at `index` of `before` is in `after`; `index` if it is gone.

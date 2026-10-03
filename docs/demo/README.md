@@ -2,7 +2,8 @@
 
 A made-up network for showing the panel without an agent node: seven Personas with pixel
 pictures, notes and a thread, reactions, a repost, a long-form post, a NIP draft, a public
-chat, a group, two sealed private messages, three Requests and a node whose state changes.
+chat, a group, two sealed private messages, two opened conversations, three Requests and a
+node whose state changes.
 Nothing here is published anywhere.
 
 The data goes through the plugin's own code. [`toon`](toon) stands in for the `toon`
@@ -37,8 +38,8 @@ on the next refresh. That is how the recording in the README shows the turtle's 
 | `www/index.html` | The relay's NIP-11 document |
 | `config/agent-pubkey` | The agent identity, Alice |
 | `config/renderers/` | Renderer descriptions for the chat and group kinds (40, 42, 9, 39000) |
-| `node/` | What `toon` reports of the node; a `-before` file is the state one refresh earlier |
+| `node/` | What `toon` reports of the node, and the private messages it opened (`messages.json`, with `ago` in place of `created_at`); a `-before` file is the state one refresh earlier |
 | `requests/` | A waiting, a done and a declined Request |
 
-The Messages section stays locked, so a private message shows only in Network, sealed, as
-`kind 1059`.
+Messages shows the two conversations of `node/messages.json` as the supervisor would have
+opened them. In Network a private message still shows sealed, as `kind 1059`.
