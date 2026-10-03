@@ -34,6 +34,9 @@ Item {
 
   readonly property string script: Qt.resolvedUrl("relay-events").toString().replace(/^file:\/\//, "")
 
+  readonly property string requestScript: Qt.resolvedUrl("request").toString().replace(/^file:\/\//, "")
+  readonly property string markScript: Qt.resolvedUrl("mark-seen").toString().replace(/^file:\/\//, "")
+
   property bool loaded: false
   property bool online: false
   property string relayName: ""
@@ -54,22 +57,38 @@ Item {
   property var events: []
   // Events a thread needs that the feed's limit left out.
   property var context: []
+  // Every Request, newest first; the agent answers them in its next session.
+  property var requests: []
+  readonly property int waitingCount: requests.filter(function(r) { return r.state === "waiting" }).length
+  // The node's state as `relay-events` reports it; null when there is no agent
+  // node. Each group in it is null when its command failed.
+  property var nodeState: null
+  // The Node section's cursor.
+  property int nodeCursor: 0
 
-  // True while the panel is open. Newest created_at seen in the panel; anything
-  // newer puts the dot on the turtle.
+  // True while the panel is open. Opening it records that the Observer looked
+  // (the `mark-seen` script, which keeps the time on disk, so it holds across
+  // restarts and is the same on every monitor).
   property bool looking: false
-  property real seenAt: 0
-  readonly property real newestAt: Math.max(events.length > 0 ? events[0].created_at : 0, lastActive)
-  readonly property bool hasUnseen: loaded && newestAt > seenAt
+  // "none", "news" or "urgent", as relay-events reports it.
+  property string attention: "none"
+  readonly property bool hasUnseen: loaded && attention === "news"
+  readonly property bool urgent: loaded && attention === "urgent"
+  // Set when the Observer looks while a refresh is running: that refresh read
+  // the time of the look before, so its "news" is already seen.
+  property bool lookedDuringFetch: false
 
   // Where the panel was, kept here because the panel is unloaded when it closes.
-  // Sections are numbered as their keys are, from 1; Activity is 1 and Network 2.
+  // Sections are numbered as their keys are, from 1; Activity is 1, Network 2 and Requests 4.
   readonly property int activitySection: 1
   readonly property int networkSection: 2
+  readonly property int requestsSection: 4
   property int section: activitySection
   property int cursor: 0
   // The Activity's cursor.
   property int activityCursor: 0
+  // The Requests section's cursor.
+  property int requestCursor: 0
   // What Network shows: a thread (the id of the event it was opened on), an
   // author page (a pubkey), or, while both are empty, the feed.
   property string threadId: ""
@@ -78,10 +97,20 @@ Item {
   // empty while the feed shows, else the first is the feed.
   property var trail: []
 
-  onLookingChanged: if (looking) seenAt = newestAt
+  onLookingChanged: if (looking) markSeen()
 
+  function markSeen() {
+    if (attention === "news") attention = "none"
+    if (fetchProc.running) lookedDuringFetch = true
+    if (!markProc.running) markProc.running = true
+  }
+
+  // Asked for while a fetch runs, another follows it, so it sees what changed since.
+  property bool refreshAgain: false
   function refresh() {
-    if (!fetchProc.running) fetchProc.running = true
+    if (fetchProc.running) { refreshAgain = true; return }
+    lookedDuringFetch = false
+    fetchProc.running = true
   }
 
   function applyReport(report) {
@@ -128,7 +157,6 @@ Item {
     acts.sort(function(a, b) { return b.created_at - a.created_at })
     root.activityCursor = indexAfter(root.activity, acts, root.activityCursor)
 
-    var first = !root.loaded
     root.profiles = map
     root.followMap = followed
     root.selfPubkey = report.self || ""
@@ -146,11 +174,18 @@ Item {
         cursor: indexAfter(threadsBefore[view.thread], threadRows(view.thread), view.cursor) }
     })
     if (root.threadId !== "") root.cursor = indexAfter(threadsBefore[root.threadId], threadRows(root.threadId), root.cursor)
+    var reqs = report.requests || []
+    reqs.sort(function(a, b) { return b.created_at - a.created_at })
+    root.requestCursor = indexAfter(root.requests, reqs, root.requestCursor)
+    root.requests = reqs
+    root.nodeState = report.state && typeof report.state === "object" ? report.state : null
     root.online = report.online === true
     root.relayName = report.name || ""
     root.loaded = true
-    // Nothing is "new" on the first load, nor while the panel is showing it.
-    if (first || root.looking) root.seenAt = root.newestAt
+    root.attention = report.attention === "urgent" || (report.attention === "news" && !root.lookedDuringFetch)
+      ? report.attention : "none"
+    // Nothing is "new" before the Observer has ever looked, nor while the panel is showing it.
+    if (report.looked_at === null || root.looking) root.markSeen()
   }
 
   // Where the event at `index` of `before` is in `after`; `index` if it is gone.
@@ -275,8 +310,43 @@ Item {
   // Opens an Activity entry: the thread of the event it refers to if the feed
   // holds it, else of the entry itself.
   function openActivity(entry) {
+    // A Request's outcome: what the agent published, or the Request and its reason.
+    if (entry.request) {
+      if (entry.refers_to && openEvent(entry.refers_to)) return
+      requestCursor = Math.max(0, requests.map(function(r) { return r.id }).indexOf(entry.request.id))
+      section = requestsSection
+      return
+    }
     var target = (entry.refers_to ? eventById(entry.refers_to) : null) || entry
     openThread(target.id)
+  }
+
+  // Opens the thread of an event in the Network; false if the relay does not hold it.
+  function openEvent(id) {
+    if (!eventById(id)) return false
+    openThread(id)
+    return true
+  }
+
+  // Writes a Request, or withdraws a waiting one. The text goes to the script
+  // as an argument, never through a shell.
+  property var pendingCommands: []
+  function submitRequest(text) {
+    if (String(text).trim() === "") return
+    runRequest([requestScript, "add", "--", String(text)])
+  }
+  function withdrawRequest(id) {
+    runRequest([requestScript, "withdraw", String(id)])
+  }
+  function runRequest(command) {
+    pendingCommands = pendingCommands.concat([command])
+    if (!requestProc.running) nextRequestCommand()
+  }
+  function nextRequestCommand() {
+    if (pendingCommands.length === 0) return
+    requestProc.command = pendingCommands[0]
+    pendingCommands = pendingCommands.slice(1)
+    requestProc.running = true
   }
 
   function followingCount(pubkey) {
@@ -304,6 +374,7 @@ Item {
   Process {
     id: fetchProc
     command: [root.script, String(root.eventLimit)]
+    onExited: if (root.refreshAgain) { root.refreshAgain = false; Qt.callLater(root.refresh) }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -316,6 +387,19 @@ Item {
         }
       }
     }
+  }
+
+  Process {
+    id: requestProc
+    onExited: {
+      root.refresh()
+      root.nextRequestCommand()
+    }
+  }
+
+  Process {
+    id: markProc
+    command: [root.markScript]
   }
 
   Timer {

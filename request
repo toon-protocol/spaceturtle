@@ -1,0 +1,77 @@
+#!/bin/bash
+# Write or withdraw a Request: something the Observer asks of the agent. One
+# JSON file per Request in a queue directory; the agent picks them up in its
+# next session and is the only one to change `state`, `result` and `reason`.
+#
+#   request add [--kind KIND] [--pubkey KEY] [--event ID] TEXT
+#       Writes a Request in the state "waiting" and prints its id. KIND is
+#       follow, unfollow, reply, react, repost, persona or free (the default).
+#   request withdraw ID
+#       Removes a Request that is still waiting. One the agent has answered is
+#       refused: it is a record of what the agent did.
+#
+# TEXT and ID are arguments, never parsed by a shell. Costs nothing and opens
+# no keystore. Environment, so that tests can run against a temporary home:
+#   SPACETURTLE_STATE_DIR   the state directory (default: ~/.local/state/spaceturtle);
+#                           the queue is its `requests` directory
+set -uo pipefail
+
+state_dir=${SPACETURTLE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/spaceturtle}
+queue=$state_dir/requests
+
+die() { echo "request: $*" >&2; exit 1; }
+command -v jq >/dev/null || die "jq is needed"
+
+add() {
+  local kind=free pubkey= event=
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --kind) [[ $# -ge 2 ]] || die "--kind needs a value"; kind=$2; shift 2 ;;
+      --pubkey) [[ $# -ge 2 ]] || die "--pubkey needs a value"; pubkey=$2; shift 2 ;;
+      --event) [[ $# -ge 2 ]] || die "--event needs a value"; event=$2; shift 2 ;;
+      --) shift; break ;;
+      *) break ;;
+    esac
+  done
+  [[ $# -le 1 ]] || die "expected one text"
+  local text=${1-}
+  case $kind in
+    follow|unfollow|reply|react|repost|persona|free) ;;
+    *) die "unknown kind: $kind" ;;
+  esac
+  [[ $pubkey == "" || $pubkey =~ ^[0-9a-f]{64}$ ]] || die "--pubkey is not 64 lowercase hex characters"
+  [[ $event == "" || $event =~ ^[0-9a-f]{64}$ ]] || die "--event is not 64 lowercase hex characters"
+  [[ $kind != free || -n ${text//[[:space:]]/} ]] || die "a free Request needs text"
+
+  mkdir -p "$queue" || die "cannot create $queue"
+  local now id
+  now=$(date +%s)
+  id=$now-$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')
+  # Written aside and moved into place, so a reader never sees half a file.
+  local tmp=$queue/.$id.tmp
+  jq -n --arg id "$id" --argjson at "$now" --arg kind "$kind" --arg text "$text" \
+    --arg pubkey "$pubkey" --arg event "$event" \
+    '{id: $id, created_at: $at, kind: $kind,
+      subject: ({pubkey: (if $pubkey == "" then null else $pubkey end),
+                 event: (if $event == "" then null else $event end)}),
+      text: $text, state: "waiting", answered_at: null, result: null, reason: null}' > "$tmp" ||
+    { rm -f "$tmp"; die "cannot write the Request"; }
+  mv "$tmp" "$queue/$id.json" || { rm -f "$tmp"; die "cannot write the Request"; }
+  echo "$id"
+}
+
+withdraw() {
+  [[ $# -eq 1 ]] || die "expected one id"
+  # The id becomes part of a path: nothing but what add makes.
+  [[ $1 =~ ^[0-9]+-[0-9a-f]+$ ]] || die "not a Request id: $1"
+  local file=$queue/$1.json
+  [[ -f $file ]] || die "no such Request: $1"
+  jq -e '.state == "waiting"' "$file" >/dev/null 2>&1 || die "Request $1 is not waiting; it cannot be withdrawn"
+  rm -f "$file"
+}
+
+case ${1-} in
+  add) shift; add "$@" ;;
+  withdraw) shift; withdraw "$@" ;;
+  *) die "usage: request add [--kind KIND] [--pubkey KEY] [--event ID] TEXT | request withdraw ID" ;;
+esac

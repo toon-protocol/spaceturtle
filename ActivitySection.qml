@@ -55,12 +55,17 @@ Item {
   function partsOf(event) { return event.parts || ({}) }
 
   function verbOf(event) {
+    if (event.request) return event.request.state === "done" ? "Request done" : "Request declined"
     var label = String(partsOf(event).label || "")
     if (label) return label.charAt(0).toUpperCase() + label.slice(1)
     return event.refers_to ? "Replied" : "Posted"
   }
 
   function bodyOf(event) {
+    if (event.request) {
+      var reason = event.request.reason ? "\n" + event.request.reason : ""
+      return String(event.request.text) + reason
+    }
     var parts = partsOf(event)
     return String(parts.title || parts.summary || parts.body || "").trim()
   }
