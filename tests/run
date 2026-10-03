@@ -283,6 +283,64 @@ check "hostile: NIP-11, not the profile, gives the node addresses" '.node == {il
 check "hostile: event content passes through unchanged" '.events[0].content == "\"; touch pwned #"'
 [[ ! -e $tmp/pwned && ! -e pwned ]] || { echo "FAIL hostile: a command ran"; fails=$((fails + 1)); }
 
+# --- Renderers the agent writes: one JSON file per kind in the configuration directory
+new_env; install_toon; running_relay
+echo '{"events":[]}' | tee "$STUB_DIR/profiles" > "$STUB_DIR/follows"
+mkdir -p "$SPACETURTLE_CONFIG_DIR/renderers"; rd=$SPACETURTLE_CONFIG_DIR/renderers
+cat > "$rd/draft.json" <<JSON
+{"kind":31990,"label":"NIP draft","title":{"tag":"title"},"summary":{"tag":"summary"},"body":{"content":true},
+ "links":[{"tag":"r"}],"refers_to":{"tag":"e"},"added_later":"ignored"}
+JSON
+echo '{"kind":31991,"title":{"tag":"title"}' > "$rd/broken.json"                       # not JSON
+echo '{"kind":"31992","title":{"tag":"title"}}' > "$rd/badkind.json"                    # kind is not a number
+echo '{"kind":31993,"title":{"tag":["title"]}}' > "$rd/badsource.json"                  # a source that names no tag
+echo '{"kind":31994,"title":{"eval":"touch pwned"}}' > "$rd/evil.json"                  # nothing is evaluated
+echo '{"kind":1,"label":"hijacked","body":{"tag":"title"}}' > "$rd/note.json"           # a built-in kind
+echo '{"kind":30023,"label":"hijacked","title":{"content":true}}' > "$rd/article.json" # a built-in kind
+echo '{"kind":31995,"label":"Sparse","title":{"tag":"title"},"refers_to":{"tag":"e"},"links":[{"tag":"r"}]}' > "$rd/sparse.json"
+echo '{"kind":31996,"label":"Partial","title":{"tag":"title"},"summary":{"tag":"summary"}}' > "$rd/partial.json"
+echo '{"kind":31997,"title":{"tag":5,"content":true}}' > "$rd/twoshapes.json"         # a source of both shapes
+echo '{"kind":31998,"label":"one"}{"kind":31999,"label":"two"}' > "$rd/several.json"    # more than one description
+echo '{"kind":31990,"label":"second"}' > "$rd/zz-duplicate.json"                       # the first by file name wins
+{
+  echo '{"events":['
+  ev 31990 'the draft' '[["title","My NIP"],["summary","Sum"],["r","https://a.example/x"],["r","javascript:alert(1)"],["e","'"$other"'"]]'; echo ,
+  ev 31991 'c1' '[["title","T1"]]'; echo ,
+  ev 31992 'c2' '[["title","T2"]]'; echo ,
+  ev 31993 'c3' '[["title","T3"]]'; echo ,
+  ev 31994 'c4' '[["title","T4"]]'; echo ,
+  ev 1 'plain note' '[["title","not used"]]'; echo ,
+  ev 30023 'article' '[["title","Real title"]]'; echo ,
+  ev 31995 'c5' '[["x","y"]]'; echo ,
+  ev 31996 'c6' '[["title","T6"]]'; echo ,
+  ev 31997 'c7' '[["title","T7"]]'; echo ,
+  ev 31998 'c8' '[]'; echo ,
+  ev 31999 'c9' '[]'
+  echo ']}'
+} > "$STUB_DIR/events"
+out=$("$root/relay-events")
+P() { echo ".events[] | select(.kind == $1) | .parts | $2"; }
+check "renderer: a valid description resolves label, title, summary, body, links and the event referred to" "$(P 31990 '. == {label:"NIP draft", title:"My NIP", summary:"Sum", body:"the draft", links:["https://a.example/x"], ref:"'"$other"'"}')"
+for k in 31991 31992 31993 31994 31997 31998 31999; do
+  check "renderer: an unusable description for $k falls back" "$(P $k '.label == "kind '$k'" and .body == "c'$((k - 31990))'"')"
+done
+check "renderer: a description for a built-in kind is ignored" "$(P 1 '.label == "" and .body == "plain note"')"
+check "renderer: a description for a built-in long-form post is ignored" "$(P 30023 '.label == "published" and .title == "Real title"')"
+check "renderer: an event lacking every tag its description names falls back" "$(P 31995 '. == {label:"kind 31995", title:"", summary:"x y", body:"c5", links:[], ref:""}')"
+check "renderer: a tag the event lacks leaves that part empty, the rest stays" "$(P 31996 '. == {label:"Partial", title:"T6", summary:"", body:"", links:[], ref:""}')"
+check "renderer: the document is whole" '.online == true and (.events | length) == 12'
+[[ ! -e pwned && ! -e $tmp/pwned ]] || { echo "FAIL renderer: a description was evaluated"; fails=$((fails + 1)); }
+# A new description takes effect on the next run, with nothing restarted; removing it takes it away.
+echo '{"kind":31991,"label":"Fixed","title":{"tag":"title"}}' > "$rd/broken.json"
+out=$("$root/relay-events")
+check "renderer: a description added or mended shows on the next run" "$(P 31991 '.label == "Fixed" and .title == "T1"')"
+rm "$rd/broken.json"
+out=$("$root/relay-events")
+check "renderer: a removed description falls back" "$(P 31991 '.label == "kind 31991"')"
+rm -r "$rd"
+out=$("$root/relay-events")
+check "renderer: no directory, the fallback" "$(P 31990 '.label == "kind 31990" and .body == "the draft"')"
+
 # --- node changes in the Activity
 node_env() {
   new_env; install_toon; running_relay

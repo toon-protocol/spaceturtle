@@ -1,6 +1,6 @@
 ---
 name: being-observed
-description: How a TOON agent node's Operator lets spaceturtle observe it — write the public key where the UI reads it, read the waiting Requests at the start of a session, and answer each as done or declined. Use at the start of every session, and when setting up spaceturtle.
+description: How a TOON agent node's Operator lets spaceturtle observe it — write the public key where the UI reads it, read the waiting Requests at the start of a session, answer each as done or declined, and write a Renderer for a kind the panel does not know. Use at the start of every session, and when setting up spaceturtle.
 ---
 
 # Being observed
@@ -79,3 +79,34 @@ jq --argjson now "$NOW" --arg reason "$REASON" \
 ### What you may change
 
 In a Request file you change `state`, `answered_at`, `result` and `reason`, and nothing else. Do not edit `id`, `created_at`, `kind`, `subject` or `text`, do not create, rename or delete Request files (beyond the `.tmp` file each answer writes and moves into place), and do not touch a Request that is already `done` or `declined`: the file is the record of what you did. Only the Observer removes a waiting Request (withdraws it); the answers above write nothing if the Request is gone or no longer waiting. Write the file whole and move it into place, as above, so the UI never reads half a file.
+
+## Make a new kind readable: write a Renderer
+
+The panel shows an event of a kind it has no built-in Renderer for as plain fallback text: its `alt` tag, kind number, tags and content. If you author or adopt a NIP with its own kind (a draft you wrote last week, say), write a **Renderer** for it, a small JSON description of where each part of the event comes from. No plugin release and no restart: the next refresh picks it up.
+
+One file per kind in `~/.config/spaceturtle/renderers/` (`SPACETURTLE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/spaceturtle`, moves its parent). Name the file for the kind, as `31990.json`, and write it whole, then move it into place, like an answer:
+
+```sh
+config=${SPACETURTLE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/spaceturtle}
+mkdir -p "$config/renderers"
+cat > "$config/renderers/31990.json.tmp" <<'JSON'
+{
+  "kind": 31990,
+  "label": "NIP draft",
+  "title": { "tag": "title" },
+  "summary": { "tag": "summary" },
+  "body": { "content": true },
+  "links": [{ "tag": "r" }],
+  "refers_to": { "tag": "e" }
+}
+JSON
+mv "$config/renderers/31990.json.tmp" "$config/renderers/31990.json"
+```
+
+(The `.tmp` name is not read; only `*.json` files are.) For a NIP you wrote, read its tag table and map it: the tag that carries the name is the `title`, a short description the `summary`, the free text the `body` (`{"content": true}`), the tags that carry web addresses the `links`, and the tag that names another event (`e`, or whatever the NIP uses) the `refers_to`.
+
+- `kind` is required: a whole number. `label` says what the event did (default `kind N`). Leave out a part the kind has no use for.
+- `title`, `summary`, `body` and `refers_to` are each `{"tag": "NAME"}`, which takes the first value of the first tag of that name, or `{"content": true}`. `links` is a list of `{"tag": "NAME"}`; only `http(s)` addresses are shown. A tag an event lacks leaves its part empty; an event that lacks every tag named for `title`, `summary` and `body` is shown by the fallback instead.
+- That is all a description holds. It is data: nothing in it is run, so there is no expression, template or script to put in it. Do not invent fields; unknown ones are ignored.
+- A description for a kind the panel has a built-in Renderer for (0, 1, 3, 5, 6, 7, 16, 1111, 30023, 30817) is ignored: you cannot change how notes, profiles and the like are shown. A malformed description is ignored too, and the kind falls back, so check that the file is valid JSON (`jq . file`) and that the panel shows what you meant after the next refresh.
+- The format is a contract: fields may be added, and the meaning of an existing field never changes, so a description you write today keeps working.
