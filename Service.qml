@@ -47,19 +47,27 @@ Item {
   property string nodeConnector: ""
   // How many hold a subscription to this relay's live feed; -1 while it is not sold.
   property int subscribers: -1
+  // What the agent identity signed, newest first, and when it last did something (0 for never).
+  property var activity: []
+  property real lastActive: 0
+  // The rest of the relay's feed: the Network.
   property var events: []
 
   // True while the panel is open. Newest created_at seen in the panel; anything
   // newer puts the dot on the turtle.
   property bool looking: false
   property real seenAt: 0
-  readonly property real newestAt: events.length > 0 ? events[0].created_at : 0
+  readonly property real newestAt: Math.max(events.length > 0 ? events[0].created_at : 0, lastActive)
   readonly property bool hasUnseen: loaded && newestAt > seenAt
 
   // Where the panel was, kept here because the panel is unloaded when it closes.
-  // Sections are numbered as their keys are, from 1; Network is 2.
-  property int section: 2
+  // Sections are numbered as their keys are, from 1; Activity is 1 and Network 2.
+  readonly property int activitySection: 1
+  readonly property int networkSection: 2
+  property int section: activitySection
   property int cursor: 0
+  // The Activity's cursor.
+  property int activityCursor: 0
   // The author page being shown in Network; empty while the feed is.
   property string profilePubkey: ""
   // The feed's cursor, to come back to from an author page.
@@ -101,6 +109,10 @@ Item {
     if (root.profilePubkey === "") root.cursor = indexAfter(root.events, list, root.cursor)
     else root.feedCursor = indexAfter(root.events, list, root.feedCursor)
 
+    var acts = report.activity || []
+    acts.sort(function(a, b) { return b.created_at - a.created_at })
+    root.activityCursor = indexAfter(root.activity, acts, root.activityCursor)
+
     var first = !root.loaded
     root.profiles = map
     root.followMap = followed
@@ -109,6 +121,8 @@ Item {
     root.nodeIlp = typeof node.ilp_address === "string" ? node.ilp_address.trim() : ""
     root.nodeConnector = typeof node.connector === "string" ? node.connector.trim() : ""
     root.subscribers = typeof report.subscribers === "number" ? report.subscribers : -1
+    root.activity = acts
+    root.lastActive = typeof report.last_active === "number" ? report.last_active : 0
     root.events = list
     root.online = report.online === true
     root.relayName = report.name || ""
@@ -137,7 +151,32 @@ Item {
   }
 
   function eventsBy(pubkey) {
-    return events.filter(function(e) { return e.pubkey === pubkey })
+    // The agent's events are only in the Activity, everyone else's only in the Network.
+    var all = pubkey === selfPubkey ? activity : events
+    return all.filter(function(e) { return e.pubkey === pubkey })
+  }
+
+  // The event an Activity entry refers to, if the feed holds it.
+  function eventById(id) {
+    var all = activity.concat(events)
+    for (var i = 0; i < all.length; i++)
+      if (all[i].id === id) return all[i]
+    return null
+  }
+
+  // Asks the Network to show an event on its author's page, with the cursor on it.
+  signal eventOpened(string id)
+
+  // Opens an Activity entry's event: the event it refers to if the feed holds
+  // it, else the entry's own, on its author's page in the Network. The feed's
+  // place is kept for Esc.
+  function openActivity(entry) {
+    var target = (entry.refers_to ? eventById(entry.refers_to) : null) || entry
+    if (profilePubkey === "") feedCursor = cursor
+    profilePubkey = target.pubkey
+    cursor = 0
+    section = networkSection
+    eventOpened(target.id)
   }
 
   function followingCount(pubkey) {
