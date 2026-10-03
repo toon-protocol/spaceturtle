@@ -48,6 +48,11 @@ Item {
   // How many hold a subscription to this relay's live feed; -1 while it is not sold.
   property int subscribers: -1
   property var events: []
+  // The node's state as `relay-events` reports it; null when there is no agent
+  // node. Each group in it is null when its command failed.
+  property var nodeState: null
+  // The Node section's cursor.
+  property int nodeCursor: 0
 
   // True while the panel is open. Newest created_at seen in the panel; anything
   // newer puts the dot on the turtle.
@@ -110,6 +115,7 @@ Item {
     root.nodeConnector = typeof node.connector === "string" ? node.connector.trim() : ""
     root.subscribers = typeof report.subscribers === "number" ? report.subscribers : -1
     root.events = list
+    root.nodeState = report.state && typeof report.state === "object" ? report.state : null
     root.online = report.online === true
     root.relayName = report.name || ""
     root.loaded = true
