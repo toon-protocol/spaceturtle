@@ -114,7 +114,7 @@ in full, with every key.
 
 <img src="docs/assets/bar-turtle.png" alt="The turtle in the Omarchy bar, beside the other bar icons" width="285">
 
-The turtle is dimmed while the relay is not running, carries an accent dot when the agent
+The turtle paddles while the relay runs and is dimmed and still while it does not. It carries an accent dot when the agent
 did something since you last looked, and a larger ringed dot while the node is down or
 today's spending limit is spent.
 

@@ -6,6 +6,9 @@ import qs.Commons
 // square per "#", filled with the theme colour and drawn with hard edges. The
 // font's turtle glyph has evenly sized limbs, so it reads as a star at bar
 // size; here the shell dominates and the flippers stand out.
+//
+// While `swimming`, the drawing alternates with its stroke, the same turtle
+// with its flippers swept back, so it paddles forward.
 Item {
   id: root
 
@@ -13,8 +16,11 @@ Item {
   property color color: Color.foreground
   // Which drawing to use, 1-5; see `variants`.
   property int variant: 1
+  property bool swimming: false
+  // Milliseconds each of the two frames is held.
+  property int strokeInterval: 450
 
-  // Each variant: 16 rows of 16, head at the top.
+  // Each variant: 16 rows of 16, head at the top, flippers out.
   readonly property var variants: [
     // 1: scutes on the shell; the logo
     [ "......####......",
@@ -102,7 +108,106 @@ Item {
       ".......##.......",
       "................" ]
   ]
-  readonly property var drawing: variants[Math.max(1, Math.min(variants.length, variant)) - 1]
+  // The same five with the flippers swept back.
+  readonly property var strokes: [
+    // 1: scutes on the shell; the logo
+    [ "......####......",
+      ".....######.....",
+      ".....######.....",
+      "......####......",
+      ".....######.....",
+      "..############..",
+      ".##############.",
+      "##.###.##.###.##",
+      "##.##########.##",
+      "#..#.##..##.#..#",
+      "...##########...",
+      "...###.##.###...",
+      "...##########...",
+      "..##.######.##..",
+      "..#...####...#..",
+      ".......##......." ],
+    // 2: plain shell
+    [ "......####......",
+      ".....######.....",
+      ".....######.....",
+      "......####......",
+      ".....######.....",
+      "..############..",
+      ".##############.",
+      "##.##########.##",
+      "##.##########.##",
+      "#..##########..#",
+      "...##########...",
+      "...##########...",
+      "...##########...",
+      "..##.######.##..",
+      "..#...####...#..",
+      ".......##......." ],
+    // 3: hollow shell
+    [ "......####......",
+      ".....######.....",
+      ".....######.....",
+      "......####......",
+      ".....######.....",
+      "..####....####..",
+      ".####......####.",
+      "##.#........#.##",
+      "##.#........#.##",
+      "#..#........#..#",
+      "...#........#...",
+      "...#........#...",
+      "...##......##...",
+      "..##.######.##..",
+      "..#...####...#..",
+      ".......##......." ],
+    // 4: long flippers
+    [ "......####......",
+      ".....######.....",
+      ".....######.....",
+      "......####......",
+      ".....######.....",
+      "..############..",
+      ".##############.",
+      "##.##########.##",
+      "#..##.####.##..#",
+      "#..##########..#",
+      "#..##.####.##..#",
+      "...##########...",
+      "....########....",
+      "...#.######.#...",
+      "...#..####..#...",
+      ".......##......." ],
+    // 5: compact, for a small bar
+    [ "................",
+      "......####......",
+      ".....######.....",
+      "......####......",
+      ".....######.....",
+      "...##########...",
+      "..############..",
+      ".##.########.##.",
+      ".##.########.##.",
+      "....########....",
+      "....########....",
+      "....########....",
+      "..############..",
+      "..#...####...#..",
+      ".......##.......",
+      "................" ]
+  ]
+  readonly property int index: Math.max(1, Math.min(variants.length, variant)) - 1
+  property bool stroke: false
+  readonly property var drawing: stroke ? strokes[index] : variants[index]
+
+  onSwimmingChanged: if (!swimming) stroke = false
+
+  Timer {
+    interval: root.strokeInterval
+    running: root.swimming && root.visible
+    repeat: true
+    onTriggered: root.stroke = !root.stroke
+  }
 
   // The drawing as one SVG path: a rectangle for each run of "#" in a row.
   function pathOf(rows) {
