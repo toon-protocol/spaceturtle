@@ -4,7 +4,8 @@ import qs.Ui
 
 // The Activity section, where the panel opens: when the agent was last active,
 // and what it did, newest first. Enter or a click opens the event an entry
-// refers to, in the Network. Where the cursor is lives on the service.
+// refers to on its author's page in the Network. Where the cursor is lives on
+// the service.
 Item {
   id: root
 
@@ -25,6 +26,7 @@ Item {
   }
 
   function move(dy) {
+    pointerGate.reset()
     root.scrollOnCursor = true
     service.activityCursor = Math.max(0, Math.min(root.cursor + dy, service.activity.length - 1))
     if (service.activityCursor === 0) scroll.contentY = 0
@@ -39,10 +41,13 @@ Item {
   function key(text) {}
 
   function ensureVisible(item) {
+    if (!item) return
     var top = item.mapToItem(column, 0, 0).y
     var bottom = top + item.height
-    if (top < scroll.contentY) scroll.contentY = top
-    else if (bottom > scroll.contentY + scroll.height) scroll.contentY = bottom - scroll.height
+    var margin = Style.space(12)
+    if (top < scroll.contentY + margin) scroll.contentY = Math.max(0, top - margin)
+    else if (bottom > scroll.contentY + scroll.height - margin)
+      scroll.contentY = Math.max(0, Math.min(scroll.contentHeight - scroll.height, bottom + margin - scroll.height))
   }
 
   function tagValue(event, name) {
@@ -81,12 +86,20 @@ Item {
     return n + " " + unit[1] + (n === 1 ? "" : "s") + " ago"
   }
 
+  // Keeps a row that slides under a still pointer from taking the cursor.
+  PointerMoveGate {
+    id: pointerGate
+    referenceItem: root
+  }
+
+  // Drives the relative timestamps.
   Timer {
     id: clock
     property real now: Date.now()
     interval: 30000
-    running: true
+    running: root.visible
     repeat: true
+    triggeredOnStart: true
     onTriggered: now = Date.now()
   }
 
@@ -112,16 +125,6 @@ Item {
         font.family: Style.font.family
         font.pixelSize: Style.font.body
         font.italic: root.service.lastActive <= 0
-      }
-
-      Text {
-        visible: root.known && root.service.loaded && root.service.online && root.service.activity.length === 0
-        textFormat: Text.PlainText
-        text: "No activity yet."
-        color: root.dim
-        font.family: Style.font.family
-        font.pixelSize: Style.font.bodySmall
-        font.italic: true
       }
 
       PanelSeparator {}
@@ -185,7 +188,8 @@ Item {
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onPositionChanged: {
+            onPositionChanged: function(mouse) {
+              if (!pointerGate.moved(row, mouse)) return
               root.scrollOnCursor = false
               root.service.activityCursor = row.index
             }

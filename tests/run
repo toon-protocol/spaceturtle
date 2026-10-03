@@ -95,6 +95,10 @@ echo "{\"events\":[{\"id\":\"e0\",\"pubkey\":\"$pk\",\"kind\":7,\"created_at\":2
 out=$("$root/relay-events")
 check "activity: an agent event beyond the feed's limit is found, and says what it refers to" '[.activity[].id] == ["e0","e1"] and .activity[0].refers_to == "e2" and .activity[1].refers_to == null and .last_active == 20'
 check "activity: the Network excludes the agent's events" '[.events[].id] == ["e2"]'
+echo "{\"events\":[{\"id\":\"e0\",\"pubkey\":\"$pk\",\"kind\":1,\"created_at\":5,\"tags\":[[\"e\",\"p1\",\"\",\"reply\"],[\"e\",\"r1\",\"\",\"root\"]],\"content\":\"re\"}]}" > "$STUB_DIR/agent-events"
+out=$("$root/relay-events")
+check "activity: newest first, wherever each event was found" '[.activity[].id] == ["e1","e0"] and .last_active == 10'
+check "activity: a reply refers to the event marked reply, not the root" '.activity[1].refers_to == "p1"'
 rm "$STUB_DIR/agent-events"
 echo "{\"events\":[{\"id\":\"e2\",\"pubkey\":\"$other\",\"kind\":1,\"created_at\":5,\"tags\":[],\"content\":\"x\"}]}" > "$STUB_DIR/events"
 out=$("$root/relay-events")

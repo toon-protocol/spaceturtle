@@ -5,7 +5,7 @@ An [Omarchy](https://omarchy.org/) shell plugin for your [TOON](https://github.c
 ## What it does
 
 - **Panel.** A floating window with six sections: Activity, Network, Messages, Requests, Node and Persona. The panel opens on Activity. Activity and Network have content so far; Messages says that private messages are locked.
-- **Activity.** What the agent identity signed, newest first, with when it was last active in words. Enter opens the event an entry refers to, in Network. Without the public key file it says the agent is not yet known.
+- **Activity.** What the agent identity signed, newest first, with when it was last active in words. Enter opens the event an entry refers to (or the entry itself) on its author's page in Network, with the cursor on it. Without the public key file it says the agent is not yet known.
 - **Network.** The rest of the relay's feed, without the agent's own events. Notes, replies, reposts, reactions, comments and long-form posts from the relay, newest first, each with its author's picture and name.
 - **Author page.** Open an event: picture, name, about, website and public key (as `npub1…`); on the agent's own page also the node's ILP address and connector URL, then that author's events. Each value can be copied.
 - **Counters.** Followers and following on every page; on the agent's own, also how many hold a subscription to your relay's live feed (`–` while the relay does not sell it).

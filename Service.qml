@@ -62,7 +62,9 @@ Item {
 
   // Where the panel was, kept here because the panel is unloaded when it closes.
   // Sections are numbered as their keys are, from 1; Activity is 1 and Network 2.
-  property int section: 1
+  readonly property int activitySection: 1
+  readonly property int networkSection: 2
+  property int section: activitySection
   property int cursor: 0
   // The Activity's cursor.
   property int activityCursor: 0
@@ -149,7 +151,8 @@ Item {
   }
 
   function eventsBy(pubkey) {
-    var all = pubkey === selfPubkey ? activity.concat(events) : events
+    // The agent's events are only in the Activity, everyone else's only in the Network.
+    var all = pubkey === selfPubkey ? activity : events
     return all.filter(function(e) { return e.pubkey === pubkey })
   }
 
@@ -161,14 +164,19 @@ Item {
     return null
   }
 
-  // Opens an Activity entry's event: the page of the author it refers to in the
-  // Network, or the agent's own page when it refers to nothing the feed holds.
+  // Asks the Network to show an event on its author's page, with the cursor on it.
+  signal eventOpened(string id)
+
+  // Opens an Activity entry's event: the event it refers to if the feed holds
+  // it, else the entry's own, on its author's page in the Network. The feed's
+  // place is kept for Esc.
   function openActivity(entry) {
-    var target = entry.refers_to ? eventById(entry.refers_to) : null
-    feedCursor = 0
-    profilePubkey = target ? target.pubkey : entry.pubkey
+    var target = (entry.refers_to ? eventById(entry.refers_to) : null) || entry
+    if (profilePubkey === "") feedCursor = cursor
+    profilePubkey = target.pubkey
     cursor = 0
-    section = 2
+    section = networkSection
+    eventOpened(target.id)
   }
 
   function followingCount(pubkey) {
