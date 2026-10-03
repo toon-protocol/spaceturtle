@@ -144,6 +144,7 @@ What `toon` reports of the node, in groups you move through with the cursor:
 - the relay's name, prices and blocklist
 - peerings, channels and routes
 - the spending limit and what is left today
+- packets fulfilled and rejected (one row per reject code) and fees earned, in base units; the counts restart with the connector
 - subscriptions held, and held to your relay
 - the ILP and connector addresses
 - the last log lines

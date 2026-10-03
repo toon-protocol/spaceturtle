@@ -30,12 +30,17 @@
 # spending limit); "looked_at" is when the Observer last looked, or null.
 # Read-only: nothing here opens the keystore, spends, changes state or
 # publishes. Only free `toon` commands are run: status, relay config, peer list,
-# channel list, route list, limit show, relay subscriptions, logs and message
+# channel list, route list, limit show, packet count, relay subscriptions, logs and message
 # list, which prints what the supervisor already opened. Wallet balances are
 # never read (they need the passphrase, ADR 0001).
 #
+# "packets" is what `toon packet count` prints, since the connector last
+# started: {"fulfilled", "rejected", "rejects": [{"code", "count"}] sorted by
+# code, "fees_earned"} with the fees as a string in base units. Packet traffic
+# adds no Activity entry and never changes "urgent" or "attention".
+#
 # "state" is the node as `toon` reports it, or null when there is no agent node.
-# Each group in it (status, relay, peers, channels, routes, limits,
+# Each group in it (status, relay, peers, channels, routes, limits, packets,
 # subscriptions, logs) is null when its command failed, returned an error
 # document or answered in a shape not understood, so the rest still shows.
 #
@@ -292,6 +297,7 @@ if [[ $status == null ]] || jq -e '.agent_node | type == "object"' <<<"$status" 
     --argjson channels "$(toon_json channel list --json)" \
     --argjson routes "$(toon_json route list --json)" \
     --argjson limits "$(toon_json limit show --json)" \
+    --argjson packets "$(toon_json packet count --json)" \
     --argjson held "$(toon_json relay subscriptions --json)" \
     --argjson incoming "$incoming" \
     --argjson logs "$(toon_json logs --json)" '
@@ -330,6 +336,13 @@ if [[ $status == null ]] || jq -e '.agent_node | type == "object"' <<<"$status" 
         per_command: (.per_command // .limits.per_command // .command | str),
         per_day: (.per_day // .limits.per_day // .daily // .day | str),
         remaining_today: (.remaining_today // .remaining | str)})),
+      packets: ($packets | group(
+        if (.packets.fulfilled | type) == "number" and (.packets.rejected | type) == "number"
+          and ((.rejects // {}) | type) == "object"
+        then {fulfilled: .packets.fulfilled, rejected: .packets.rejected,
+          rejects: [(.rejects // {}) | to_entries | sort_by(.key)[] | {code: .key, count: (.value | count)}],
+          fees_earned: (.fees_earned | if . == null then "0" else str end)}
+        else error("shape") end)),
       subscriptions: (if $held == null and $incoming == null then null else {
         held: ($held | group(items("subscriptions") | [.[] | str])),
         incoming: ($incoming | group(items("subscriptions") | length))} end),

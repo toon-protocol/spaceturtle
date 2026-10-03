@@ -39,6 +39,7 @@ Only free, read-only `toon` commands:
 - `toon channel list`
 - `toon route list`
 - `toon limit show`
+- `toon packet count`
 - `toon logs`
 - `toon message list`
 

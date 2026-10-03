@@ -78,6 +78,17 @@ Item {
       row("Left today", st.limits.remaining_today || "–")
     }
 
+    group("Packets")
+    if (!st.packets) unavailable()
+    else {
+      row("Fulfilled", String(st.packets.fulfilled))
+      row("Rejected", String(st.packets.rejected))
+      for (var k = 0; k < st.packets.rejects.length; k++)
+        row("Rejected " + st.packets.rejects[k].code, String(st.packets.rejects[k].count))
+      row("Fees earned", st.packets.fees_earned + " (base units)")
+      list.push({ label: "", value: "Counts are since the connector last started", note: true, under: current })
+    }
+
     group("Subscriptions")
     if (!st.subscriptions) unavailable()
     else {

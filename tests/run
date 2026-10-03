@@ -37,6 +37,8 @@ case "$1 $2" in
     esac ;;
   "peer list"|"channel list"|"route list"|"limit show"|"logs --json")
     f="$STUB_DIR/$1$2"; [[ -r $f ]] && cat "$f" || exit 1 ;;
+  "packet count")
+    [[ -r $STUB_DIR/packetcount ]] && cat "$STUB_DIR/packetcount" || exit 2 ;;
   "message list")
     # A toon without the command answers 2; $STUB_DIR/messages is what a newer one prints.
     [[ -r $STUB_DIR/messages ]] && cat "$STUB_DIR/messages" || exit 2 ;;
@@ -210,6 +212,7 @@ echo '{"channels":[{"peer":"alice","direction":"outbound","status":"open","colla
 echo '{"routes":[{"prefix":"g.alice","peer":"alice","price":3}]}' > "$STUB_DIR/routelist"
 echo '{"per_command":"100","per_day":"1000","remaining_today":"640"}' > "$STUB_DIR/limitshow"
 echo '{"subscriptions":["wss://other"]}' > "$STUB_DIR/held"
+echo '{"toon_app":"relay","packets":{"fulfilled":12,"rejected":3},"rejects":{"T04":1,"F02":2},"fees_earned":"40"}' > "$STUB_DIR/packetcount"
 printf '{"lines":[%s]}\n' "$(jq -cn '[range(30) | "line \(.)"] | map(tojson) | join(",")' -r)" > "$STUB_DIR/logs--json"
 out=$("$root/relay-events")
 check "state: supervisor, connector and each app with restarts" '.state.status == {supervisor: {running: true, restarts: 1}, connector: {running: false, restarts: 0}, apps: [{name:"relay",running:true,restarts:2},{name:"chat",running:false,restarts:0}]}'
@@ -220,7 +223,23 @@ check "state: routes with price" '.state.routes == [{prefix:"g.alice",peer:"alic
 check "state: spending limits and what remains" '.state.limits == {per_command:"100",per_day:"1000",remaining_today:"640"}'
 check "state: subscriptions held, and incoming unavailable while not sold" '.state.subscriptions == {held:["wss://other"], incoming:null}'
 check "state: the last 20 log lines" '(.state.logs | length) == 20 and .state.logs[19] == "line 29"'
+check "state: packets, rejects sorted by code" '.state.packets == {fulfilled: 12, rejected: 3, rejects: [{code:"F02",count:2},{code:"T04",count:1}], fees_earned: "40"}'
+grep -c "^packet count" "$STUB_DIR/calls" | grep -qx 1 || { echo "FAIL state: packet count not run exactly once"; fails=$((fails + 1)); }
 grep -c "subscriptions --incoming" "$STUB_DIR/calls" | grep -qx 1 || { echo "FAIL state: asked for incoming subscriptions more than once"; fails=$((fails + 1)); }
+echo '{"toon_app":"relay","packets":{"fulfilled":0,"rejected":0},"rejects":{},"fees_earned":"0"}' > "$STUB_DIR/packetcount"
+out=$("$root/relay-events")
+check "state: a connector that carried nothing shows zeros, not unavailable" '.state.packets == {fulfilled: 0, rejected: 0, rejects: [], fees_earned: "0"}'
+echo '{"toon_app":"relay","packets":"many"}' > "$STUB_DIR/packetcount"
+out=$("$root/relay-events")
+check "state: packets of a shape not understood are unavailable, the rest shows" '.state.packets == null and .state.limits.per_day == "1000"'
+echo '{"error":"not_running"}' > "$STUB_DIR/packetcount"
+out=$("$root/relay-events")
+check "state: packets error document is unavailable" '.state.packets == null and .state.limits.per_day == "1000"'
+rm "$STUB_DIR/packetcount"
+out=$("$root/relay-events")
+check "state: a toon without packet count leaves packets unavailable" '.state.packets == null and .state.limits.per_day == "1000"'
+echo '{"toon_app":"relay","packets":{"fulfilled":12,"rejected":3},"rejects":{"T04":1,"F02":2},"fees_earned":"40"}' > "$STUB_DIR/packetcount"
+out=$("$root/relay-events")
 rm "$STUB_DIR/channellist"; echo '{"error":"no channels"}' > "$STUB_DIR/routelist"
 out=$("$root/relay-events")
 check "state: a failing command and an error document are unavailable, the rest shows" '.state.channels == null and .state.routes == null and (.state.peers | length) == 1 and .state.limits.per_day == "1000" and .state.status.supervisor.running == true'
@@ -380,6 +399,7 @@ node_env() {
   echo '{"channels":[{"peer":"alice","direction":"outbound","status":"open","collateral":500}]}' > "$STUB_DIR/channellist"
   echo '{"routes":[{"prefix":"g.alice","peer":"alice","price":3}]}' > "$STUB_DIR/routelist"
   echo '{"per_command":"100","per_day":"1000","remaining_today":"640"}' > "$STUB_DIR/limitshow"
+  echo '{"packets":{"fulfilled":12,"rejected":3},"rejects":{"F02":2,"T04":1},"fees_earned":"40"}' > "$STUB_DIR/packetcount"
 }
 at() { SPACETURTLE_NOW=$1 "$root/relay-events" 40 30; }
 node_env
@@ -387,6 +407,12 @@ out=$(at 1000)
 check "node changes: the first run, with no snapshot, has none" '.activity == [] and .urgent == false'
 out=$(at 1010)
 check "node changes: nothing changed, no entry" '.activity == []'
+echo '{"packets":{"fulfilled":0,"rejected":0},"rejects":{},"fees_earned":"0"}' > "$STUB_DIR/packetcount"
+out=$(at 1012)
+check "node changes: packet counts falling to 0 add nothing and leave attention alone" '.activity == [] and .urgent == false and .attention == "none"'
+echo '{"packets":{"fulfilled":99,"rejected":9},"rejects":{"F02":9},"fees_earned":"7"}' > "$STUB_DIR/packetcount"
+out=$(at 1014)
+check "node changes: packet counts moving add nothing" '.activity == [] and .urgent == false'
 echo '{"relay":{"name":"Shelly","prices":{"write":"12"}}}' > "$STUB_DIR/config"
 echo '{"peers":[{"id":"bob","direction":"inbound","status":"connected"}]}' > "$STUB_DIR/peerlist"
 echo '{"channels":[{"peer":"bob","direction":"inbound","status":"open"}]}' > "$STUB_DIR/channellist"
