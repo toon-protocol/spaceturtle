@@ -55,6 +55,7 @@ Item {
   function partsOf(event) { return event.parts || ({}) }
 
   function verbOf(event) {
+    if (event.node_change === true) return "Node"
     if (event.request) return event.request.state === "done" ? "Request done" : "Request declined"
     var label = String(partsOf(event).label || "")
     if (label) return label.charAt(0).toUpperCase() + label.slice(1)
@@ -62,6 +63,7 @@ Item {
   }
 
   function bodyOf(event) {
+    if (event.node_change === true) return String(event.text || "")
     if (event.request) {
       var reason = event.request.reason ? "\n" + event.request.reason : ""
       return String(event.request.text) + reason
@@ -155,7 +157,8 @@ Item {
               }
               Text {
                 textFormat: Text.PlainText
-                text: root.ago(row.modelData.created_at)
+                // A node change is when it was noticed, not when it happened.
+                text: (row.modelData.node_change === true ? "noticed " : "") + root.ago(row.modelData.created_at)
                 color: root.dim
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption

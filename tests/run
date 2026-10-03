@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs relay-events and mark-seen against a stub `toon` and `curl` in a temporary home.
+# Runs relay-events, mark-seen, request and the being-observed skill's answers against a stub `toon` and `curl` in a temporary home.
 # Needs only bash and jq. Usage: tests/run
 set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -168,7 +168,8 @@ echo "{\"events\":[$(note a1 "$pk" 150 '[]')]}" > "$STUB_DIR/events"
 echo '{"agent_node":{"toon_apps":[{"apps":[{"name":"relay","running":false}]}]}}' > "$STUB_DIR/status"
 out=$("$root/relay-events")
 check "attention: node down is urgent, and keeps when the Observer looked" '.attention == "urgent" and .looked_at > 150'
-[[ $(ls "$SPACETURTLE_STATE_DIR") == last-looked ]] || { echo "FAIL mark-seen: left stray files"; fails=$((fails + 1)); }
+# relay-events keeps the node's snapshot in the same directory.
+[[ $(ls "$SPACETURTLE_STATE_DIR" | grep -vx node-snapshot.json) == last-looked ]] || { echo "FAIL mark-seen: left stray files"; fails=$((fails + 1)); }
 
 # --- the node's state
 new_env; install_toon
@@ -281,6 +282,96 @@ out=$("$root/relay-events")
 check "hostile: NIP-11, not the profile, gives the node addresses" '.node == {ilp_address: "g.toon.shelly", connector: "https://node.example:8080"}'
 check "hostile: event content passes through unchanged" '.events[0].content == "\"; touch pwned #"'
 [[ ! -e $tmp/pwned && ! -e pwned ]] || { echo "FAIL hostile: a command ran"; fails=$((fails + 1)); }
+
+# --- node changes in the Activity
+node_env() {
+  new_env; install_toon; running_relay
+  export SPACETURTLE_STATE_DIR=$tmp/state
+  echo '{"events":[]}' | tee "$STUB_DIR/events" "$STUB_DIR/profiles" > "$STUB_DIR/follows"
+  echo '{"relay":{"name":"Shelly","prices":{"write":"10"}}}' > "$STUB_DIR/config"
+  echo '{"peers":[{"id":"alice","direction":"outbound","status":"connected"}]}' > "$STUB_DIR/peerlist"
+  echo '{"channels":[{"peer":"alice","direction":"outbound","status":"open","collateral":500}]}' > "$STUB_DIR/channellist"
+  echo '{"routes":[{"prefix":"g.alice","peer":"alice","price":3}]}' > "$STUB_DIR/routelist"
+  echo '{"per_command":"100","per_day":"1000","remaining_today":"640"}' > "$STUB_DIR/limitshow"
+}
+at() { SPACETURTLE_NOW=$1 "$root/relay-events" 40 30; }
+node_env
+out=$(at 1000)
+check "node changes: the first run, with no snapshot, has none" '.activity == [] and .urgent == false'
+out=$(at 1010)
+check "node changes: nothing changed, no entry" '.activity == []'
+echo '{"relay":{"name":"Shelly","prices":{"write":"12"}}}' > "$STUB_DIR/config"
+echo '{"peers":[{"id":"bob","direction":"inbound","status":"connected"}]}' > "$STUB_DIR/peerlist"
+echo '{"channels":[{"peer":"bob","direction":"inbound","status":"open"}]}' > "$STUB_DIR/channellist"
+echo '{"routes":[{"prefix":"g.bob","peer":"bob","price":1}]}' > "$STUB_DIR/routelist"
+echo '{"per_command":"100","per_day":"1000","remaining_today":"600"}' > "$STUB_DIR/limitshow"
+out=$(at 1020)
+check "node changes: one entry per change, noticed at the time of the run" '(.activity | length) == 8 and ([.activity[] | .noticed_at == 1020 and .created_at == 1020 and .node_change == true] | all)'
+check "node changes: a peering added and removed" '[.activity[].text] | (index("Peering with bob added") != null and index("Peering with alice removed") != null)'
+check "node changes: a channel opened and closed" '[.activity[].text] | (index("Channel with bob opened") != null and index("Channel with alice closed") != null)'
+check "node changes: a route added and removed" '[.activity[].text] | (index("Route g.bob added") != null and index("Route g.alice removed") != null)'
+check "node changes: a price changed" '[.activity[].text] | index("Price write changed to 12") != null'
+check "node changes: the limit drawn down" '[.activity[].text] | index("Spending limit: 600 left today, was 640") != null'
+check "node changes: an entry targets the item it concerns in the Node section" '(.activity[] | select(.text == "Channel with bob opened") | .target) == {group:"Channels",label:"bob"} and (.activity[] | select(.text | startswith("Price")) | .target) == {group:"Relay",label:"Price write"}'
+echo '{"routes":[{"prefix":"g.bob","peer":"carol","price":1}]}' > "$STUB_DIR/routelist"
+echo '{"channels":[{"peer":"bob","direction":"inbound","status":"closing"}]}' > "$STUB_DIR/channellist"
+out=$(at 1030)
+check "node changes: a route and a channel changing in place" '[.activity[0:2][].text] | sort == ["Channel with bob is now closing","Route g.bob changed"]'
+check "node changes: earlier entries are kept across refreshes" '(.activity | length) == 10'
+out=$(at 1040)
+check "node changes: still kept when nothing changed" '(.activity | length) == 10 and .activity[0].noticed_at == 1030'
+rm "$STUB_DIR/channellist"
+out=$(at 1050)
+check "node changes: an unreadable group is not compared, so it invents nothing" '(.activity | length) == 10'
+mv "$SPACETURTLE_TOON" "$tmp/toon.away"
+out=$(at 1055)
+check "node changes: still kept when toon is missing" '.online == false and (.activity | length) == 10'
+mv "$tmp/toon.away" "$SPACETURTLE_TOON"
+echo '{"channels":[{"peer":"bob","direction":"inbound","status":"closing"}]}' > "$STUB_DIR/channellist"
+out=$(at 1060)
+check "node changes: the group back as it was is no change" '(.activity | length) == 10'
+echo '{"relay":{"name":"Shelly","prices":{"read":"2"}}}' > "$STUB_DIR/config"
+echo '{"peers":[{"id":"bob","direction":"inbound","status":"disconnected"}]}' > "$STUB_DIR/peerlist"
+out=$(at 1062)
+check "node changes: a price set and removed, a peering changing in place" '[.activity[0:3][].text] | sort == ["Peering with bob is now disconnected","Price read set to 2","Price write removed"]'
+echo '{"per_command":"100","per_day":"1000","remaining_today":"0"}' > "$STUB_DIR/limitshow"
+out=$(at 1070)
+check "urgent: nothing left of today's limit" '.urgent == true and .attention == "urgent" and .activity[0].text == "Spending limit used up for today"'
+echo '{"per_command":"100","per_day":"1000","remaining_today":"5"}' > "$STUB_DIR/limitshow"
+out=$(at 1080)
+check "urgent: not while something is left" '.urgent == false and .attention != "urgent"'
+echo '{"per_command":"100","per_day":"1000"}' > "$STUB_DIR/limitshow"
+out=$(at 1090)
+check "urgent: not when the limit is not known" '.urgent == false'
+
+# a gap collapses the differences into one entry
+node_env
+at 1000 >/dev/null
+echo '{"peers":[{"id":"bob","direction":"inbound","status":"connected"}]}' > "$STUB_DIR/peerlist"
+echo '{"per_command":"100","per_day":"1000","remaining_today":"600"}' > "$STUB_DIR/limitshow"
+out=$(at 5000)
+check "node changes: after a gap, one 'since you last looked' entry" '(.activity | length) == 1 and (.activity[0].text | startswith("Since you last looked: ")) and (.activity[0].text | contains("Peering with bob added")) and (.activity[0].text | contains("600 left today")) and .activity[0].target == null and .activity[0].noticed_at == 5000'
+out=$(at 5010)
+check "node changes: the summary is kept too" '(.activity | length) == 1'
+
+# bounded
+node_env
+at 1000 >/dev/null
+for i in $(seq 1 70); do
+  echo "{\"peers\":[{\"id\":\"p$i\",\"direction\":\"inbound\",\"status\":\"up\"}]}" > "$STUB_DIR/peerlist"
+  out=$(at $((1000 + i)))
+done
+check "node changes: kept entries are bounded" '(.activity | length) == 50 and .activity[0].noticed_at == 1070'
+
+# entries sit among the agent's own events
+node_env
+echo "$pk" > "$SPACETURTLE_CONFIG_DIR/agent-pubkey"
+echo "{\"events\":[{\"id\":\"e1\",\"pubkey\":\"$pk\",\"kind\":1,\"created_at\":1015,\"tags\":[],\"content\":\"hi\"}]}" > "$STUB_DIR/events"
+at 1000 >/dev/null
+echo '{"peers":[]}' > "$STUB_DIR/peerlist"
+out=$(at 1020)
+check "node changes: beside what the agent published, newest first, last_active its own" '[.activity[].id] == ["node-1020-0","e1"] and .last_active == 1015'
+unset SPACETURTLE_STATE_DIR
 
 # --- threads: what each event refers to, and what refers to it
 new_env; install_toon; running_relay
@@ -398,6 +489,40 @@ echo '{"agent_node":{"toon_apps":[{"apps":[{"name":"relay","running":false}]}]}}
 out=$("$root/relay-events")
 check "requests: still listed while the relay is not running" '.online == false and (.requests | length) == 3'
 check "requests: without the relay, the answers are the Activity and the last activity" '[.activity[].id] == ["request:2-bb","request:3-cc"] and .last_active == 150'
+
+# --- the being-observed skill: a Request answered the way it says appears as done or declined
+skill=$root/skills/being-observed/SKILL.md
+block() { awk -v tag="$1" '$0 ~ "^```sh " tag "$" {on=1; next} on && /^```$/ {exit} on' "$skill"; }
+new_env; install_toon; running_relay
+queue=$SPACETURTLE_STATE_DIR/requests; mkdir -p "$queue"
+echo '{"events":[]}' > "$STUB_DIR/events"; echo '{"events":[]}' > "$STUB_DIR/profiles"; echo '{"events":[]}' > "$STUB_DIR/follows"
+echo "$pk" > "$SPACETURTLE_CONFIG_DIR/agent-pubkey"
+ev=$(printf 'd%.0s' {1..64})
+a=$("$root/request" add "answer me"); b=$("$root/request" add --kind follow --pubkey "$pk" "answer me too")
+cp "$queue/$a.json" "$tmp/a.before"; cp "$queue/$b.json" "$tmp/b.before"
+[[ -n $(block answer-done) && -n $(block answer-declined) ]] || { echo "FAIL skill: the answer commands are missing"; fails=$((fails + 1)); }
+FILE=$queue/$a.json EVENT=$ev NOW=500 bash -c "$(block answer-done)"
+FILE=$queue/$b.json REASON="Not in character" NOW=600 bash -c "$(block answer-declined)"
+out=$("$root/relay-events")
+check "skill: a done answer shows as done with its event" ".requests[] | select(.id == \"$a\") | .state == \"done\" and .result.event == \"$ev\" and .answered_at == 500"
+check "skill: a declined answer shows as declined with its reason" ".requests[] | select(.id == \"$b\") | .state == \"declined\" and .reason == \"Not in character\" and .answered_at == 600"
+check "skill: both answers are Activity entries" "[.activity[].id] == [\"request:$b\", \"request:$a\"] and .activity[1].refers_to == \"$ev\""
+# Nothing but state, answered_at, result and reason changed.
+count=$((count + 1))
+unanswered() { jq -S 'del(.state, .answered_at, .result, .reason)' "$1"; }
+if [[ $(unanswered "$queue/$a.json") == $(unanswered "$tmp/a.before") \
+   && $(unanswered "$queue/$b.json") == $(unanswered "$tmp/b.before") \
+   && $(ls -A "$queue" | wc -l) -eq 2 ]]; then echo "ok   skill: only state, answered_at, result and reason changed, and no file was left or added"
+else echo "FAIL skill: an answer changed more than it may"; fails=$((fails + 1)); fi
+# An answered Request is left alone, and a withdrawn one is not brought back.
+c=$("$root/request" add "withdraw me"); "$root/request" withdraw "$c" >/dev/null
+FILE=$queue/$a.json REASON="Changed my mind" NOW=700 bash -c "$(block answer-declined)" 2>/dev/null
+FILE=$queue/$c.json EVENT=$ev NOW=700 bash -c "$(block answer-done)" 2>/dev/null
+out=$("$root/relay-events")
+check "skill: an answer leaves a done Request and a withdrawn one alone" ".requests[] | select(.id == \"$a\") | .state == \"done\" and .answered_at == 500"
+count=$((count + 1))
+if [[ ! -e $queue/$c.json && $(ls -A "$queue" | wc -l) -eq 2 ]]; then echo "ok   skill: a withdrawn Request stays withdrawn"
+else echo "FAIL skill: a withdrawn Request came back"; fails=$((fails + 1)); fi
 
 echo; echo "$count checks, $fails failed"
 [[ $fails -eq 0 ]]

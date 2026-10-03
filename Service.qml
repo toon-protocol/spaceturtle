@@ -65,6 +65,9 @@ Item {
   property var nodeState: null
   // The Node section's cursor.
   property int nodeCursor: 0
+  // The item an Activity entry asked the Node section to stand on, { group, label },
+  // until the section has moved its cursor there.
+  property var nodeFocus: null
 
   // True while the panel is open. Opening it records that the Observer looked
   // (the `mark-seen` script, which keeps the time on disk, so it holds across
@@ -79,10 +82,11 @@ Item {
   property bool lookedDuringFetch: false
 
   // Where the panel was, kept here because the panel is unloaded when it closes.
-  // Sections are numbered as their keys are, from 1; Activity is 1, Network 2 and Requests 4.
+  // Sections are numbered as their keys are, from 1; Activity is 1, Network 2, Requests 4 and Node 5.
   readonly property int activitySection: 1
   readonly property int networkSection: 2
   readonly property int requestsSection: 4
+  readonly property int nodeSection: 5
   property int section: activitySection
   property int cursor: 0
   // The Activity's cursor.
@@ -307,9 +311,16 @@ Item {
     return true
   }
 
-  // Opens an Activity entry: the thread of the event it refers to if the feed
+  // Opens an Activity entry: a node change in the Node section, a Request's
+  // outcome as below, else the thread of the event it refers to if the feed
   // holds it, else of the entry itself.
   function openActivity(entry) {
+    // A change noticed in the node: the Node section, at the item it concerns.
+    if (entry.node_change === true) {
+      nodeFocus = entry.target || null
+      section = nodeSection
+      return
+    }
     // A Request's outcome: what the agent published, or the Request and its reason.
     if (entry.request) {
       if (entry.refers_to && openEvent(entry.refers_to)) return
@@ -409,7 +420,7 @@ Item {
 
   Process {
     id: fetchProc
-    command: [root.script, String(root.eventLimit)]
+    command: [root.script, String(root.eventLimit), String(root.refreshSeconds)]
     onExited: if (root.refreshAgain) { root.refreshAgain = false; Qt.callLater(root.refresh) }
     stdout: StdioCollector {
       waitForEnd: true
