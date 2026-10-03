@@ -164,34 +164,32 @@ state=null
 # $config_dir/renderers/, read afresh each run so a new one shows on the next
 # refresh. Each is data, never evaluated: a description names where a part comes
 # from, {"tag": NAME} or {"content": true}, and nothing else. One that is
-# malformed, or names a kind with a built-in Renderer, is ignored and its events
-# fall back. The result maps a kind to its normalised description.
+# malformed is ignored and its events fall back; one for a kind with a built-in
+# Renderer is never reached, since `parts` tries the built-in ones first. The
+# result maps a kind to its normalised description; the first by file name (in
+# byte order) wins a kind.
 read_custom_renderers() {
-  local file
+  local file LC_COLLATE=C
   [[ -d $config_dir/renderers ]] || { echo '{}'; return; }
   for file in "$config_dir"/renderers/*.json; do
     [[ -f $file ]] || continue
-    jq -ce '
-      def source: type == "object"
-        and ((has("tag") and (.tag | type == "string" and length > 0)) or .content == true);
-      def norm: if has("tag") then {tag} else {content: true} end;
-      select(type == "object"
+    jq -sce '
+      def source: type == "object" and (
+        (keys == ["tag"] and (.tag | type == "string" and length > 0)) or (keys == ["content"] and .content == true));
+      def norm: if . == null then null elif has("tag") then {tag} else {content: true} end;
+      select(length == 1) | .[0]
+      | select(type == "object"
         and (.kind | type == "number" and . >= 0 and . == floor)
-        and (.kind as $k | [0, 1, 3, 5, 6, 7, 16, 1111, 30023, 30817] | index($k)) == null
         and (.label == null or (.label | type == "string"))
         and ([.title, .summary, .body, .refers_to] | all(. == null or source))
-        and (.links == null or (.links | type == "array" and all(type == "object" and (.tag | type == "string" and length > 0)))))
+        and (.links == null or (.links | type == "array" and all(type == "object" and keys == ["tag"] and (.tag | type == "string" and length > 0)))))
       | {key: (.kind | tostring), value: {
           label: (.label // ("kind " + (.kind | tostring))),
-          title: (.title | if . == null then null else norm end),
-          summary: (.summary | if . == null then null else norm end),
-          body: (.body | if . == null then null else norm end),
-          refers_to: (.refers_to | if . == null then null else norm end),
+          title: (.title | norm), summary: (.summary | norm), body: (.body | norm), refers_to: (.refers_to | norm),
           links: [(.links // [])[] | {tag}]}}' "$file" 2>/dev/null || true
   done | jq -sc 'reduce .[] as $e ({}; if has($e.key) then . else . + {($e.key): $e.value} end)' 2>/dev/null || echo '{}'
 }
 custom_renderers=$(read_custom_renderers)
-[[ -n $custom_renderers ]] || custom_renderers='{}'
 
 renderers=$(cat <<'JQ'
 def tags: (.tags | arrays // [])[] | arrays;
@@ -208,6 +206,9 @@ def from($s): if $s == null then "" elif $s.tag != null then tag($s.tag) else te
 def described($d): {label: $d.label, title: from($d.title), summary: from($d.summary), body: from($d.body),
   links: ([$d.links[] as $l | tags | select(.[0] == $l.tag and length > 1) | .[1] | strings | select(test("^https?://"))] | unique),
   ref: from($d.refers_to)};
+# A description that leaves the event nothing to show, its tags lacking every
+# part it names, gives way to the fallback, so no event is invisible.
+def described_or_fallback($d): . as $e | described($d) | if .title == "" and .summary == "" and .body == "" then $e | fallback else . end;
 def parts:
   if .kind == 0 then (meta) as $m | base + {label: "updated profile", title: ($m.name | strings // ""), summary: ($m.about | strings // ""), body: "", ref: ""}
   elif .kind == 1 then base + {label: (if tag("e") != "" then "replied" else "" end)}
@@ -218,7 +219,7 @@ def parts:
   elif .kind == 1111 then base + {label: "commented"}
   elif .kind == 30023 then base + {label: "published", title: tag("title"), summary: tag("summary")}
   elif .kind == 30817 then base + {label: "drafted", title: (tag("title") | if . == "" then tag("d") else . end), summary: tag("summary")}
-  elif $custom[.kind | tostring] != null then described($custom[.kind | tostring])
+  elif $custom[0][.kind | tostring] != null then described_or_fallback($custom[0][.kind | tostring])
   else fallback end;
 JQ
 )
@@ -355,7 +356,9 @@ read_address=$(jq -r '.agent_node.toon_apps[]?.apps[]? | select(.name == "relay"
 # Every event, whatever its kind, each with the parts a Renderer resolves for
 # it; then the profiles that name their authors and the follow lists that count
 # their followers.
-with_parts() { jq -c --argjson custom "$custom_renderers" "$renderers"' map(. + {parts: parts})' 2>/dev/null || echo '[]'; }
+# The descriptions go in as a file, not an argument, so that however many there
+# are they cannot exceed the length of one argument and empty the feed.
+with_parts() { jq -c --slurpfile custom <(printf '%s' "$custom_renderers") "$renderers"' map(. + {parts: parts})' 2>/dev/null || echo '[]'; }
 events=$(relay_query "{\"limit\":$limit}" | with_parts)
 profiles=$(relay_query '{"kinds":[0],"limit":200}')
 follows=$(relay_query '{"kinds":[3],"limit":500}')
