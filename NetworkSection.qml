@@ -151,9 +151,11 @@ Item {
     copiedTimer.restart()
   }
 
+  // A row taller than the page, a long-form post, is shown from its start.
   function restoreCursor(item) {
     root.cursorToRestore = false
-    root.ensureVisible(item)
+    if (item && item.height > scroll.height) scroll.contentY = Math.max(0, item.mapToItem(column, 0, 0).y)
+    else root.ensureVisible(item)
   }
 
   function ensureVisible(item) {
@@ -573,7 +575,7 @@ Item {
         cursorShape: Qt.PointingHandCursor
         onClicked: {
           root.hover(row.target)
-          service.openAuthor(row.modelData.pubkey)
+          root.service.openAuthor(row.modelData.pubkey)
         }
       }
     }
@@ -610,7 +612,7 @@ Item {
             cursorShape: Qt.PointingHandCursor
             onClicked: {
               root.hover(row.target)
-              service.openAuthor(row.modelData.pubkey)
+              root.service.openAuthor(row.modelData.pubkey)
             }
           }
         }

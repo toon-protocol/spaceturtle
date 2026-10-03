@@ -101,20 +101,23 @@ agent_events='[]'
 
 # The events a thread needs beyond the limit: what shown events refer to, up
 # the chain a few levels, and what refers to them. Asked for by id and by "e"
-# tag; anything the relay does not return stays missing.
+# tag; an event asked for by id that the relay does not return is missing.
+# One higher up than the walk reaches is neither held nor missing.
 ref_of='[.tags[]? | select(type == "array" and .[0] == "e" and (.[1] | strings))]
   | ((map(select(.[3]? == "reply")) | first) // last) | .[1]? // null'
 context='[]'
+asked='[]'
 for _ in 1 2 3; do
-  want=$(jq -cn --argjson a "$events" --argjson b "${agent_events:-[]}" --argjson c "$context" \
+  want=$(jq -cn --argjson a "$events" --argjson b "${agent_events:-[]}" --argjson c "$context" --argjson asked "$asked" \
     "[\$a[], \$b[], \$c[]] | (map(.id) | unique) as \$held
-     | [.[] | $ref_of | select(. != null)] | unique - \$held | .[0:100]" 2>/dev/null || echo '[]')
+     | [.[] | $ref_of | select(. != null)] | unique - \$held - \$asked | .[0:100]" 2>/dev/null || echo '[]')
   [[ $want == '[]' ]] && break
+  asked=$(jq -cn --argjson a "$asked" --argjson b "$want" '$a + $b' 2>/dev/null || echo "$asked")
   found=$(relay_query "{\"ids\":$want}")
   context=$(jq -cn --argjson a "$context" --argjson b "$found" '$a + $b | unique_by(.id)' 2>/dev/null || echo "$context")
   [[ $found == '[]' ]] && break
 done
-ids=$(jq -cn --argjson a "$events" --argjson b "${agent_events:-[]}" '[$a[], $b[] | .id | strings] | unique | .[0:100]' 2>/dev/null || echo '[]')
+ids=$(jq -cn --argjson a "$events" --argjson b "${agent_events:-[]}" --argjson c "$context" '[$a[], $b[], $c[] | .id | strings] | unique | .[0:100]' 2>/dev/null || echo '[]')
 replies=$(relay_query "{\"#e\":$ids,\"limit\":200}")
 context=$(jq -cn --argjson a "$context" --argjson b "$replies" '$a + $b | unique_by(.id)' 2>/dev/null || echo "$context")
 context=$(printf '%s' "$context" | with_parts)
@@ -135,6 +138,7 @@ jq -cn --arg name "${name:-}" --arg self "$self" \
   --argjson subscribers "${subscribers:-null}" --argjson events "${events:-[]}" \
   --argjson profiles "${profiles:-[]}" --argjson follows "${follows:-[]}" \
   --argjson agent "${agent_events:-[]}" --argjson context "${context:-[]}" \
+  --argjson asked "${asked:-[]}" \
   '# The "e" tag marked "reply" (NIP-10), else the last one.
   def ref: '"$ref_of"';
   ([$agent[], $events[], $context[]] | unique_by(.id)) as $all
@@ -142,7 +146,7 @@ jq -cn --arg name "${name:-}" --arg self "$self" \
   | ($all | map(select(ref != null)) | sort_by(.created_at)
       | reduce .[] as $e ({}; .[$e | ref] += [$e.id])) as $referrers
   | def mark: map((ref) as $r | . + {refers_to: $r,
-      refers_missing: ($r != null and ($held | index($r) == null)),
+      refers_missing: ($r != null and ($held | index($r) == null) and ($asked | index($r) != null)),
       referenced_by: ($referrers[.id] // [])});
   (if $self == "" then []
     else ([$agent[], $events[]] | map(select(.pubkey == $self)) | unique_by(.id)

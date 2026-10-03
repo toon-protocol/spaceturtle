@@ -118,6 +118,11 @@ Item {
       views[0] = { profile: "", thread: "", cursor: indexAfter(root.events, list, views[0].cursor) }
       root.trail = views
     }
+    // In a thread too, showing or kept for Esc: its rows before, by thread id.
+    var threadsBefore = {}
+    root.trail.concat([{ thread: root.threadId }]).forEach(function(view) {
+      if (view.thread !== "") threadsBefore[view.thread] = threadRows(view.thread)
+    })
 
     var acts = report.activity || []
     acts.sort(function(a, b) { return b.created_at - a.created_at })
@@ -135,6 +140,12 @@ Item {
     root.lastActive = typeof report.last_active === "number" ? report.last_active : 0
     root.events = list
     root.context = report.context || []
+    root.trail = root.trail.map(function(view) {
+      if (view.thread === "") return view
+      return { profile: view.profile, thread: view.thread,
+        cursor: indexAfter(threadsBefore[view.thread], threadRows(view.thread), view.cursor) }
+    })
+    if (root.threadId !== "") root.cursor = indexAfter(threadsBefore[root.threadId], threadRows(root.threadId), root.cursor)
     root.online = report.online === true
     root.relayName = report.name || ""
     root.loaded = true
@@ -162,9 +173,11 @@ Item {
   }
 
   function eventsBy(pubkey) {
-    // The agent's events are only in the Activity, everyone else's only in the Network.
-    var all = pubkey === selfPubkey ? activity : events
+    // The agent's events are only in the Activity, everyone else's only in the
+    // Network; either may have more that only a thread brought in.
+    var all = (pubkey === selfPubkey ? activity : events).concat(context)
     return all.filter(function(e) { return e.pubkey === pubkey })
+      .sort(function(a, b) { return b.created_at - a.created_at })
   }
 
   // An event the relay held at the last refresh, wherever it was found.

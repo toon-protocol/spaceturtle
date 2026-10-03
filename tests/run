@@ -33,7 +33,8 @@ case "$1 $2" in
   "relay subscriptions") echo '{"error":"not sold"}' ;;
   "event query")
     case "$*" in
-      *'"ids"'*) if [[ -r $STUB_DIR/by-id ]]; then cat "$STUB_DIR/by-id"; else echo '{"events":[]}'; fi ;;
+      *'"ids"'*) if [[ -r $STUB_DIR/pool ]]; then jq -c --argjson f "$5" '{events: [.events[] | select(.id as $i | $f.ids | index($i))]}' "$STUB_DIR/pool"
+        elif [[ -r $STUB_DIR/by-id ]]; then cat "$STUB_DIR/by-id"; else echo '{"events":[]}'; fi ;;
       *'"#e"'*) if [[ -r $STUB_DIR/replies ]]; then cat "$STUB_DIR/replies"; else echo '{"events":[]}'; fi ;;
       *'"authors"'*) if [[ -r $STUB_DIR/agent-events ]]; then cat "$STUB_DIR/agent-events"; else echo '{"events":[]}'; fi ;;
       *'"kinds":[0]'*) cat "$STUB_DIR/profiles" ;;
@@ -210,6 +211,14 @@ check "threads: a note refers to nothing" '.context[] | select(.id == "root") | 
 rm "$STUB_DIR/by-id"
 out=$("$root/relay-events")
 check "threads: a root the relay does not return is missing" '.events[] | select(.id == "r1") | .refers_missing == true'
+
+# a chain deeper than the walk: what is past it is not asked for, so not missing
+rm -f "$STUB_DIR/replies" "$STUB_DIR/agent-events"
+echo "{\"events\":[$(t d4 "$other" 40 '[["e","d3"]]')]}" > "$STUB_DIR/events"
+echo "{\"events\":[$(t d3 "$other" 30 '[["e","d2"]]'),$(t d2 "$other" 20 '[["e","d1"]]'),$(t d1 "$other" 10 '[["e","d0"]]'),$(t d0 "$other" 5 '[]')]}" > "$STUB_DIR/pool"
+out=$("$root/relay-events")
+check "threads: a chain is fetched up to the walk's depth" '[.context[].id] | sort == ["d1","d2","d3"]'
+check "threads: a reference past the walk is not marked missing" '.context[] | select(.id == "d1") | .refers_to == "d0" and .refers_missing == false'
 
 echo; echo "$count checks, $fails failed"
 [[ $fails -eq 0 ]]
