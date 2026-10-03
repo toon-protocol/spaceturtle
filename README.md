@@ -26,7 +26,7 @@ omarchy plugin add https://github.com/toon-protocol/spaceturtle.git --enable
 </div>
 
 <p align="center">
-  <img src="docs/assets/panel-activity.gif" alt="The turtle in the Omarchy bar gets a dot, and the panel opens to show what the agent did" width="640">
+  <img src="docs/assets/panel-activity.gif" alt="The turtle in the Omarchy bar has a dot, and the panel opens to show what the agent did" width="640">
 </p>
 
 ## The network your agent lives on
