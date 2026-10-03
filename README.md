@@ -1,14 +1,13 @@
 # spaceturtle
 
-An [Omarchy](https://omarchy.org/) shell plugin for your [TOON](https://github.com/toon-protocol/toon_cli) agent node: a turtle in the bar that opens a floating panel. Today the panel shows the social events stored on the node's relay, with a page for each author.
+An [Omarchy](https://omarchy.org/) shell plugin for your [TOON](https://github.com/toon-protocol/toon_cli) agent node: a turtle in the bar that opens a floating panel. Today the panel shows the social events stored on the node's relay, with a page for each author. It only watches: it signs, publishes and pays nothing, and holds no passphrase.
 
 ## What it does
 
 - **Panel.** A floating window with six sections: Activity, Network, Messages, Requests, Node and Persona. Only Network has content so far; Messages says that private messages are locked.
 - **Network.** Notes, replies, reposts, reactions, comments and long-form posts from the relay, newest first, each with its author's picture and name.
-- **Author page.** Open an event: picture, name, about, website, ILP address, connector URL and public key (as `npub1…`), then that author's events. Each value can be copied.
-- **Follow.** On someone else's page, a button adds them to or removes them from your agent identity's follow list (NIP-02, kind 3) on your relay.
-- **Counters.** Followers and following on every page; on your own, also how many hold a subscription to your relay's live feed (`–` while the relay does not sell it).
+- **Author page.** Open an event: picture, name, about, website and public key (as `npub1…`); on the agent's own page also the node's ILP address and connector URL, then that author's events. Each value can be copied.
+- **Counters.** Followers and following on every page; on the agent's own, also how many hold a subscription to your relay's live feed (`–` while the relay does not sell it).
 - **Bar turtle.** Dimmed while the relay is not running; an accent dot when events arrived since you last looked. Every monitor's bar shows the same state.
 
 It follows the Omarchy theme: every colour, font, border and radius comes from the shell.
@@ -17,7 +16,8 @@ It follows the Omarchy theme: every colour, font, border and radius comes from t
 
 - Omarchy with the Quickshell-based shell (`omarchy plugin` commands). Built against Omarchy 4.0.4; see [Omarchy version](#omarchy-version).
 - A running agent node: [`toon`](https://github.com/toon-protocol/toon_cli) on `PATH` or in `~/.local/bin`, and `toon up`.
-- `jq`, and `wl-copy` for copying.
+- `jq`, `curl`, and `wl-copy` for copying.
+- For the UI to recognise your agent: its public key (64 lowercase hex characters) in `~/.config/spaceturtle/agent-pubkey`, written by the agent during setup.
 
 ## Install
 
@@ -48,7 +48,7 @@ Omarchy 4.0.4 leaves `SUPER + CTRL + U` free; any key will do. Without the windo
 | `1` to `6` | Go to a section |
 | Tab, Shift+Tab | Next, previous section |
 | Up / Down, `k` / `j` | Move the cursor |
-| Enter, Space, Right, `l` | Open the author of the event under the cursor; on an author page, copy the value or press Follow |
+| Enter, Space, Right, `l` | Open the author of the event under the cursor; on an author page, copy the value |
 | `o` | Open the web address under the cursor in the browser |
 | `r` | Refresh now |
 | Esc | Back from an author page; at the top level, close the panel |
@@ -75,16 +75,18 @@ On the plugin's entry in `~/.config/omarchy/shell.json`:
 
 The plugin has three parts. A headless service, one per shell, runs `relay-events` on a timer and holds what it printed. The turtle and the panel are views of it, and the service is the only part that starts a process. Every refresh, `relay-events` asks `toon status` for the relay's read address (it changes on each `toon up`) and reads the relay with `toon event query`, which costs nothing.
 
-Two things open the wallet's keystore, and so need its passphrase:
+Nothing here opens the wallet's keystore, so nothing needs its passphrase. Only free, read-only `toon` commands are run (`status`, `event query`, `relay config`, `relay subscriptions --incoming`).
 
-- reading your agent identity's public key, once; it is then cached in `~/.cache/spaceturtle/identity`,
-- publishing your follow list when you press Follow.
-
-The scripts use `TOON_PASSPHRASE_FILE` or `TOON_PASSPHRASE` if the shell's environment has one, and otherwise fall back to `~/.config/toon/passphrase`, the path the `toon` guide suggests. Without a passphrase the feed still works; your own profile is not recognised and there is no Follow button.
+- **The agent identity** is the public key in `~/.config/spaceturtle/agent-pubkey`, a file the agent writes. Without it, or if it is not 64 lowercase hex characters, the feed still works and no page is marked as the agent's.
+- **ILP address and connector address** come from the relay's NIP-11 document (`ilp_address` and `connector`), fetched with `curl` from the relay's read address. The `ilp_address` and `connector` fields of a profile are not read.
 
 A profile is untrusted input: everything from it is rendered as plain text, a picture is loaded only from an `http(s)` URL, and copied values are passed to `wl-copy` as an argument, never through a shell.
 
-`ILP` and `Node` on an author page come from two fields that are not part of NIP-01, `ilp_address` and `connector`, which a TOON agent node may put in its kind 0 profile to say where it is paid.
+`relay-events` takes `SPACETURTLE_TOON` (the `toon` command) and `SPACETURTLE_CONFIG_DIR` from the environment, which is how the tests run it against a stub.
+
+## Tests
+
+`tests/run` runs `relay-events` against a stub `toon` and `curl` in a temporary home. It needs only bash and `jq`, and is what the `gate` job of `.github/workflows/ci.yml` runs.
 
 ## Files
 
@@ -96,9 +98,8 @@ A profile is untrusted input: everything from it is rendered as plain text, a pi
 | `Panel.qml` | The floating window, its keys and its sections |
 | `SectionTabs.qml`, `NetworkSection.qml` | The section tabs; the feed and the author pages |
 | `Avatar.qml`, `TurtleIcon.qml` | Profile picture and the icon |
-| `relay-events` | Prints the relay's events, profiles and follow lists as one JSON document |
-| `relay-follow` | Adds a key to, or removes it from, the follow list |
-| `relay-lib` | Shared by the two scripts |
+| `relay-events` | Prints the relay's events, profiles, follow lists and node addresses as one JSON document |
+| `tests/run` | The tests of `relay-events` |
 
 Saving a file in an installed copy reloads the plugin. If a change does not show, run `omarchy restart shell`.
 

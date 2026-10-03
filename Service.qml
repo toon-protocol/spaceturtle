@@ -33,7 +33,6 @@ Item {
   readonly property bool iconPreview: settings.iconPreview === true
 
   readonly property string script: Qt.resolvedUrl("relay-events").toString().replace(/^file:\/\//, "")
-  readonly property string followScript: Qt.resolvedUrl("relay-follow").toString().replace(/^file:\/\//, "")
 
   property bool loaded: false
   property bool online: false
@@ -43,11 +42,12 @@ Item {
   // The agent identity's own key, and pubkey -> the keys its newest follow list names.
   property string selfPubkey: ""
   property var followMap: ({})
+  // This node's ILP and connector addresses, from the relay's NIP-11 document.
+  property string nodeIlp: ""
+  property string nodeConnector: ""
   // How many hold a subscription to this relay's live feed; -1 while it is not sold.
   property int subscribers: -1
   property var events: []
-  // What the follow button was last asked to do, shown until the relay confirms it.
-  property string followPending: ""
 
   // True while the panel is open. Newest created_at seen in the panel; anything
   // newer puts the dot on the turtle.
@@ -105,6 +105,9 @@ Item {
     root.profiles = map
     root.followMap = followed
     root.selfPubkey = report.self || ""
+    var node = report.node || ({})
+    root.nodeIlp = typeof node.ilp_address === "string" ? node.ilp_address.trim() : ""
+    root.nodeConnector = typeof node.connector === "string" ? node.connector.trim() : ""
     root.subscribers = typeof report.subscribers === "number" ? report.subscribers : -1
     root.events = list
     root.online = report.online === true
@@ -148,17 +151,6 @@ Item {
     return count
   }
 
-  function isFollowing(pubkey) {
-    return (followMap[selfPubkey] || []).indexOf(pubkey) !== -1
-  }
-
-  function toggleFollow(pubkey) {
-    if (followProc.running || pubkey === "" || pubkey === selfPubkey) return
-    root.followPending = isFollowing(pubkey) ? "unfollow" : "follow"
-    followProc.command = [root.followScript, root.followPending, pubkey]
-    followProc.running = true
-  }
-
   function copy(value) {
     if (value === "") return
     // Passed as an argument, never through a shell: the value comes from a profile.
@@ -184,15 +176,6 @@ Item {
           root.loaded = true
         }
       }
-    }
-  }
-
-  // Publishes the changed follow list, then re-reads the relay to show it.
-  Process {
-    id: followProc
-    onExited: {
-      root.followPending = ""
-      root.refresh()
     }
   }
 
