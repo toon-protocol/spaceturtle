@@ -78,7 +78,7 @@ echo '{"name":"Shelly relay","ilp_address":"g.toon.shelly","connector":"https://
 out=$("$root/relay-events" 25)
 check "events: online, with the relay's name" '.online == true and .name == "Shelly"'
 check "events: every event the relay returned" '[.events[].id] == ["e1","e2"]'
-grep -q '"kinds":\[1,6,7,16,1111,30023\]' "$STUB_DIR/calls" || { echo "FAIL events: feed kinds not asked for"; fails=$((fails + 1)); }
+! grep -q '"limit":25.*"kinds"\|"kinds".*"limit":25' "$STUB_DIR/calls" || { echo "FAIL events: the feed query is limited to kinds"; fails=$((fails + 1)); }
 check "events: profiles and follow lists" '(.profiles | length) == 1 and (.follows[0].tags == [["p","'"$other"'"]])'
 grep -q '"limit":25' "$STUB_DIR/calls" || { echo "FAIL events: limit not passed"; fails=$((fails + 1)); }
 check "events: ILP and connector come from NIP-11" '.node == {ilp_address: "g.toon.shelly", connector: "https://node.example:8080"}'
@@ -97,6 +97,44 @@ rm "$STUB_DIR/nip11"
 out=$("$root/relay-events")
 check "events: without NIP-11 the feed still works" '.online == true and (.events | length) == 2 and .node.ilp_address == ""'
 ! grep -q "wallet" "$STUB_DIR/calls" || { echo "FAIL ran a wallet command"; fails=$((fails + 1)); }
+
+# --- the parts of each kind
+new_env; install_toon; running_relay
+echo '{"events":[]}' > "$STUB_DIR/profiles"; echo '{"events":[]}' > "$STUB_DIR/follows"
+ev() { jq -cn --argjson k "$1" --arg c "$2" --argjson t "$3" '{id:("k"+($k|tostring)+$c[0:3]),pubkey:"'"$pk"'",kind:$k,created_at:1,tags:$t,content:$c}'; }
+{
+  echo '{"events":['
+  ev 0 '{"name":"Shelly","about":"turtle"}' '[]'; echo ,
+  ev 1 'hello' '[]'; echo ,
+  ev 1 'a reply' '[["e","'"$other"'"]]'; echo ,
+  ev 3 '' '[["p","'"$other"'"],["p","'"$pk"'"]]'; echo ,
+  ev 5 'mistake' '[["e","'"$other"'"]]'; echo ,
+  ev 6 '' '[["e","'"$other"'"]]'; echo ,
+  ev 7 '+' '[["e","'"$other"'"]]'; echo ,
+  ev 16 '' '[["e","'"$other"'"]]'; echo ,
+  ev 1111 'a comment' '[["e","'"$other"'"]]'; echo ,
+  ev 30023 'long text' '[["title","A Title"],["summary","Sum"],["r","https://a.example/x"],["r","javascript:alert(1)"]]'; echo ,
+  ev 30817 'draft text' '[["d","nip-x"],["title","Draft"]]'; echo ,
+  ev 31337 'raw' '[["alt","A thing"],["x","y","z"]]'; echo ,
+  ev 31338 'raw2' '[]'
+  echo ']}'
+} > "$STUB_DIR/events"
+out=$("$root/relay-events")
+P() { echo ".events[] | select(.kind == $1) | .parts | $2"; }
+check "parts 0: name and about" "$(P 0 '.label == "updated profile" and .title == "Shelly" and .summary == "turtle" and .body == ""')"
+check "parts 1: a note" "$(P 1 'select(.ref == "") | .label == "" and .body == "hello"')"
+check "parts 1: a reply refers to its event" "$(P 1 'select(.body == "a reply") | .label == "replied" and .ref == "'"$other"'"')"
+check "parts 3: follows counted" "$(P 3 '.label == "updated follows" and .body == "2 followed"')"
+check "parts 5: deletion refers to its target" "$(P 5 '.label == "deleted" and .ref == "'"$other"'" and .summary == "1 deleted"')"
+check "parts 6: repost" "$(P 6 '.label == "reposted" and .ref == "'"$other"'" and .body == ""')"
+check "parts 7: reaction" "$(P 7 '.label == "reacted" and .body == "󰋑"')"
+check "parts 16: generic repost" "$(P 16 '.label == "reposted" and .ref == "'"$other"'"')"
+check "parts 1111: comment" "$(P 1111 '.label == "commented" and .body == "a comment"')"
+check "parts 30023: article, only http(s) links" "$(P 30023 '.label == "published" and .title == "A Title" and .summary == "Sum" and .links == ["https://a.example/x"]')"
+check "parts 30817: NIP draft" "$(P 30817 '.label == "drafted" and .title == "Draft" and .body == "draft text"')"
+check "parts unknown with alt: alt, kind, tags, content" "$(P 31337 '.label == "kind 31337" and .title == "A thing" and .summary == "alt A thing, x y z" and .body == "raw"')"
+check "parts unknown without alt: kind, content" "$(P 31338 '.label == "kind 31338" and .title == "" and .summary == "" and .body == "raw2"')"
+check "parts: every event has all the parts" '[.events[].parts | keys == ["body","label","links","ref","summary","title"]] | all'
 
 # --- hostile profile fields stay data
 new_env; install_toon; running_relay
