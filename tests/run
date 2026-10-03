@@ -126,6 +126,32 @@ out=$("$root/relay-events")
 check "events: without NIP-11 the feed still works" '.online == true and (.events | length) == 2 and .node.ilp_address == ""'
 ! grep -q "wallet" "$STUB_DIR/calls" || { echo "FAIL ran a wallet command"; fails=$((fails + 1)); }
 
+# --- the Persona
+new_env; install_toon; running_relay
+echo '{"events":[]}' > "$STUB_DIR/events"; echo '{"events":[]}' > "$STUB_DIR/follows"
+echo "{\"events\":[{\"id\":\"p0\",\"pubkey\":\"$pk\",\"kind\":0,\"created_at\":1,\"tags\":[],\"content\":\"{\\\"name\\\":\\\"Old\\\"}\"},{\"id\":\"p1\",\"pubkey\":\"$pk\",\"kind\":0,\"created_at\":5,\"tags\":[],\"content\":\"{\\\"name\\\":\\\"Shelly\\\",\\\"about\\\":\\\"A calm turtle\\\",\\\"picture\\\":\\\"https://a.example/s.png\\\"}\"},{\"id\":\"p2\",\"pubkey\":\"$other\",\"kind\":0,\"created_at\":9,\"tags\":[],\"content\":\"{\\\"name\\\":\\\"Stranger\\\"}\"}]}" > "$STUB_DIR/profiles"
+echo "$pk" > "$SPACETURTLE_CONFIG_DIR/agent-pubkey"
+out=$("$root/relay-events")
+check "persona: the agent identity's newest profile" '.persona == {name: "Shelly", character: "A calm turtle", picture: "https://a.example/s.png", created_at: 5}'
+echo '{"events":[]}' > "$STUB_DIR/profiles"
+out=$("$root/relay-events")
+check "persona: no profile for the agent, none" '.persona == null and .online == true'
+echo "{\"events\":[{\"id\":\"p2\",\"pubkey\":\"$other\",\"kind\":0,\"created_at\":9,\"tags\":[],\"content\":\"{\\\"name\\\":\\\"Stranger\\\"}\"},{\"id\":\"p3\",\"pubkey\":\"$pk\",\"kind\":0,\"created_at\":9,\"tags\":[],\"content\":\"not json\"}]}" > "$STUB_DIR/profiles"
+out=$("$root/relay-events")
+check "persona: another author's profile, and one that is not JSON, are none" '.persona == null'
+echo "{\"events\":[{\"id\":\"p4\",\"pubkey\":\"$pk\",\"kind\":0,\"created_at\":9,\"tags\":[],\"content\":\"{\\\"name\\\":7,\\\"about\\\":\\\"x\\\"}\"}]}" > "$STUB_DIR/profiles"
+out=$("$root/relay-events")
+check "persona: a profile without a name is none" '.persona == null'
+echo "{\"events\":[{\"id\":\"p1\",\"pubkey\":\"$pk\",\"kind\":0,\"created_at\":5,\"tags\":[],\"content\":\"{\\\"name\\\":\\\"Shelly\\\"}\"}]}" > "$STUB_DIR/profiles"
+out=$("$root/relay-events")
+check "persona: a name alone, character and picture empty" '.persona == {name: "Shelly", character: "", picture: "", created_at: 5}'
+rm "$SPACETURTLE_CONFIG_DIR/agent-pubkey"
+out=$("$root/relay-events")
+check "persona: a missing public key file, none" '.persona == null and .self == "" and .online == true'
+new_env
+out=$("$root/relay-events")
+check "persona: offline, none" '.persona == null and .online == false'
+
 # --- attention
 new_env; install_toon; running_relay
 echo "$pk" > "$SPACETURTLE_CONFIG_DIR/agent-pubkey"
@@ -500,6 +526,20 @@ check "skill: an answer leaves a done Request and a withdrawn one alone" ".reque
 count=$((count + 1))
 if [[ ! -e $queue/$c.json && $(ls -A "$queue" | wc -l) -eq 2 ]]; then echo "ok   skill: a withdrawn Request stays withdrawn"
 else echo "FAIL skill: a withdrawn Request came back"; fails=$((fails + 1)); fi
+
+# --- persona Requests
+new_env; queue=$SPACETURTLE_STATE_DIR/requests
+a=$("$root/request" persona --name "Shelly" --character "A calm turtle" --picture "https://a.example/s.png")
+b=$("$root/request" persona)
+c=$("$root/request" persona --name "Only a name")
+out=$("$root/relay-events")
+check "persona Request: describing writes a waiting persona Request with the three fields" ".requests[] | select(.id == \"$a\") | .kind == \"persona\" and .state == \"waiting\" and .text == \"Name: Shelly\\nCharacter: A calm turtle\\nPicture: https://a.example/s.png\""
+check "persona Request: leaving it to the agent writes a waiting persona Request" ".requests[] | select(.id == \"$b\") | .kind == \"persona\" and .state == \"waiting\" and .text == \"Leave it to the agent.\""
+check "persona Request: a part of the description may be left out" ".requests[] | select(.id == \"$c\") | .kind == \"persona\" and .text == \"Name: Only a name\""
+d=$("$root/request" persona --name $'Shelly\nPicture: file:///etc/passwd')
+out=$("$root/relay-events")
+check "persona Request: a line break in a field cannot pose as another field" ".requests[] | select(.id == \"$d\") | (.text | split(\"\\n\") | length) == 1"
+"$root/request" persona --bogus x 2>/dev/null && { echo "FAIL persona Request: an unknown argument was accepted"; fails=$((fails + 1)); }
 
 echo; echo "$count checks, $fails failed"
 [[ $fails -eq 0 ]]

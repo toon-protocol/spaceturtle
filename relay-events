@@ -1,7 +1,7 @@
 #!/bin/bash
 # Print what can be observed of this agent node as one JSON document:
 # {"online", "name", "self", "node", "subscribers", "state", "profiles",
-# "follows", "activity", "last_active", "events", "context", "requests",
+# "follows", "persona", "activity", "last_active", "events", "context", "requests",
 # "urgent", "attention", "looked_at"}. "activity" is what the agent identity signed and
 # the Requests it answered, newest first; an answered Request is an entry with a
 # "request" field and the id "request:<id>". "last_active" is the newest
@@ -11,6 +11,10 @@
 # ("refers_missing"), and which events refer to it ("referenced_by", ids, oldest
 # first). "context" holds the events a thread needs that the feed's limit left
 # out: those that shown events refer to, and those that refer to them.
+# "persona" is the agent identity's newest profile as {name, character, picture,
+# created_at} (the profile's name, about and picture, each "" when absent), or
+# null when the public key is not known or the agent has published no profile
+# with a name: the Install has no Persona yet.
 # "requests" is every Request in the queue, newest first (a file that is not a
 # valid Request is skipped). "attention" is "none", "news" (an Activity entry,
 # or an event tagging the agent, is newer than the last time the Observer
@@ -116,7 +120,7 @@ fi
 # Without the relay, the Activity is what the agent answered, which is local.
 offline() {
   command -v jq >/dev/null || {
-    printf '{"online":false,"name":"","self":"","node":{"ilp_address":"","connector":""},"subscribers":null,"profiles":[],"follows":[],"state":null,"urgent":false,"activity":[],"last_active":null,"events":[],"context":[],"requests":[],"attention":"urgent","looked_at":null}\n'
+    printf '{"online":false,"name":"","self":"","node":{"ilp_address":"","connector":""},"subscribers":null,"profiles":[],"follows":[],"persona":null,"state":null,"urgent":false,"activity":[],"last_active":null,"events":[],"context":[],"requests":[],"attention":"urgent","looked_at":null}\n'
     exit 0
   }
   jq -cn --argjson requests "${requests:-[]}" \
@@ -124,7 +128,7 @@ offline() {
     --argjson answered "$(request_activity "$self" "${requests:-[]}")" \
     --argjson changes "$changes" --argjson urgent "$urgent" \
     '($answered | sort_by(-.created_at)) as $activity
-    | {online:false,name:"",self:"",node:{ilp_address:"",connector:""},subscribers:null,state:$state,urgent:$urgent,profiles:[],follows:[],
+    | {online:false,name:"",self:"",node:{ilp_address:"",connector:""},subscribers:null,state:$state,urgent:$urgent,profiles:[],follows:[],persona:null,
        activity:(($activity + $changes) | sort_by(-.created_at)),last_active:($activity[0].created_at? // null),events:[],context:[],requests:$requests,
        attention:"urgent",looked_at:$looked}'
   exit 0
@@ -390,7 +394,14 @@ jq -cn --arg name "${name:-}" --arg self "$self" \
   | ($signed + $answered | sort_by(-.created_at)) as $activity
   | ([$mentioned[], $events[] | select(.pubkey != $self and $self != ""
       and any(.tags[]?; .[0] == "p" and .[1] == $self))]) as $mentions
-  | {online: true, name: $name, self: $self,
+  # The Persona: the newest profile of the agent identity that has a name.
+  | ([$profiles[] | select($self != "" and .pubkey == $self)
+      | (.content | try fromjson catch null) as $m
+      | select(($m | type) == "object" and (($m.name | strings | gsub("^\\s+|\\s+$"; "")) != ""))
+      | {name: ($m.name | strings | gsub("^\\s+|\\s+$"; "")), character: ($m.about | strings // ""),
+         picture: ($m.picture | strings // ""), created_at: .created_at}]
+    | sort_by(.created_at) | last // null) as $persona
+  | {online: true, name: $name, self: $self, persona: $persona,
     activity: (($activity + $changes) | sort_by(-.created_at)), last_active: ($activity[0].created_at? // null),
     urgent: $urgent,
     node: ($node // {ilp_address: "", connector: ""}),
