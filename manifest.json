@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "id": "toon.relay-feed",
-  "name": "Relay feed",
+  "id": "toon.spaceturtle",
+  "name": "Spaceturtle",
   "version": "0.1.0",
   "author": "TOON Protocol",
   "description": "Social events and profiles from a TOON agent node's relay",
@@ -12,7 +12,7 @@
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "Relay feed",
+    "displayName": "Spaceturtle",
     "description": "Social events and profiles from a TOON agent node's relay",
     "category": "Info",
     "defaultSection": "right",

@@ -18,7 +18,7 @@ relay_query() {
 # The agent identity's public key. It is public, so it is cached to keep the
 # keystore closed on every refresh; a newer keystore invalidates the cache.
 agent_identity() {
-  local cache=${XDG_CACHE_HOME:-$HOME/.cache}/toon-relay-feed/identity
+  local cache=${XDG_CACHE_HOME:-$HOME/.cache}/spaceturtle/identity
   local keystore=$HOME/.toon/agent-node/keystore.json
   if [[ ! -s $cache || $keystore -nt $cache ]]; then
     local key

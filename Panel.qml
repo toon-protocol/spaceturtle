@@ -9,10 +9,10 @@ import qs.Ui
 // `toon` for the relay's read address and queries it.
 Panel {
   id: root
-  moduleName: "toon.relay-feed"
-  ipcTarget: "toon.relay-feed"
+  moduleName: "toon.spaceturtle"
+  ipcTarget: "toon.spaceturtle"
 
-  // Inline shell.json settings: { "id": "toon.relay-feed", "interval": 30, "limit": 40 }
+  // Inline shell.json settings: { "id": "toon.spaceturtle", "interval": 30, "limit": 40 }
   readonly property int refreshSeconds: Math.max(5, Number(setting("interval", 30)) || 30)
   readonly property int eventLimit: Math.max(1, Number(setting("limit", 40)) || 40)
   // Which TurtleIcon drawing to use, and whether the popup lists them all to choose from.

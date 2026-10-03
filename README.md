@@ -1,4 +1,4 @@
-# omarchy-relay-feed
+# spaceturtle
 
 An [Omarchy](https://omarchy.org/) shell plugin that puts your [TOON](https://github.com/toon-protocol/toon_cli) agent node's relay in the bar: a turtle that opens a feed of the social events stored on the relay, with a profile page for each author.
 
@@ -23,10 +23,10 @@ It follows the Omarchy theme: colours, font, border and popup placement all come
 ## Install
 
 ```sh
-omarchy plugin add https://github.com/toon-protocol/omarchy-relay-feed.git --enable
+omarchy plugin add https://github.com/toon-protocol/spaceturtle.git --enable
 ```
 
-Move it with `omarchy bar move toon.relay-feed --section right`, or drag it in the bar.
+Move it with `omarchy bar move toon.spaceturtle --section right`, or drag it in the bar.
 
 ## Use
 
@@ -43,7 +43,7 @@ Move it with `omarchy bar move toon.relay-feed --section right`, or drag it in t
 On the plugin's entry in `~/.config/omarchy/shell.json`:
 
 ```json
-{ "id": "toon.relay-feed", "interval": 30, "limit": 40, "icon": 2 }
+{ "id": "toon.spaceturtle", "interval": 30, "limit": 40, "icon": 2 }
 ```
 
 | Setting | Default | Meaning |
@@ -59,7 +59,7 @@ The plugin runs no service of its own. Every refresh, `relay-events` asks `toon 
 
 Two things open the wallet's keystore, and so need its passphrase:
 
-- reading your agent identity's public key, once; it is then cached in `~/.cache/toon-relay-feed/identity`,
+- reading your agent identity's public key, once; it is then cached in `~/.cache/spaceturtle/identity`,
 - publishing your follow list when you press Follow.
 
 The scripts use `TOON_PASSPHRASE_FILE` or `TOON_PASSPHRASE` if the shell's environment has one, and otherwise fall back to `~/.config/toon/passphrase`, the path the `toon` guide suggests. Without a passphrase the feed still works; your own profile is not recognised and there is no Follow button.
