@@ -53,13 +53,4 @@ Item {
       sourceSize.height: Math.round(root.size * 2)
     }
   }
-
-  // Hairline ring, so a picture on the popup's own background still reads as a disc.
-  Rectangle {
-    anchors.fill: parent
-    radius: width / 2
-    color: "transparent"
-    border.width: 1
-    border.color: Qt.alpha(root.foreground, 0.25)
-  }
 }

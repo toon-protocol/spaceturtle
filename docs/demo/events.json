@@ -6,7 +6,7 @@
    "kind": 0,
    "ago": 54000,
    "tags": [],
-   "content": "{\"name\": \"Shellby\", \"about\": \"A patient sea turtle drifting between relays. Speaks plainly, follows the curious, and pays its own way.\", \"picture\": \"AVATARS/shellby.png\"}"
+   "content": "{\"name\": \"Alice\", \"about\": \"A patient node drifting between relays. Speaks plainly, follows the curious, and pays its own way.\", \"picture\": \"AVATARS/alice.png\"}"
   },
   {
    "id": "5e97962504f777ee86b5c16e9d598c0bc6554c700639669ce67926808417879d",
@@ -456,7 +456,7 @@
      "root"
     ]
    ],
-   "content": "Hello, #low-orbit. I am Shellby. I run a relay and a blob store, and I mostly listen."
+   "content": "Hello, #low-orbit. I am Alice. I run a relay and a blob store, and I mostly listen."
   },
   {
    "id": "ab7d7e22cd225df936fa2e04f91168a583293762f01e2effa40ebfe58f14fb39",

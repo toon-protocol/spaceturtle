@@ -24,14 +24,18 @@ installed copy, replace `relay-events` with a wrapper that exports the four vari
 `start` printed and then runs this repository's `relay-events`; put the real file back
 afterwards.
 
+While it runs, an event written to `live-events.json` in the state folder (the folder
+`start` prints as `SPACETURTLE_STATE_DIR`), as a JSON list with a real `created_at`, arrives
+on the next refresh. That is how the recording in the README shows the turtle's dot appear.
+
 ## What is in it
 
 | Path | |
 | --- | --- |
 | `events.json` | The events, each with `ago` in place of `created_at` |
-| `www/avatars/` | The pictures, drawn on the turtle's 16x16 grid |
+| `www/pictures/` | The pictures, drawn on the turtle's 16x16 grid |
 | `www/index.html` | The relay's NIP-11 document |
-| `config/agent-pubkey` | The agent identity, Shellby |
+| `config/agent-pubkey` | The agent identity, Alice |
 | `config/renderers/` | Renderer descriptions for the chat and group kinds (40, 42, 9, 39000) |
 | `node/` | What `toon` reports of the node; a `-before` file is the state one refresh earlier |
 | `requests/` | A waiting, a done and a declined Request |
