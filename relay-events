@@ -1,0 +1,37 @@
+#!/bin/bash
+# Print the social events stored on this agent node's relay as one JSON
+# document: {"online", "name", "self", "subscribers", "profiles", "follows",
+# "events"}. The relay's read port changes on every `toon up`, so it is looked
+# up from `toon status` each time.
+set -uo pipefail
+PATH="$HOME/.local/bin:$PATH"
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/relay-lib"
+
+limit=${1:-40}
+[[ $limit =~ ^[0-9]+$ ]] || limit=40
+
+offline() {
+  printf '{"online":false,"name":"","self":"","subscribers":null,"profiles":[],"follows":[],"events":[]}\n'
+  exit 0
+}
+
+command -v toon >/dev/null && command -v jq >/dev/null || offline
+read_address=$(relay_read_address)
+[[ -n $read_address ]] || offline
+
+# Notes, reposts, reactions, comments and long-form posts; then the profiles
+# that name their authors and the follow lists that count their followers.
+events=$(relay_query "{\"kinds\":[1,6,7,16,1111,30023],\"limit\":$limit}")
+profiles=$(relay_query '{"kinds":[0],"limit":200}')
+follows=$(relay_query '{"kinds":[3],"limit":500}')
+name=$(toon relay config --json 2>/dev/null | jq -r '.relay.name // ""' 2>/dev/null)
+
+# Who holds a subscription to this relay's live feed; null while it is not sold.
+subscribers=$(toon relay subscriptions --incoming --json 2>/dev/null |
+  jq -c 'if .error then null else ([.. | arrays] | first // [] | length) end' 2>/dev/null)
+
+jq -cn --arg name "${name:-}" --arg self "$(agent_identity)" \
+  --argjson subscribers "${subscribers:-null}" --argjson events "${events:-[]}" \
+  --argjson profiles "${profiles:-[]}" --argjson follows "${follows:-[]}" \
+  '{online: true, name: $name, self: $self, subscribers: $subscribers, profiles: $profiles, follows: $follows, events: $events}'

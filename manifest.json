@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "toon.relay-feed",
+  "name": "Relay feed",
+  "version": "0.1.0",
+  "author": "TOON Protocol",
+  "description": "Social events and profiles from a TOON agent node's relay",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Relay feed",
+    "description": "Social events and profiles from a TOON agent node's relay",
+    "category": "Info",
+    "defaultSection": "right",
+    "allowMultiple": false
+  }
+}

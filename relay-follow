@@ -1,0 +1,30 @@
+#!/bin/bash
+# Add a key to, or take it out of, the agent identity's follow list (NIP-02,
+# kind 3) on this agent node's relay. The list is replaced whole, so the
+# current one is read first.
+#
+#   relay-follow follow|unfollow <64-hex pubkey>
+set -uo pipefail
+PATH="$HOME/.local/bin:$PATH"
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/relay-lib"
+
+action=${1:-}
+pubkey=${2:-}
+[[ $action == follow || $action == unfollow ]] || { echo "usage: relay-follow follow|unfollow <pubkey>" >&2; exit 2; }
+[[ $pubkey =~ ^[0-9a-f]{64}$ ]] || { echo "not a public key: $pubkey" >&2; exit 2; }
+
+read_address=$(relay_read_address)
+[[ -n $read_address ]] || { echo "the relay is not running" >&2; exit 1; }
+self=$(agent_identity)
+[[ -n $self ]] || { echo "the agent identity could not be read" >&2; exit 1; }
+[[ $pubkey != "$self" ]] || { echo "an identity does not follow itself" >&2; exit 1; }
+
+current=$(relay_query "{\"kinds\":[3],\"authors\":[\"$self\"]}" | jq -c 'sort_by(.created_at) | last | .tags // []')
+if [[ $action == follow ]]; then
+  tags=$(jq -c --arg p "$pubkey" 'if any(.[]; .[0] == "p" and .[1] == $p) then . else . + [["p", $p]] end' <<<"$current")
+else
+  tags=$(jq -c --arg p "$pubkey" 'map(select((.[0] == "p" and .[1] == $p) | not))' <<<"$current")
+fi
+
+toon event publish --kind 3 --tags "$tags" --json
