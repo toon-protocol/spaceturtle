@@ -10,11 +10,11 @@ push, open a PR or close the issue. The runner does all three once you finish.
 ## This repository
 
 - This is spaceturtle, an Omarchy shell plugin (`manifest.json`, id `toon.spaceturtle`): a
-  bar widget in QML (`Panel.qml`, `Avatar.qml`, `TurtleIcon.qml`) and three bash scripts
-  (`relay-events`, `relay-follow`, and `relay-lib`, which the other two source) that read a
-  TOON agent node's relay with the `toon` CLI and `jq`. There is no build step, no package
-  manager and no test suite at the repository root; `.sandcastle/package.json` belongs to
-  the runner, not to the plugin. `README.md` describes every file, the settings and how the
+  bar widget in QML (`Panel.qml`, `Avatar.qml`, `TurtleIcon.qml`) and one bash script,
+  `relay-events`, that reads a TOON agent node's relay with the `toon` CLI, `jq` and `curl`.
+  There is no build step and no package manager at the repository root; `tests/run` tests
+  `relay-events` against a stub `toon`. `.sandcastle/package.json` belongs to the runner,
+  not to the plugin. `README.md` describes every file, the settings and how the
   data is fetched. Read it before you touch the code.
 - `CLAUDE.md` says what this repository is and how the factory works. Read it first. Read
   `CONTEXT.md` (the vocabulary) and `docs/adr/` (decisions) when they exist and the ticket
@@ -30,12 +30,11 @@ push, open a PR or close the issue. The runner does all three once you finish.
   can do from here. Say so in a comment on the issue rather than guessing.
 - The sandbox has no Omarchy shell and no running agent node, so the popup cannot be
   rendered and the scripts cannot reach a relay here: `relay-events` prints its offline
-  document and `relay-follow` exits with "the relay is not running". Do not claim to have
+  document. Do not claim to have
   seen the widget work. Check bash with `bash -n` and say in the PR what a human must try
   in the bar.
-- `relay-follow` publishes a kind 3 event signed by the agent identity, and `relay-lib`
-  reads `~/.config/toon/passphrase` and `~/.toon/agent-node/keystore.json`. Never run
-  `toon up`, create or fund a wallet, or publish an event to exercise them.
+- The plugin only observes: it holds no passphrase and runs no `toon` command that opens
+  the keystore. Never run `toon up`, create or fund a wallet, or publish an event.
 - Everything from a profile is untrusted input (`README.md`, "How it gets its data"): it is
   rendered as plain text, a picture loads only from an `http(s)` URL, and a copied value
   reaches `wl-copy` as an argument, never through a shell. Keep those three properties.

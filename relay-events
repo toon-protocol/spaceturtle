@@ -35,9 +35,9 @@ read_address=$(toon status --json 2>/dev/null |
   head -n1)
 [[ -n $read_address ]] || offline
 
-# Every kind: the UI decides what it can show. Then the profiles that name the
-# authors and the follow lists that count their followers.
-events=$(relay_query "{\"limit\":$limit}")
+# Notes, reposts, reactions, comments and long-form posts; then the profiles
+# that name their authors and the follow lists that count their followers.
+events=$(relay_query "{\"kinds\":[1,6,7,16,1111,30023],\"limit\":$limit}")
 profiles=$(relay_query '{"kinds":[0],"limit":200}')
 follows=$(relay_query '{"kinds":[3],"limit":500}')
 name=$(toon relay config --json 2>/dev/null | jq -r '.relay.name // ""' 2>/dev/null)
@@ -53,7 +53,7 @@ fi
 node=
 if command -v curl >/dev/null; then
   node=$(curl -fsS --max-time 5 -H 'Accept: application/nostr+json' "http://$read_address" 2>/dev/null |
-    jq -c '{ilp_address: (.ilp_address // "" | strings), connector: (.connector // "" | strings)}' 2>/dev/null)
+    jq -c '{ilp_address: (.ilp_address | strings // ""), connector: (.connector | strings // "")}' 2>/dev/null)
 fi
 
 # Who holds a subscription to this relay's live feed; null while it is not sold.

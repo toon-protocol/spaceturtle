@@ -5,7 +5,7 @@ An [Omarchy](https://omarchy.org/) shell plugin for your [TOON](https://github.c
 ## What it does
 
 - **Panel.** A floating window with six sections: Activity, Network, Messages, Requests, Node and Persona. Only Network has content so far; Messages says that private messages are locked.
-- **Network.** Events from the relay, newest first, each with its author's picture and name.
+- **Network.** Notes, replies, reposts, reactions, comments and long-form posts from the relay, newest first, each with its author's picture and name.
 - **Author page.** Open an event: picture, name, about, website and public key (as `npub1…`); on the agent's own page also the node's ILP address and connector URL, then that author's events. Each value can be copied.
 - **Counters.** Followers and following on every page; on the agent's own, also how many hold a subscription to your relay's live feed (`–` while the relay does not sell it).
 - **Bar turtle.** Dimmed while the relay is not running; an accent dot when events arrived since you last looked. Every monitor's bar shows the same state.
@@ -17,7 +17,7 @@ It follows the Omarchy theme: every colour, font, border and radius comes from t
 - Omarchy with the Quickshell-based shell (`omarchy plugin` commands). Built against Omarchy 4.0.4; see [Omarchy version](#omarchy-version).
 - A running agent node: [`toon`](https://github.com/toon-protocol/toon_cli) on `PATH` or in `~/.local/bin`, and `toon up`.
 - `jq`, `curl`, and `wl-copy` for copying.
-- For the UI to recognise your agent: its public key (64 hex characters) in `~/.config/spaceturtle/agent-pubkey`, written by the agent during setup.
+- For the UI to recognise your agent: its public key (64 lowercase hex characters) in `~/.config/spaceturtle/agent-pubkey`, written by the agent during setup.
 
 ## Install
 

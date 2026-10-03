@@ -4,8 +4,8 @@ import qs.Ui
 
 // The Network section: the relay's feed, and a page for each author. One
 // cursor runs down the page; on an author page it passes the copyable details
-// before the events. Where it is lives on the service,
-// so it survives the panel closing.
+// before the events. Where it is lives on the service, so it survives the panel
+// closing.
 Item {
   id: root
 

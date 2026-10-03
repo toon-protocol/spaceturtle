@@ -41,10 +41,10 @@ Item {
   property var profiles: ({})
   // The agent identity's own key, and pubkey -> the keys its newest follow list names.
   property string selfPubkey: ""
+  property var followMap: ({})
   // This node's ILP and connector addresses, from the relay's NIP-11 document.
   property string nodeIlp: ""
   property string nodeConnector: ""
-  property var followMap: ({})
   // How many hold a subscription to this relay's live feed; -1 while it is not sold.
   property int subscribers: -1
   property var events: []
