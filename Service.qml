@@ -57,6 +57,11 @@ Item {
   property var nodeState: null
   // The Node section's cursor.
   property int nodeCursor: 0
+  // The item an Activity entry asked the Node section to stand on, { group, label },
+  // until the section has moved its cursor there.
+  property var nodeFocus: null
+  // True while nothing is left of today's spending limit.
+  property bool urgent: false
 
   // True while the panel is open. Newest created_at seen in the panel; anything
   // newer puts the dot on the turtle.
@@ -69,6 +74,7 @@ Item {
   // Sections are numbered as their keys are, from 1; Activity is 1 and Network 2.
   readonly property int activitySection: 1
   readonly property int networkSection: 2
+  readonly property int nodeSection: 5
   property int section: activitySection
   property int cursor: 0
   // The Activity's cursor.
@@ -129,6 +135,7 @@ Item {
     root.activity = acts
     root.lastActive = typeof report.last_active === "number" ? report.last_active : 0
     root.events = list
+    root.urgent = report.urgent === true
     root.nodeState = report.state && typeof report.state === "object" ? report.state : null
     root.online = report.online === true
     root.relayName = report.name || ""
@@ -173,10 +180,16 @@ Item {
   // Asks the Network to show an event on its author's page, with the cursor on it.
   signal eventOpened(string id)
 
-  // Opens an Activity entry's event: the event it refers to if the feed holds
+  // Opens an Activity entry: a node change in the Node section; else the event it refers to if the feed holds
   // it, else the entry's own, on its author's page in the Network. The feed's
   // place is kept for Esc.
   function openActivity(entry) {
+    // A change noticed in the node: the Node section, at the item it concerns.
+    if (entry.node_change === true) {
+      nodeFocus = entry.target || null
+      section = nodeSection
+      return
+    }
     var target = (entry.refers_to ? eventById(entry.refers_to) : null) || entry
     if (profilePubkey === "") feedCursor = cursor
     profilePubkey = target.pubkey
@@ -209,7 +222,7 @@ Item {
 
   Process {
     id: fetchProc
-    command: [root.script, String(root.eventLimit)]
+    command: [root.script, String(root.eventLimit), String(root.refreshSeconds)]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {

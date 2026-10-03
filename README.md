@@ -6,11 +6,12 @@ An [Omarchy](https://omarchy.org/) shell plugin for your [TOON](https://github.c
 
 - **Panel.** A floating window with six sections: Activity, Network, Messages, Requests, Node and Persona. The panel opens on Activity. Activity, Network and Node have content so far; Messages says that private messages are locked.
 - **Activity.** What the agent identity signed, newest first, with when it was last active in words. Enter opens the event an entry refers to (or the entry itself) on its author's page in Network, with the cursor on it. Without the public key file it says the agent is not yet known.
+- **Node changes.** `toon` does not report that a channel opened or a price moved, so each refresh compares the node with the snapshot the last one saved (`~/.local/state/spaceturtle/node-snapshot.json`) and adds an entry to the Activity for each difference: a channel opened or closed, a peering added or removed, a route or a price changed, the spending limit drawn down. Each reads "noticed", with when it was noticed, never when it happened. Enter opens the Node section at the item. After a gap longer than four refresh intervals (the panel closed, the shell off) the differences are one "since you last looked" entry; the first run has none. The last 50 are kept.
 - **Network.** The rest of the relay's feed, without the agent's own events: every event of every kind, newest first, each with its author's picture and name. Notes, replies, reposts, reactions, comments, long-form posts, profiles, follow lists, NIP drafts and deletions have a built-in Renderer; any other kind shows its `alt` tag (NIP-31) if it has one, its kind number, its tags and its content, as plain text.
 - **Node.** What `toon` reports of the node, in groups you move through with the cursor: processes with restart counts, the relay's name, prices and blocklist, peerings, channels, routes, the spending limit and what is left today, subscriptions held and held to your relay, the ILP and connector addresses, and the last log lines. Enter copies a value. A group whose command failed says `unavailable`; the rest still shows. Wallet balances say `not shown: needs the passphrase`. With no agent node it says how to start one.
 - **Author page.** Open an event: picture, name, about, website and public key (as `npub1…`); on the agent's own page also the node's ILP address and connector URL, then that author's events. Each value can be copied.
 - **Counters.** Followers and following on every page; on the agent's own, also how many hold a subscription to your relay's live feed (`–` while the relay does not sell it).
-- **Bar turtle.** Dimmed while the relay is not running; an accent dot when events arrived since you last looked. Every monitor's bar shows the same state.
+- **Bar turtle.** Dimmed while the relay is not running; an accent dot when events arrived since you last looked; a larger red dot when nothing is left of today's spending limit. Every monitor's bar shows the same state.
 
 It follows the Omarchy theme: every colour, font, border and radius comes from the shell.
 
@@ -84,7 +85,7 @@ Nothing here opens the wallet's keystore, so nothing needs its passphrase. Only 
 
 A profile is untrusted input: everything from it is rendered as plain text, a picture is loaded only from an `http(s)` URL, and copied values are passed to `wl-copy` as an argument, never through a shell.
 
-`relay-events` takes `SPACETURTLE_TOON` (the `toon` command) and `SPACETURTLE_CONFIG_DIR` from the environment, which is how the tests run it against a stub.
+`relay-events` takes `SPACETURTLE_TOON` (the `toon` command), `SPACETURTLE_CONFIG_DIR`, `SPACETURTLE_STATE_DIR` and `SPACETURTLE_NOW` from the environment, which is how the tests run it against a stub.
 
 ## Tests
 

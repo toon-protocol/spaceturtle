@@ -54,12 +54,14 @@ Item {
   function partsOf(event) { return event.parts || ({}) }
 
   function verbOf(event) {
+    if (event.node_change === true) return "Node"
     var label = String(partsOf(event).label || "")
     if (label) return label.charAt(0).toUpperCase() + label.slice(1)
     return event.refers_to ? "Replied" : "Posted"
   }
 
   function bodyOf(event) {
+    if (event.node_change === true) return String(event.text || "")
     var parts = partsOf(event)
     return String(parts.title || parts.summary || parts.body || "").trim()
   }
@@ -149,7 +151,8 @@ Item {
               }
               Text {
                 textFormat: Text.PlainText
-                text: root.ago(row.modelData.created_at)
+                // A node change is when it was noticed, not when it happened.
+                text: (row.modelData.node_change === true ? "noticed " : "") + root.ago(row.modelData.created_at)
                 color: root.dim
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption
