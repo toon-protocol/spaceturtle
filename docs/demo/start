@@ -1,0 +1,36 @@
+#!/bin/bash
+# Set up the demo: serve the pictures and the relay's NIP-11 document on
+# loopback, write the Requests with times relative to now, and run
+# `relay-events` once against the node as it was, so that the panel's first
+# refresh notices what changed. Prints the environment the plugin then needs.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+root=$(cd "$here/../.." && pwd)
+port=${SPACETURTLE_DEMO_PORT:-47833}
+state=${SPACETURTLE_DEMO_STATE:-${XDG_RUNTIME_DIR:-/tmp}/spaceturtle-demo}
+now=$(date +%s)
+
+rm -rf "$state"; mkdir -p "$state/requests"
+for file in "$here"/requests/*.json; do
+  jq -c --argjson now "$now" '. + {created_at: ($now - .ago),
+    answered_at: (if .answered_ago then $now - .answered_ago else null end)} | del(.ago, .answered_ago)' \
+    "$file" > "$state/requests/$(basename "$file")"
+done
+# The Observer last looked ten minutes ago, so what came since is news.
+echo $((now - 600)) > "$state/last-looked"
+
+if ! curl -fsS --max-time 2 "http://127.0.0.1:$port/" >/dev/null 2>&1; then
+  python3 -m http.server "$port" --bind 127.0.0.1 --directory "$here/www" >/dev/null 2>&1 &
+  disown
+  sleep 1
+fi
+
+export SPACETURTLE_TOON=$here/toon SPACETURTLE_CONFIG_DIR=$here/config SPACETURTLE_STATE_DIR=$state SPACETURTLE_DEMO_PORT=$port
+SPACETURTLE_DEMO_BEFORE=1 SPACETURTLE_NOW=$((now - 20)) "$root/relay-events" 40 30 >/dev/null
+
+cat <<ENV
+export SPACETURTLE_TOON=$here/toon
+export SPACETURTLE_CONFIG_DIR=$here/config
+export SPACETURTLE_STATE_DIR=$state
+export SPACETURTLE_DEMO_PORT=$port
+ENV

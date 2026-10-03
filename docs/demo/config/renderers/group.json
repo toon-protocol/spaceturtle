@@ -1,0 +1,10 @@
+{
+  "kind": 39000,
+  "label": "group",
+  "title": {
+    "tag": "name"
+  },
+  "summary": {
+    "tag": "about"
+  }
+}

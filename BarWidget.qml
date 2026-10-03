@@ -33,6 +33,8 @@ BarWidget {
           anchors.centerIn: parent
           iconSize: Style.space(15)
           variant: root.iconVariant
+          // It paddles while the relay runs, and is still when it does not.
+          swimming: root.online
           color: root.bar ? root.bar.foreground : Color.foreground
         }
       }

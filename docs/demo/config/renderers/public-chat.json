@@ -1,0 +1,10 @@
+{
+  "kind": 42,
+  "label": "said in a chat",
+  "body": {
+    "content": true
+  },
+  "refers_to": {
+    "tag": "e"
+  }
+}

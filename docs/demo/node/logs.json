@@ -1,0 +1,10 @@
+{
+ "lines": [
+  "connector: listening on 127.0.0.1:16278",
+  "relay: accepted write, 1 unit, from g.toon.nova",
+  "relay: accepted write, 1 unit, from g.toon.jelly",
+  "connector: channel with nova-crab open, collateral 500",
+  "relay: live feed delivered 3 events to 3 subscribers",
+  "store: stored blob, 1000 units"
+ ]
+}

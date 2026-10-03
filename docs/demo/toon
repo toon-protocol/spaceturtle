@@ -1,0 +1,46 @@
+#!/bin/bash
+# A stand-in for `toon` that answers from the files beside it, so the panel can
+# be shown with a busy network and no agent node. It prints what `relay-events`
+# asks for and nothing else; see README.md in this folder.
+set -uo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+port=${SPACETURTLE_DEMO_PORT:-47833}
+now=$(date +%s)
+# `start` runs relay-events once against the node as it was, so that the next
+# run notices what changed.
+node() { if [[ -n ${SPACETURTLE_DEMO_BEFORE:-} && -r $here/node/$1-before.json ]]; then cat "$here/node/$1-before.json"; else cat "$here/node/$1.json"; fi; }
+
+case "${1:-} ${2:-}" in
+  "status --json")
+    jq -cn --arg read "127.0.0.1:$port" '{agent_node: {
+      supervisor: {running: true, restarts: 0}, connector: {running: true, restarts: 1},
+      toon_apps: [{apps: [
+        {name: "relay", running: true, read_address: $read, restarts: 0},
+        {name: "store", running: true, restarts: 2}]}]}}' ;;
+  "relay config") node config ;;
+  "relay subscriptions")
+    case "$*" in *--incoming*) node incoming ;; *) node held ;; esac ;;
+  "peer list") node peers ;;
+  "channel list") node channels ;;
+  "route list") node routes ;;
+  "limit show") node limits ;;
+  "logs --json") node logs ;;
+  "event query")
+    # toon event query ws://ADDRESS --filter FILTER --json
+    # Events written to live-events.json in the state folder while the demo runs
+    # (with a real `created_at`) arrive on the next refresh.
+    live=${SPACETURTLE_STATE_DIR:-}/live-events.json
+    [[ -r $live ]] || live=/dev/null
+    jq -c --argjson f "$5" --argjson now "$now" --arg avatars "http://127.0.0.1:$port/pictures" \
+      --slurpfile live "$live" '
+      def tagged($n): [.tags[]? | select(.[0] == $n) | .[1]];
+      {events: [(.events + ($live[0] // []))[]
+        | select(($f.kinds == null or (.kind as $k | $f.kinds | index($k) != null))
+          and ($f.authors == null or (.pubkey as $p | $f.authors | index($p) != null))
+          and ($f.ids == null or (.id as $i | $f.ids | index($i) != null))
+          and ($f["#e"] == null or (tagged("e") - (tagged("e") - $f["#e"]) | length > 0))
+          and ($f["#p"] == null or (tagged("p") - (tagged("p") - $f["#p"]) | length > 0)))
+        | . + {created_at: (.created_at // ($now - .ago)), content: (.content | gsub("AVATARS"; $avatars))} | del(.ago)]
+        | sort_by(-.created_at) | .[0:($f.limit // 500)]}' "$here/events.json" ;;
+  *) exit 1 ;;
+esac

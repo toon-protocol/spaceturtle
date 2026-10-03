@@ -1,0 +1,16 @@
+{
+ "channels": [
+  {
+   "peer": "nova-crab",
+   "direction": "outbound",
+   "status": "open",
+   "collateral": 500
+  },
+  {
+   "peer": "devnet-hub",
+   "direction": "outbound",
+   "status": "open",
+   "collateral": 2000
+  }
+ ]
+}
