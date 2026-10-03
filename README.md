@@ -25,8 +25,12 @@ It follows the Omarchy theme: every colour, font, border and radius comes from t
 ## Install
 
 ```sh
-omarchy plugin add https://github.com/toon-protocol/spaceturtle.git --enable
+git clone https://github.com/toon-protocol/spaceturtle.git ~/.local/share/spaceturtle
+omarchy plugin add ~/.local/share/spaceturtle --enable
+mkdir -p ~/.claude/skills && ln -sfn ~/.local/share/spaceturtle/skills/being-observed ~/.claude/skills/being-observed
 ```
+
+This leaves the plugin and the agent's skill in place from one clone. The skill, [`being-observed`](skills/being-observed/SKILL.md), tells the agent how to write its public key to `~/.config/spaceturtle/agent-pubkey`, read the waiting Requests at the start of a session and answer each as done or declined. Without it the agent does not know the Requests are there. Update both with `git -C ~/.local/share/spaceturtle pull`. If your agent reads skills from somewhere other than `~/.claude/skills`, link the folder there instead.
 
 Move the turtle with `omarchy bar move toon.spaceturtle --section right`, or drag it in the bar.
 
@@ -93,7 +97,7 @@ A Request is one JSON file in `~/.local/state/spaceturtle/requests/`, written by
 
 ## Tests
 
-`tests/run` runs `relay-events`, `mark-seen` and `request` against a stub `toon` and `curl` in a temporary home. It needs only bash and `jq`, and is what the `gate` job of `.github/workflows/ci.yml` runs.
+`tests/run` runs `relay-events`, `mark-seen` and `request` (and the answers the `being-observed` skill describes) against a stub `toon` and `curl` in a temporary home. It needs only bash and `jq`, and is what the `gate` job of `.github/workflows/ci.yml` runs.
 
 ## Files
 
@@ -107,6 +111,7 @@ A Request is one JSON file in `~/.local/state/spaceturtle/requests/`, written by
 | `Avatar.qml`, `TurtleIcon.qml` | Profile picture and the icon |
 | `mark-seen` | Records that you looked (opening the panel runs it), in `~/.local/state/spaceturtle/last-looked` |
 | `relay-events` | Prints the agent's activity, the relay's other events, each event with its resolved parts (label, title, summary, body, links, ref), profiles, follow lists, node addresses, the node's state and the Requests as one JSON document, with its `attention` state (`none`, `news`, `urgent`) |
+| `skills/being-observed/SKILL.md` | The agent's skill: the public key file, reading the Requests, answering them |
 | `request` | Writes a Request into the queue, or withdraws a waiting one |
 | `tests/run` | The tests of `relay-events`, `mark-seen` and `request` |
 
