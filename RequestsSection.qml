@@ -31,8 +31,6 @@ Item {
     return waiting + " Your agent answers them in its next session." + when
   }
 
-  function focusInput() { input.forceActiveFocus() }
-
   function submit() {
     if (input.text.trim() === "") return
     service.submitRequest(input.text)
@@ -127,6 +125,8 @@ Item {
       radius: Math.min(4, Style.cornerRadius)
       border.width: 1
       border.color: input.activeFocus ? Color.accent : root.dim
+      // Whatever the text box does not use stops here, so the panel never sees it.
+      Keys.onPressed: function(event) { event.accepted = true }
 
       TextInput {
         id: input

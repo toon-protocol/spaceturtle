@@ -46,7 +46,7 @@ read_requests() {
          subject: (.subject | if type == "object" then . else {} end),
          answered_at: (.answered_at | numbers // null),
          result: (.result | if type == "object" then . else null end),
-         reason: (.reason | strings // null)}' "$file" 2>/dev/null
+         reason: (.reason | strings // null)}' "$file" 2>/dev/null || true
   done | jq -sc 'sort_by(-.created_at)' 2>/dev/null || echo '[]'
 }
 
@@ -61,9 +61,24 @@ request_activity() {
 
 requests=$(read_requests)
 
+# The agent identity's public key, from a file the agent writes during setup.
+self=
+if [[ -r $config_dir/agent-pubkey ]]; then
+  read -r self < "$config_dir/agent-pubkey" || true
+  [[ $self =~ ^[0-9a-f]{64}$ ]] || self=
+fi
+
+# Without the relay, the Activity is what the agent answered, which is local.
 offline() {
+  command -v jq >/dev/null || {
+    printf '{"online":false,"name":"","self":"","node":{"ilp_address":"","connector":""},"subscribers":null,"profiles":[],"follows":[],"activity":[],"last_active":null,"events":[],"requests":[]}\n'
+    exit 0
+  }
   jq -cn --argjson requests "${requests:-[]}" \
-    '{online:false,name:"",self:"",node:{ilp_address:"",connector:""},subscribers:null,profiles:[],follows:[],activity:[],last_active:null,events:[],requests:$requests}'
+    --argjson answered "$(request_activity "$self" "${requests:-[]}")" \
+    '($answered | sort_by(-.created_at)) as $activity
+    | {online:false,name:"",self:"",node:{ilp_address:"",connector:""},subscribers:null,profiles:[],follows:[],
+       activity:$activity,last_active:($activity[0].created_at? // null),events:[],requests:$requests}'
   exit 0
 }
 
@@ -86,13 +101,6 @@ events=$(relay_query "{\"kinds\":$kinds,\"limit\":$limit}")
 profiles=$(relay_query '{"kinds":[0],"limit":200}')
 follows=$(relay_query '{"kinds":[3],"limit":500}')
 name=$(toon relay config --json 2>/dev/null | jq -r '.relay.name // ""' 2>/dev/null)
-
-# The agent identity's public key, from a file the agent writes during setup.
-self=
-if [[ -r $config_dir/agent-pubkey ]]; then
-  read -r self < "$config_dir/agent-pubkey" || true
-  [[ $self =~ ^[0-9a-f]{64}$ ]] || self=
-fi
 
 # What the agent itself signed, asked for by author so a busy network cannot
 # push it out of the feed's limit.

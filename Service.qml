@@ -66,7 +66,7 @@ Item {
   readonly property bool hasUnseen: loaded && newestAt > seenAt
 
   // Where the panel was, kept here because the panel is unloaded when it closes.
-  // Sections are numbered as their keys are, from 1; Activity is 1 and Network 2.
+  // Sections are numbered as their keys are, from 1; Activity is 1, Network 2 and Requests 4.
   readonly property int activitySection: 1
   readonly property int networkSection: 2
   readonly property int requestsSection: 4
@@ -83,8 +83,11 @@ Item {
 
   onLookingChanged: if (looking) seenAt = newestAt
 
+  // Asked for while a fetch runs, another follows it, so it sees what changed since.
+  property bool refreshAgain: false
   function refresh() {
     if (!fetchProc.running) fetchProc.running = true
+    else refreshAgain = true
   }
 
   function applyReport(report) {
@@ -255,6 +258,7 @@ Item {
   Process {
     id: fetchProc
     command: [root.script, String(root.eventLimit)]
+    onExited: if (root.refreshAgain) { root.refreshAgain = false; Qt.callLater(root.refresh) }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {

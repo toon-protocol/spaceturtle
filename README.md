@@ -106,7 +106,7 @@ A Request is one JSON file in `~/.local/state/spaceturtle/requests/`, written by
 | `Avatar.qml`, `TurtleIcon.qml` | Profile picture and the icon |
 | `relay-events` | Prints the agent's activity, the relay's other events, profiles, follow lists and node addresses and the Requests as one JSON document |
 | `request` | Writes a Request into the queue, or withdraws a waiting one |
-| `tests/run` | The tests of `relay-events` |
+| `tests/run` | The tests of `relay-events` and `request` |
 
 Saving a file in an installed copy reloads the plugin. If a change does not show, run `omarchy restart shell`.
 

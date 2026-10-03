@@ -51,7 +51,8 @@ running_relay() {
 
 check() { # name, jq expression that must be true of $out
   count=$((count + 1))
-  if jq -e "$2" <<<"$out" >/dev/null 2>&1; then echo "ok   $1"
+  # jq 1.6 -e succeeds on empty input, so an empty document must fail here.
+  if [[ -n $out ]] && jq -e "$2" <<<"$out" >/dev/null 2>&1; then echo "ok   $1"
   else echo "FAIL $1"; echo "     expression: $2"; echo "     document:   $out"; fails=$((fails + 1)); fi
 }
 
@@ -193,11 +194,13 @@ echo '[1,2]' > "$queue/5-ee.json"
 echo '{"id":"m","created_at":"soon","kind":"free","text":"t","state":"waiting"}' > "$queue/6-ff.json"
 echo '{"id":"m","created_at":1,"kind":"free","text":"t","state":"whatever"}' > "$queue/7-gg.json"
 : > "$queue/8-hh.json"
+echo '{"bad' > "$queue/9-ii.json" # last in the queue, so it is the last file read
 out=$("$root/relay-events")
 check "requests: malformed files are skipped and the document is whole" '.online == true and [.requests[].id] == ["3-cc","2-bb","1-aa"] and (.activity | length) == 3'
 echo '{"agent_node":{"toon_apps":[{"apps":[{"name":"relay","running":false}]}]}}' > "$STUB_DIR/status"
 out=$("$root/relay-events")
-check "requests: still listed while the relay is not running" '.online == false and (.requests | length) == 3 and .activity == []'
+check "requests: still listed while the relay is not running" '.online == false and (.requests | length) == 3'
+check "requests: without the relay, the answers are the Activity and the last activity" '[.activity[].id] == ["request:2-bb","request:3-cc"] and .last_active == 150'
 
 echo; echo "$count checks, $fails failed"
 [[ $fails -eq 0 ]]

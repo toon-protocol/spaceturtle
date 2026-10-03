@@ -55,9 +55,8 @@ Item {
   function showSection(number) {
     if (!service || number < 1 || number > sections.length) return
     service.section = number
-    // The keys are the panel's again, unless this is the section with a text box.
+    // The keys are the panel's again; in Requests, i gives them to the text box.
     keyCatcher.forceActiveFocus()
-    if (number === requestsSection) Qt.callLater(function() { if (requests.item) requests.item.focusInput() })
   }
 
   // Esc: back within the section, and out of the panel from its top level.
