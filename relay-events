@@ -33,16 +33,52 @@ relay_query() {
   toon event query "ws://$read_address" --filter "$1" --json 2>/dev/null | jq -c '.events // []' 2>/dev/null || echo '[]'
 }
 
+# Renderers: resolve an event into its parts, {label, title, summary, body,
+# links, ref}. A built-in Renderer handles a known kind and the fallback every
+# other; the panel lays out parts and never interprets a kind. The part names
+# are the ones an agent-written description (ADR 0002) will use.
+#   label    what the event did, shown by its author ("" for a plain note)
+#   title    one headline line, or ""
+#   summary  a short line under the title, or ""
+#   body     the text
+#   links    http(s) addresses only
+#   ref      the id of the event this one refers to, or ""
+renderers=$(cat <<'JQ'
+def tags: (.tags | arrays // [])[] | arrays;
+def tag($n): [tags | select(.[0] == $n and length > 1) | .[1] | strings] | first // "";
+def text: (.content | strings) // "" | gsub("^\\s+|\\s+$"; "");
+def links: [tags | select((.[0] == "r" or .[0] == "url" or .[0] == "web") and length > 1) | .[1] | strings | select(test("^https?://"))] | unique;
+def base: {label: "", title: "", summary: "", body: text, links: links, ref: tag("e")};
+def meta: (.content | strings | try fromjson catch null) | if type == "object" then . else {} end;
+def fallback:
+  base + {label: ("kind " + (.kind | tostring)),
+    title: tag("alt"),
+    summary: ([tags | map(strings) | join(" ")] | join(", "))};
+def parts:
+  if .kind == 0 then (meta) as $m | base + {label: "updated profile", title: ($m.name | strings // ""), summary: ($m.about | strings // ""), body: "", ref: ""}
+  elif .kind == 1 then base + {label: (if tag("e") != "" then "replied" else "" end)}
+  elif .kind == 3 then base + {label: "updated follows", body: ([tags | select(.[0] == "p")] | length | tostring + " followed"), ref: ""}
+  elif .kind == 5 then base + {label: "deleted", summary: ([tags | select(.[0] == "e" or .[0] == "a") | .[1] | strings] | length | tostring + " deleted")}
+  elif .kind == 6 or .kind == 16 then base + {label: "reposted", body: ""}
+  elif .kind == 7 then base + {label: "reacted", body: (text | if . == "+" or . == "" then "󰋑" elif . == "-" then "󰋕" else . end)}
+  elif .kind == 1111 then base + {label: "commented"}
+  elif .kind == 30023 then base + {label: "published", title: tag("title"), summary: tag("summary")}
+  elif .kind == 30817 then base + {label: "drafted", title: (tag("title") | if . == "" then tag("d") else . end), summary: tag("summary")}
+  else fallback end;
+JQ
+)
+
 command -v "$toon_cmd" >/dev/null && command -v jq >/dev/null || offline
 read_address=$(toon status --json 2>/dev/null |
   jq -r '.agent_node.toon_apps[]?.apps[]? | select(.name == "relay" and .running) | .read_address // empty' 2>/dev/null |
   head -n1)
 [[ -n $read_address ]] || offline
 
-# Notes, reposts, reactions, comments and long-form posts; then the profiles
-# that name their authors and the follow lists that count their followers.
-kinds='[1,6,7,16,1111,30023]'
-events=$(relay_query "{\"kinds\":$kinds,\"limit\":$limit}")
+# Every event, whatever its kind, each with the parts a Renderer resolves for
+# it; then the profiles that name their authors and the follow lists that count
+# their followers.
+with_parts() { jq -c "$renderers"' map(. + {parts: parts})' 2>/dev/null || echo '[]'; }
+events=$(relay_query "{\"limit\":$limit}" | with_parts)
 profiles=$(relay_query '{"kinds":[0],"limit":200}')
 follows=$(relay_query '{"kinds":[3],"limit":500}')
 name=$(toon relay config --json 2>/dev/null | jq -r '.relay.name // ""' 2>/dev/null)
@@ -57,7 +93,7 @@ fi
 # What the agent itself signed, asked for by author so a busy network cannot
 # push it out of the feed's limit.
 agent_events='[]'
-[[ -n $self ]] && agent_events=$(relay_query "{\"authors\":[\"$self\"],\"kinds\":$kinds,\"limit\":$limit}")
+[[ -n $self ]] && agent_events=$(relay_query "{\"authors\":[\"$self\"],\"limit\":$limit}" | with_parts)
 
 # The node's ILP address and connector address, from the relay's NIP-11 document.
 node=

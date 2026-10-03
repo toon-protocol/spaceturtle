@@ -169,33 +169,17 @@ Item {
     return "npub1" + data.map(function(d) { return charset[d] }).join("")
   }
 
-  function tagValue(event, name) {
-    var tags = event.tags || []
-    for (var i = 0; i < tags.length; i++)
-      if (tags[i][0] === name && tags[i].length > 1) return String(tags[i][1])
-    return ""
-  }
+  // An event's parts are resolved by relay-events; nothing here looks at a kind.
+  function partsOf(event) { return event.parts || ({}) }
 
   // What the event did, shown next to the author.
-  function verbOf(event) {
-    switch (event.kind) {
-    case 6:
-    case 16: return "reposted"
-    case 7: return "reacted"
-    case 1111: return "commented"
-    case 30023: return "published"
-    default: return tagValue(event, "e") !== "" ? "replied" : ""
-    }
-  }
+  function verbOf(event) { return String(partsOf(event).label || "") }
 
   function bodyOf(event) {
-    switch (event.kind) {
-    case 6:
-    case 16: return tagValue(event, "e").slice(0, 8)
-    case 7: return event.content === "+" || event.content === "" ? "󰋑" : (event.content === "-" ? "󰋕" : event.content)
-    case 30023: return tagValue(event, "title") || tagValue(event, "summary") || String(event.content || "")
-    default: return String(event.content || "").trim()
-    }
+    var parts = partsOf(event)
+    var lines = [parts.title, parts.summary, parts.body].filter(function(line) { return line })
+    if (lines.length === 0 && parts.ref) lines.push(String(parts.ref).slice(0, 8))
+    return lines.join("\n")
   }
 
   function ago(seconds) {
