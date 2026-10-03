@@ -2,7 +2,7 @@
 # Print what can be observed of this agent node as one JSON document:
 # {"online", "name", "self", "node", "subscribers", "state", "profiles",
 # "follows", "persona", "activity", "last_active", "events", "context", "requests",
-# "urgent", "attention", "looked_at"}. "activity" is what the agent identity signed and
+# "messages", "urgent", "attention", "looked_at"}. "activity" is what the agent identity signed and
 # the Requests it answered, newest first; an answered Request is an entry with a
 # "request" field and the id "request:<id>". "last_active" is the newest
 # created_at of the entries, or null; "events" is the rest of the feed, without
@@ -16,14 +16,23 @@
 # null when the public key is not known or the agent has published no profile
 # with a name: the Install has no Persona yet.
 # "requests" is every Request in the queue, newest first (a file that is not a
-# valid Request is skipped). "attention" is "none", "news" (an Activity entry,
-# or an event tagging the agent, is newer than the last time the Observer
-# looked) or "urgent" (the node is not running, or nothing is left of today's
+# valid Request is skipped). "messages" is the agent identity's private messages
+# as {readable, reason, supervisor, conversations}: the conversations newest
+# first, each {id, participants (without the agent), subject, last_at, messages},
+# its messages oldest first, each {id, from, sent, created_at, body, file,
+# reply_to}. They are read whether or not the relay runs. While they cannot be
+# read, "readable" is false and "reason" says why: "unsupported" (this `toon`
+# has no `message list`), "agent_key_not_kept" (the agent node does not keep the
+# agent identity's secret yet) or "unavailable". "supervisor" is whether it is
+# running, and so opening what arrives. "attention" is "none", "news" (an
+# Activity entry, an event tagging the agent, or a private message to it, is
+# newer than the last time the Observer looked) or "urgent" (the node is not running, or nothing is left of today's
 # spending limit); "looked_at" is when the Observer last looked, or null.
 # Read-only: nothing here opens the keystore, spends, changes state or
 # publishes. Only free `toon` commands are run: status, relay config, peer list,
-# channel list, route list, limit show, relay subscriptions and logs. Wallet
-# balances are never read (they need the passphrase, ADR 0001).
+# channel list, route list, limit show, relay subscriptions, logs and message
+# list, which prints what the supervisor already opened. Wallet balances are
+# never read (they need the passphrase, ADR 0001).
 #
 # "state" is the node as `toon` reports it, or null when there is no agent node.
 # Each group in it (status, relay, peers, channels, routes, limits,
@@ -122,16 +131,16 @@ fi
 # Without the relay, the Activity is what the agent answered, which is local.
 offline() {
   command -v jq >/dev/null || {
-    printf '{"online":false,"name":"","self":"","node":{"ilp_address":"","connector":""},"subscribers":null,"profiles":[],"follows":[],"persona":null,"state":null,"urgent":false,"activity":[],"last_active":null,"events":[],"context":[],"requests":[],"attention":"urgent","looked_at":null}\n'
+    printf '{"online":false,"name":"","self":"","node":{"ilp_address":"","connector":""},"subscribers":null,"profiles":[],"follows":[],"persona":null,"state":null,"urgent":false,"activity":[],"last_active":null,"events":[],"context":[],"requests":[],"messages":{"readable":false,"reason":"unavailable","supervisor":false,"conversations":[]},"attention":"urgent","looked_at":null}\n'
     exit 0
   }
-  jq -cn --argjson requests "${requests:-[]}" \
+  jq -cn --argjson requests "${requests:-[]}" --argjson messages "${messages:-$no_messages}" \
     --argjson state "${state:-null}" --argjson looked "${looked_at:-null}" \
     --argjson answered "$(request_activity "$self" "${requests:-[]}")" \
     --argjson changes "$changes" --argjson urgent "$urgent" \
     '($answered | sort_by(-.created_at)) as $activity
     | {online:false,name:"",self:"",node:{ilp_address:"",connector:""},subscribers:null,state:$state,urgent:$urgent,profiles:[],follows:[],persona:null,
-       activity:(($activity + $changes) | sort_by(-.created_at)),last_active:($activity[0].created_at? // null),events:[],context:[],requests:$requests,
+       activity:(($activity + $changes) | sort_by(-.created_at)),last_active:($activity[0].created_at? // null),events:[],context:[],requests:$requests,messages:$messages,
        attention:"urgent",looked_at:$looked}'
   exit 0
 }
@@ -146,6 +155,45 @@ toon_json() {
   # Several JSON values, one per line, are read as one array of them.
   out=$(jq -cs 'if length == 0 then null elif length == 1 then .[0] else . end | if type == "object" and has("error") then null else . end' <<<"$out" 2>/dev/null)
   echo "${out:-null}"
+}
+
+# The agent identity's private messages, grouped into conversations. `toon
+# message list` prints what the supervisor opened and kept, so it needs no
+# passphrase. A `toon` without the command answers with exit code 2.
+no_messages='{"readable":false,"reason":"unavailable","supervisor":false,"conversations":[]}'
+read_messages() {
+  local out code
+  out=$(if command -v timeout >/dev/null; then timeout 10 "$toon_cmd" message list --limit 200 --json; else "$toon_cmd" message list --limit 200 --json; fi 2>/dev/null)
+  code=$?
+  out=$(jq -cs --arg self "$self" --argjson code "$code" '
+    def locked($reason): {readable: false, reason: $reason, supervisor: false, conversations: []};
+    def tagged($n): [(.tags | arrays // [])[] | arrays | select(.[0] == $n and length > 1) | .[1] | strings];
+    # The code of an error document, or null.
+    def failed: if type == "object" and (.error | type) == "object" then .error.code else null end;
+    (if length == 1 then .[0] else null end)
+    | if $code == 2 or failed == "usage" then locked("unsupported")
+      elif failed == "agent_key_not_kept" then locked("agent_key_not_kept")
+      elif type != "object" or (.messages | type) != "array" then locked("unavailable")
+      else
+        [.messages[] | select(type == "object" and (.id | type) == "string"
+          and (.from | type) == "string" and (.created_at | type) == "number")] as $all
+        # Who the agent is: the public key file, else the sender of what it sent.
+        | (if $self != "" then $self else ([$all[] | select(.sent == true) | .from] | first // "") end) as $me
+        | {readable: true, reason: "", supervisor: (.supervisor == "running"),
+           conversations: ($all | group_by(.conversation | strings // "") | map(
+             sort_by(.created_at, .id) as $c
+             | ([$c[] | (.participants | arrays // [])[] | strings] | unique) as $keys
+             | {id: ($c[0].conversation | strings // ""),
+                # A conversation of the agent alone is a note to itself.
+                participants: (($keys - [$me]) | if length == 0 then $keys else . end),
+                subject: ([$c[] | tagged("subject")[]] | last // ""),
+                last_at: $c[-1].created_at,
+                messages: [$c[] | {id, from, sent: (.sent == true), created_at,
+                  body: (.content | strings // ""), file: (.kind == 15),
+                  reply_to: (tagged("e") | first // null)}]})
+             | sort_by(-.last_at))}
+      end' <<<"$out" 2>/dev/null)
+  echo "${out:-$no_messages}"
 }
 
 relay_query() {
@@ -229,6 +277,7 @@ JQ
 )
 
 command -v "$toon_cmd" >/dev/null && command -v jq >/dev/null || offline
+messages=$(read_messages)
 status=$(toon_json status --json)
 relay_config=$(toon_json relay config --json)
 
@@ -422,7 +471,7 @@ jq -cn --arg name "${name:-}" --arg self "$self" \
   --argjson agent "${agent_events:-[]}" --argjson context "${context:-[]}" \
   --argjson asked "${asked:-[]}" --argjson looked "${looked_at:-null}" \
   --argjson mentioned "${mention_events:-[]}" \
-  --argjson requests "${requests:-[]}" \
+  --argjson requests "${requests:-[]}" --argjson messages "${messages:-$no_messages}" \
   --argjson answered "$(request_activity "$self" "${requests:-[]}")" \
   --argjson changes "$changes" --argjson urgent "$urgent" \
   '# The "e" tag marked "reply" (NIP-10), else the last one.
@@ -455,7 +504,7 @@ jq -cn --arg name "${name:-}" --arg self "$self" \
     activity: (($activity + $changes) | sort_by(-.created_at)), last_active: ($activity[0].created_at? // null),
     urgent: $urgent,
     node: ($node // {ilp_address: "", connector: ""}),
-    requests: $requests, subscribers: $subscribers, state: $state, profiles: $profiles, follows: ([$own_follows[], $follows[]] | unique_by(.id)),
+    requests: $requests, messages: $messages, subscribers: $subscribers, state: $state, profiles: $profiles, follows: ([$own_follows[], $follows[]] | unique_by(.id)),
     events: ($events | map(select(.pubkey != $self)) | mark),
     context: ($context | map(select(.id as $i | ($events | map(.id) | index($i)) == null and ($agent | map(.id) | index($i)) == null)) | mark),
     looked_at: $looked,
@@ -464,4 +513,6 @@ jq -cn --arg name "${name:-}" --arg self "$self" \
     attention: (if $urgent then "urgent"
       elif $looked == null then "none"
       elif any(($activity + $changes + $mentions)[]; .created_at > $looked) then "news"
+      # A private message to the agent is news too; one it sent is not.
+      elif any($messages.conversations[].messages[]; .sent == false and .created_at > $looked) then "news"
       else "none" end)}'

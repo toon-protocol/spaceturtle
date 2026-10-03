@@ -34,9 +34,10 @@ Item {
   // The section that has a cursor to move, if the one showing does.
   readonly property var cursorSection: section === activitySection ? activity.item
     : (section === networkSection ? network.item
+    : (section === messagesSection ? messages.item
     : (section === requestsSection ? requests.item
     : (section === nodeSection ? node.item
-    : (section === personaSection ? persona.item : null))))
+    : (section === personaSection ? persona.item : null)))))
 
   function open(payloadJson) {
     closingFromHost = false
@@ -194,6 +195,14 @@ Item {
           }
 
           Loader {
+            id: messages
+            anchors.fill: parent
+            active: root.service !== null
+            visible: root.section === root.messagesSection
+            sourceComponent: MessagesSection { service: root.service }
+          }
+
+          Loader {
             id: requests
             anchors.fill: parent
             active: root.service !== null
@@ -232,16 +241,15 @@ Item {
             sourceComponent: NodeSection { service: root.service }
           }
 
-          // The sections that are still to be built; and a panel with no service.
+          // A panel with no service.
           Text {
-            visible: (root.section !== root.activitySection && root.section !== root.networkSection && root.section !== root.requestsSection && root.section !== root.nodeSection && root.section !== root.personaSection) || !root.service
+            visible: !root.service
             anchors.centerIn: parent
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.Wrap
             textFormat: Text.PlainText
-            text: !root.service ? "The service is not running. Run: omarchy restart shell"
-              : (root.section === root.messagesSection ? "Private messages are locked." : "Nothing here yet.")
+            text: "The service is not running. Run: omarchy restart shell"
             color: root.dim
             font.family: Style.font.family
             font.pixelSize: Style.font.bodySmall

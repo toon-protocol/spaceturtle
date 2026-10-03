@@ -37,6 +37,9 @@ case "$1 $2" in
     esac ;;
   "peer list"|"channel list"|"route list"|"limit show"|"logs --json")
     f="$STUB_DIR/$1$2"; [[ -r $f ]] && cat "$f" || exit 1 ;;
+  "message list")
+    # A toon without the command answers 2; $STUB_DIR/messages is what a newer one prints.
+    [[ -r $STUB_DIR/messages ]] && cat "$STUB_DIR/messages" || exit 2 ;;
   "event query")
     case "$*" in
       *'"ids"'*) if [[ -r $STUB_DIR/pool ]]; then jq -c --argjson f "$5" '{events: [.events[] | select(.id as $i | $f.ids | index($i))]}' "$STUB_DIR/pool"
@@ -607,6 +610,64 @@ check "skill: an answer leaves a done Request and a withdrawn one alone" ".reque
 count=$((count + 1))
 if [[ ! -e $queue/$c.json && $(ls -A "$queue" | wc -l) -eq 2 ]]; then echo "ok   skill: a withdrawn Request stays withdrawn"
 else echo "FAIL skill: a withdrawn Request came back"; fails=$((fails + 1)); fi
+
+# --- private messages
+new_env; install_toon; running_relay
+echo '{"events":[]}' > "$STUB_DIR/events"; echo '{"events":[]}' > "$STUB_DIR/profiles"; echo '{"events":[]}' > "$STUB_DIR/follows"
+echo "$pk" > "$SPACETURTLE_CONFIG_DIR/agent-pubkey"
+third=$(printf 'c%.0s' {1..64})
+out=$("$root/relay-events")
+check "messages: a toon without the command leaves them locked, and the rest whole" '.messages == {readable: false, reason: "unsupported", supervisor: false, conversations: []} and .online == true'
+echo '{"error":{"code":"agent_key_not_kept","message":"not kept"}}' > "$STUB_DIR/messages"
+out=$("$root/relay-events")
+check "messages: without the kept secret they are locked, with the reason" '.messages.readable == false and .messages.reason == "agent_key_not_kept"'
+echo '{"error":{"code":"io","message":"x"}}' > "$STUB_DIR/messages"
+out=$("$root/relay-events")
+check "messages: another error is unavailable" '.messages.readable == false and .messages.reason == "unavailable"'
+echo 'not json' > "$STUB_DIR/messages"
+out=$("$root/relay-events")
+check "messages: an answer that is not JSON is unavailable" '.messages.reason == "unavailable" and .online == true'
+echo '{"messages":[],"supervisor":"running"}' > "$STUB_DIR/messages"
+out=$("$root/relay-events")
+check "messages: none stored" '.messages == {readable: true, reason: "", supervisor: true, conversations: []}'
+msg() { # id, conversation, from, sent, created_at, kind, content, tags, participants
+  echo "{\"id\":\"$1\",\"conversation\":\"$2\",\"participants\":$9,\"sent\":$4,\"from\":\"$3\",\"created_at\":$5,\"kind\":$6,\"content\":\"$7\",\"tags\":$8}"
+}
+two="[\"$pk\",\"$other\"]"; three="[\"$pk\",\"$other\",\"$third\"]"
+{
+  echo '{"supervisor":"not_running","messages":['
+  msg m1 c1 "$other" false 10 14 'hello' "[[\"p\",\"$pk\"],[\"subject\",\"Reef\"]]" "$two"; echo ,
+  msg m2 c1 "$pk" true 20 14 'hi back' "[[\"p\",\"$other\"],[\"e\",\"m1\",\"\",\"reply\"]]" "$two"; echo ,
+  msg m3 c2 "$third" false 30 15 'https://a.example/f.bin' "[[\"p\",\"$pk\"],[\"p\",\"$other\"]]" "$three"; echo ,
+  echo '"not a message",{"id":"m4"}'
+  echo ']}'
+} > "$STUB_DIR/messages"
+out=$("$root/relay-events")
+check "messages: grouped into conversations, the newest first" '.messages.readable == true and [.messages.conversations[].id] == ["c2","c1"]'
+check "messages: a conversation names the others, not the agent" '.messages.conversations[1].participants == ["'"$other"'"] and (.messages.conversations[0].participants | sort) == ["'"$other"'","'"$third"'"]'
+check "messages: oldest first within a conversation, each with who sent it" '[.messages.conversations[1].messages[] | [.id, .sent, .body]] == [["m1",false,"hello"],["m2",true,"hi back"]]'
+check "messages: the subject, the time of the last and what a message replies to" '.messages.conversations[1] | .subject == "Reef" and .last_at == 20 and .messages[1].reply_to == "m1" and .messages[0].reply_to == null'
+check "messages: a file message is marked" '.messages.conversations[0].messages[0] | .file == true and .body == "https://a.example/f.bin"'
+check "messages: an entry that is not a message is skipped" '[.messages.conversations[].messages[].id] | sort == ["m1","m2","m3"]'
+check "messages: a stopped supervisor is reported" '.messages.supervisor == false'
+grep -q "message list" "$STUB_DIR/calls" && ! grep -q "message send" "$STUB_DIR/calls" || { echo "FAIL messages: only message list is run"; fails=$((fails + 1)); }
+rm "$SPACETURTLE_CONFIG_DIR/agent-pubkey"
+out=$("$root/relay-events")
+check "messages: without the public key file the agent is who sent" '.messages.conversations[1].participants == ["'"$other"'"]'
+echo "$pk" > "$SPACETURTLE_CONFIG_DIR/agent-pubkey"
+mkdir -p "$SPACETURTLE_STATE_DIR"; echo 25 > "$SPACETURTLE_STATE_DIR/last-looked"
+out=$("$root/relay-events")
+check "messages: one received since the Observer looked is news" '.attention == "news"'
+echo 15 > "$SPACETURTLE_STATE_DIR/last-looked"
+{ echo '{"supervisor":"running","messages":['; msg m1 c1 "$other" false 10 14 'hello' '[]' "$two"; echo ,; msg m2 c1 "$pk" true 20 14 'hi back' '[]' "$two"; echo ']}'; } > "$STUB_DIR/messages"
+out=$("$root/relay-events")
+check "messages: one the agent sent is not news" '.attention == "none"'
+echo '{"agent_node":{"toon_apps":[{"apps":[{"name":"relay","running":false}]}]}}' > "$STUB_DIR/status"
+out=$("$root/relay-events")
+check "messages: read while the relay is not running" '.online == false and [.messages.conversations[].id] == ["c1"]'
+new_env
+out=$(SPACETURTLE_TOON=$tmp/bin/missing "$root/relay-events")
+check "messages: no toon, none and not readable" '.messages == {readable: false, reason: "unavailable", supervisor: false, conversations: []}'
 
 # --- persona Requests
 new_env; queue=$SPACETURTLE_STATE_DIR/requests

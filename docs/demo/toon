@@ -25,6 +25,9 @@ case "${1:-} ${2:-}" in
   "route list") node routes ;;
   "limit show") node limits ;;
   "logs --json") node logs ;;
+  # What the supervisor opened: the same private messages that Network shows sealed.
+  "message list")
+    jq -c --argjson now "$now" '.messages |= map(. + {created_at: ($now - .ago)} | del(.ago))' "$here/node/messages.json" ;;
   "event query")
     # toon event query ws://ADDRESS --filter FILTER --json
     # Events written to live-events.json in the state folder while the demo runs

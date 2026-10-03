@@ -1,0 +1,193 @@
+{
+ "supervisor": "running",
+ "messages": [
+  {
+   "id": "0000000000000000000000000000000000000000000000000000000000000001",
+   "conversation": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+   "participants": [
+    "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727",
+    "7238b1e77de6467eed5027f4475f6cb0bf8becb208e13c5b7316db6ee025be34"
+   ],
+   "sent": false,
+   "from": "7238b1e77de6467eed5027f4475f6cb0bf8becb208e13c5b7316db6ee025be34",
+   "ago": 5400,
+   "kind": 14,
+   "content": "Alice, are you carrying packets for the reef group tonight?",
+   "tags": [
+    [
+     "p",
+     "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727"
+    ]
+   ]
+  },
+  {
+   "id": "0000000000000000000000000000000000000000000000000000000000000002",
+   "conversation": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+   "participants": [
+    "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727",
+    "7238b1e77de6467eed5027f4475f6cb0bf8becb208e13c5b7316db6ee025be34"
+   ],
+   "sent": true,
+   "from": "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727",
+   "ago": 5100,
+   "kind": 14,
+   "content": "Yes. My relay takes writes at 1 a packet, and the route to you is open.",
+   "tags": [
+    [
+     "p",
+     "7238b1e77de6467eed5027f4475f6cb0bf8becb208e13c5b7316db6ee025be34"
+    ]
+   ]
+  },
+  {
+   "id": "0000000000000000000000000000000000000000000000000000000000000003",
+   "conversation": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+   "participants": [
+    "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727",
+    "7238b1e77de6467eed5027f4475f6cb0bf8becb208e13c5b7316db6ee025be34"
+   ],
+   "sent": false,
+   "from": "7238b1e77de6467eed5027f4475f6cb0bf8becb208e13c5b7316db6ee025be34",
+   "ago": 4800,
+   "kind": 14,
+   "content": "Good. I will send the draft once the others have read it.",
+   "tags": [
+    [
+     "p",
+     "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727"
+    ]
+   ]
+  },
+  {
+   "id": "0000000000000000000000000000000000000000000000000000000000000004",
+   "conversation": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+   "participants": [
+    "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727",
+    "7238b1e77de6467eed5027f4475f6cb0bf8becb208e13c5b7316db6ee025be34"
+   ],
+   "sent": true,
+   "from": "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727",
+   "ago": 4500,
+   "kind": 14,
+   "content": "Send it when it is ready. I will comment before I back it.",
+   "tags": [
+    [
+     "p",
+     "7238b1e77de6467eed5027f4475f6cb0bf8becb208e13c5b7316db6ee025be34"
+    ]
+   ]
+  },
+  {
+   "id": "0000000000000000000000000000000000000000000000000000000000000005",
+   "conversation": "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2",
+   "participants": [
+    "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727",
+    "8a4444376d4b2a9e674f56375ebf35f2b823fe2c997b97c72cbc66d6a240cd78",
+    "dfd84b5369e056d82d27f0f2b44c377331e154a1ad9647c7ac0ac63e153522c2"
+   ],
+   "sent": false,
+   "from": "8a4444376d4b2a9e674f56375ebf35f2b823fe2c997b97c72cbc66d6a240cd78",
+   "ago": 900,
+   "kind": 14,
+   "content": "Snacks are sorted. Who brings the map?",
+   "tags": [
+    [
+     "p",
+     "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727"
+    ],
+    [
+     "p",
+     "dfd84b5369e056d82d27f0f2b44c377331e154a1ad9647c7ac0ac63e153522c2"
+    ],
+    [
+     "subject",
+     "Reef meetup"
+    ]
+   ]
+  },
+  {
+   "id": "0000000000000000000000000000000000000000000000000000000000000006",
+   "conversation": "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2",
+   "participants": [
+    "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727",
+    "8a4444376d4b2a9e674f56375ebf35f2b823fe2c997b97c72cbc66d6a240cd78",
+    "dfd84b5369e056d82d27f0f2b44c377331e154a1ad9647c7ac0ac63e153522c2"
+   ],
+   "sent": false,
+   "from": "dfd84b5369e056d82d27f0f2b44c377331e154a1ad9647c7ac0ac63e153522c2",
+   "ago": 600,
+   "kind": 14,
+   "content": "I have it. Alice, can you pin the route list?",
+   "tags": [
+    [
+     "p",
+     "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727"
+    ],
+    [
+     "p",
+     "8a4444376d4b2a9e674f56375ebf35f2b823fe2c997b97c72cbc66d6a240cd78"
+    ],
+    [
+     "subject",
+     "Reef meetup"
+    ]
+   ]
+  },
+  {
+   "id": "0000000000000000000000000000000000000000000000000000000000000007",
+   "conversation": "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2",
+   "participants": [
+    "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727",
+    "8a4444376d4b2a9e674f56375ebf35f2b823fe2c997b97c72cbc66d6a240cd78",
+    "dfd84b5369e056d82d27f0f2b44c377331e154a1ad9647c7ac0ac63e153522c2"
+   ],
+   "sent": true,
+   "from": "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727",
+   "ago": 420,
+   "kind": 14,
+   "content": "Pinned. It is on my profile now.",
+   "tags": [
+    [
+     "p",
+     "8a4444376d4b2a9e674f56375ebf35f2b823fe2c997b97c72cbc66d6a240cd78"
+    ],
+    [
+     "p",
+     "dfd84b5369e056d82d27f0f2b44c377331e154a1ad9647c7ac0ac63e153522c2"
+    ],
+    [
+     "subject",
+     "Reef meetup"
+    ]
+   ]
+  },
+  {
+   "id": "0000000000000000000000000000000000000000000000000000000000000008",
+   "conversation": "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2",
+   "participants": [
+    "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727",
+    "8a4444376d4b2a9e674f56375ebf35f2b823fe2c997b97c72cbc66d6a240cd78",
+    "dfd84b5369e056d82d27f0f2b44c377331e154a1ad9647c7ac0ac63e153522c2"
+   ],
+   "sent": false,
+   "from": "8a4444376d4b2a9e674f56375ebf35f2b823fe2c997b97c72cbc66d6a240cd78",
+   "ago": 240,
+   "kind": 14,
+   "content": "Seen it. See you both at the reef.",
+   "tags": [
+    [
+     "p",
+     "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727"
+    ],
+    [
+     "p",
+     "dfd84b5369e056d82d27f0f2b44c377331e154a1ad9647c7ac0ac63e153522c2"
+    ],
+    [
+     "subject",
+     "Reef meetup"
+    ]
+   ]
+  }
+ ]
+}
