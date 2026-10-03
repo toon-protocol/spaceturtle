@@ -116,7 +116,8 @@ ev() { jq -cn --argjson k "$1" --arg c "$2" --argjson t "$3" '{id:("k"+($k|tostr
   ev 30023 'long text' '[["title","A Title"],["summary","Sum"],["r","https://a.example/x"],["r","javascript:alert(1)"]]'; echo ,
   ev 30817 'draft text' '[["d","nip-x"],["title","Draft"]]'; echo ,
   ev 31337 'raw' '[["alt","A thing"],["x","y","z"]]'; echo ,
-  ev 31338 'raw2' '[]'
+  ev 31338 'raw2' '[]'; echo ,
+  ev 31339 'raw3' '[["k","v"],["e","'"$other"'"]]'
   echo ']}'
 } > "$STUB_DIR/events"
 out=$("$root/relay-events")
@@ -134,7 +135,23 @@ check "parts 30023: article, only http(s) links" "$(P 30023 '.label == "publishe
 check "parts 30817: NIP draft" "$(P 30817 '.label == "drafted" and .title == "Draft" and .body == "draft text"')"
 check "parts unknown with alt: alt, kind, tags, content" "$(P 31337 '.label == "kind 31337" and .title == "A thing" and .summary == "alt A thing, x y z" and .body == "raw"')"
 check "parts unknown without alt: kind, content" "$(P 31338 '.label == "kind 31338" and .title == "" and .summary == "" and .body == "raw2"')"
+check "parts unknown without alt, with tags: kind, tags, content" "$(P 31339 '.label == "kind 31339" and .title == "" and .summary == "k v, e '"$other"'" and .body == "raw3"')"
 check "parts: every event has all the parts" '[.events[].parts | keys == ["body","label","links","ref","summary","title"]] | all'
+
+# --- malformed tags and content cost only the odd part, never the feed
+new_env; install_toon; running_relay
+echo '{"events":[]}' > "$STUB_DIR/profiles"; echo '{"events":[]}' > "$STUB_DIR/follows"
+echo '{"events":[
+  {"id":"m3","kind":3,"tags":["p",{"a":1}],"content":""},
+  {"id":"m5","kind":5,"tags":[{"a":1},"e"],"content":""},
+  {"id":"m1","kind":1,"tags":"oops","content":"still here"},
+  {"id":"m7","kind":7,"tags":[],"content":null}
+]}' > "$STUB_DIR/events"
+out=$("$root/relay-events")
+check "malformed: every event survives" '[.events[].id] == ["m3","m5","m1","m7"]'
+check "malformed: no tags counted" '[.events[] | select(.id == "m3" or .id == "m5") | .parts | .body, .summary] == ["0 followed","","","0 deleted"]'
+check "malformed: a note with string tags" '.events[] | select(.id == "m1") | .parts | .body == "still here" and .ref == "" and .links == []'
+check "malformed: a reaction without content" '.events[] | select(.id == "m7") | .parts.body == "󰋑"'
 
 # --- hostile profile fields stay data
 new_env; install_toon; running_relay

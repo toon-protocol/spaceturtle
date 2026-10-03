@@ -40,22 +40,23 @@ relay_query() {
 #   links    http(s) addresses only
 #   ref      the id of the event this one refers to, or ""
 renderers=$(cat <<'JQ'
-def tag($n): [(.tags // [])[] | select(type == "array" and .[0] == $n and length > 1) | .[1] | strings] | first // "";
+def tags: (.tags | arrays // [])[] | arrays;
+def tag($n): [tags | select(.[0] == $n and length > 1) | .[1] | strings] | first // "";
 def text: (.content | strings) // "" | gsub("^\\s+|\\s+$"; "");
-def links: [(.tags // [])[] | select(type == "array" and (.[0] == "r" or .[0] == "url" or .[0] == "web") and length > 1) | .[1] | strings | select(test("^https?://"))] | unique;
+def links: [tags | select((.[0] == "r" or .[0] == "url" or .[0] == "web") and length > 1) | .[1] | strings | select(test("^https?://"))] | unique;
 def base: {label: "", title: "", summary: "", body: text, links: links, ref: tag("e")};
 def meta: (.content | strings | try fromjson catch null) | if type == "object" then . else {} end;
 def fallback:
   base + {label: ("kind " + (.kind | tostring)),
     title: tag("alt"),
-    summary: ([(.tags // [])[] | select(type == "array") | map(strings) | join(" ")] | join(", "))};
+    summary: ([tags | map(strings) | join(" ")] | join(", "))};
 def parts:
   if .kind == 0 then (meta) as $m | base + {label: "updated profile", title: ($m.name | strings // ""), summary: ($m.about | strings // ""), body: "", ref: ""}
   elif .kind == 1 then base + {label: (if tag("e") != "" then "replied" else "" end)}
-  elif .kind == 3 then base + {label: "updated follows", body: ([(.tags // [])[] | select(.[0] == "p")] | length | tostring + " followed"), ref: ""}
-  elif .kind == 5 then base + {label: "deleted", summary: ([(.tags // [])[] | select(.[0] == "e" or .[0] == "a") | .[1] | strings] | length | tostring + " deleted")}
+  elif .kind == 3 then base + {label: "updated follows", body: ([tags | select(.[0] == "p")] | length | tostring + " followed"), ref: ""}
+  elif .kind == 5 then base + {label: "deleted", summary: ([tags | select(.[0] == "e" or .[0] == "a") | .[1] | strings] | length | tostring + " deleted")}
   elif .kind == 6 or .kind == 16 then base + {label: "reposted", body: ""}
-  elif .kind == 7 then base + {label: "reacted", body: (if .content == "+" or .content == "" then "󰋑" elif .content == "-" then "󰋕" else text end)}
+  elif .kind == 7 then base + {label: "reacted", body: (text | if . == "+" or . == "" then "󰋑" elif . == "-" then "󰋕" else . end)}
   elif .kind == 1111 then base + {label: "commented"}
   elif .kind == 30023 then base + {label: "published", title: tag("title"), summary: tag("summary")}
   elif .kind == 30817 then base + {label: "drafted", title: (tag("title") | if . == "" then tag("d") else . end), summary: tag("summary")}
