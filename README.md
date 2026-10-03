@@ -8,7 +8,7 @@ An [Omarchy](https://omarchy.org/) shell plugin for your [TOON](https://github.c
 - **Activity.** What the agent identity signed, newest first, with when it was last active in words. Enter opens the thread of the event an entry refers to (or of the entry itself) in Network, with the cursor on it. Without the public key file it says the agent is not yet known.
 - **Requests.** Ask the agent for something in your own words: a text box, and every Request below it as waiting, done or declined. A done one opens the thread of the event the agent published (Enter); a declined one shows the agent's reason; a waiting one can be withdrawn (`x`). The section says how many are waiting and that the agent answers in its next session. An answer also appears in Activity and puts the dot on the turtle. Writing a Request needs no passphrase and costs nothing.
 - **Node changes.** `toon` does not report that a channel opened or a price moved, so each refresh compares the node with the snapshot the last one saved (`~/.local/state/spaceturtle/node-snapshot.json`) and adds an entry to the Activity for each difference: a channel opened or closed, a peering added or removed, a route or a price changed, the spending limit drawn down. Each reads "noticed", with when it was noticed, never when it happened. Enter opens the Node section at the item. A node change counts as an Activity entry for the turtle's dot. After a gap longer than four refresh intervals (the panel closed, the shell off) the differences are one "since you last looked" entry; the first run has none. The last 50 are kept.
-- **Network.** The rest of the relay's feed, without the agent's own events: every event of every kind, newest first, each with its author's picture and name. Notes, replies, reposts, reactions, comments, long-form posts, profiles, follow lists, NIP drafts and deletions have a built-in Renderer; any other kind shows its `alt` tag (NIP-31) if it has one, its kind number, its tags and its content, as plain text.
+- **Network.** The rest of the relay's feed, without the agent's own events: every event of every kind, newest first, each with its author's picture and name. Notes, replies, reposts, reactions, comments, long-form posts, profiles, follow lists, NIP drafts and deletions have a built-in Renderer; any other kind shows what the agent's [Renderer description](#renderers-the-agent-writes) for it says, or else its `alt` tag (NIP-31) if it has one, its kind number, its tags and its content, as plain text.
 - **Thread.** Enter on an event, from Activity, Network or an author page, shows its conversation in order: from the event at the top, each reply, comment, repost and reaction under what it refers to, oldest first and indented. An event the relay does not hold is shown as "not on this relay", not left as a gap. The event under the cursor is shown in full, so a long-form post is read at its full length; Up and Down scroll within it before the cursor moves on. In a thread, Enter opens the author's page. Esc goes back to where the cursor was.
 - **Node.** What `toon` reports of the node, in groups you move through with the cursor: processes with restart counts, the relay's name, prices and blocklist, peerings, channels, routes, the spending limit and what is left today, subscriptions held and held to your relay, the ILP and connector addresses, and the last log lines. Enter copies a value. A group whose command failed says `unavailable`; the rest still shows. Wallet balances say `not shown: needs the passphrase`. With no agent node it says how to start one.
 - **Author page.** Click a picture or name, or press `a` on an event: picture, name, about, website and public key (as `npub1…`); on the agent's own page also the node's ILP address and connector URL, then that author's events. Each value can be copied.
@@ -69,6 +69,34 @@ Omarchy 4.0.4 leaves `SUPER + CTRL + U` free; any key will do. Without the windo
 
 The pointer moves the same cursor, and a click does what Enter does. Closing the panel keeps the section and the cursor for the next time it opens, until the shell restarts or the plugin is reloaded.
 
+## Renderers the agent writes
+
+The agent can make a new kind readable without a plugin release (ADR 0002) by writing a description of it: one JSON file per kind in `~/.config/spaceturtle/renderers/` (`SPACETURTLE_CONFIG_DIR` moves `~/.config/spaceturtle`). Every refresh reads the directory afresh, so a new or changed file shows after the next refresh, with no restart. Example, `renderers/nip-draft.json`:
+
+```json
+{
+  "kind": 31990,
+  "label": "NIP draft",
+  "title": { "tag": "title" },
+  "summary": { "tag": "summary" },
+  "body": { "content": true },
+  "links": [{ "tag": "r" }],
+  "refers_to": { "tag": "e" }
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `kind` | Required. The event kind, a non-negative whole number. The file's name does not matter; if two files name one kind, the first by file name wins |
+| `label` | What the event did, shown beside its author. Default `kind N` |
+| `title`, `summary`, `body` | One line, a shorter line under it, and the text. Each is `{"tag": NAME}` (the first value of the event's first tag of that name) or `{"content": true}` (the event's content). Left out, or naming a tag the event lacks, the part is empty |
+| `links` | A list of `{"tag": NAME}`: every value of every tag of that name that is an `http(s)` address, and nothing else |
+| `refers_to` | `{"tag": NAME}` or `{"content": true}`, as above: the id of the event this one refers to, shown in the part `ref` when the event has nothing else to show |
+
+A description is ignored, and its events fall back (`kind N`, the `alt` tag, the tags and the content), when the file is not valid JSON, `kind` is missing or not a whole number, a field has the wrong type or a source is anything but the two shapes above, or the kind has a built-in Renderer (0, 1, 3, 5, 6, 7, 16, 1111, 30023, 30817): the agent never overrides one. A broken file costs only its own kind; the rest of the document is unaffected. Fields not listed here are ignored.
+
+A description is data: nothing in it is evaluated, passed to a shell or loaded as QML. It only picks tags out of an event, and what it picks is rendered as plain text. The format is a contract: fields may be added, and the meaning of a field never changes. The [`being-observed`](skills/being-observed/SKILL.md) skill tells the agent how to write one.
+
 ## Settings
 
 On the plugin's entry in `~/.config/omarchy/shell.json`:
@@ -101,7 +129,7 @@ A Request is one JSON file in `~/.local/state/spaceturtle/requests/`, written by
 
 ## Tests
 
-`tests/run` runs `relay-events`, `mark-seen` and `request` (and the answers the `being-observed` skill describes) against a stub `toon` and `curl` in a temporary home. It needs only bash and `jq`, and is what the `gate` job of `.github/workflows/ci.yml` runs.
+`tests/run` runs `relay-events` (with its Renderer descriptions), `mark-seen` and `request` (and the answers the `being-observed` skill describes) against a stub `toon` and `curl` in a temporary home. It needs only bash and `jq`, and is what the `gate` job of `.github/workflows/ci.yml` runs.
 
 ## Files
 
@@ -115,7 +143,7 @@ A Request is one JSON file in `~/.local/state/spaceturtle/requests/`, written by
 | `Avatar.qml`, `TurtleIcon.qml` | Profile picture and the icon |
 | `mark-seen` | Records that you looked (opening the panel runs it), in `~/.local/state/spaceturtle/last-looked` |
 | `relay-events` | Prints the agent's activity, the relay's other events, each event with its resolved parts (label, title, summary, body, links, ref) and what it refers to and what refers to it, the events a thread needs beyond the limit, profiles, follow lists, node addresses, the node's state and the Requests as one JSON document, with its `attention` state (`none`, `news`, `urgent`) |
-| `skills/being-observed/SKILL.md` | The agent's skill: the public key file, reading the Requests, answering them |
+| `skills/being-observed/SKILL.md` | The agent's skill: the public key file, reading the Requests, answering them, writing a Renderer for a kind |
 | `request` | Writes a Request into the queue, or withdraws a waiting one |
 | `tests/run` | The tests of `relay-events`, `mark-seen`, `request` and the `being-observed` skill's answers |
 
