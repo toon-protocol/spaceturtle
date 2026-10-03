@@ -47,7 +47,7 @@ Item {
   // What a Request about a thing is about, in words.
   function subjectText(request) {
     var subject = request.subject || {}
-    var verbs = { follow: "Follow", unfollow: "Unfollow", reply: "Reply to", react: "React to", repost: "Repost" }
+    var verbs = service.requestVerbs
     if (!verbs[request.kind]) return ""
     if (subject.event) return verbs[request.kind] + " note " + String(subject.event).slice(0, 8)
       + (subject.pubkey ? " by " + service.nameOf(subject.pubkey) : "")

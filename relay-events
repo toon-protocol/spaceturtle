@@ -259,6 +259,10 @@ done
 ids=$(jq -cn --argjson a "$events" --argjson b "${agent_events:-[]}" --argjson c "$context" '[$a[], $b[], $c[] | .id | strings] | unique | .[0:100]' 2>/dev/null || echo '[]')
 replies=$(relay_query "{\"#e\":$ids,\"limit\":200}")
 context=$(jq -cn --argjson a "$context" --argjson b "$replies" '$a + $b | unique_by(.id)' 2>/dev/null || echo "$context")
+# The agent's own follow list, by author too: it says whom the agent follows.
+own_follows='[]'
+[[ -n $self ]] && own_follows=$(relay_query "{\"kinds\":[3],\"authors\":[\"$self\"],\"limit\":1}")
+
 context=$(printf '%s' "$context" | with_parts)
 
 # Events tagging the agent identity, asked for by tag for the same reason.
@@ -279,6 +283,7 @@ jq -cn --arg name "${name:-}" --arg self "$self" \
   --argjson node "${node:-null}" \
   --argjson subscribers "${subscribers:-null}" --argjson state "$state" --argjson events "${events:-[]}" \
   --argjson profiles "${profiles:-[]}" --argjson follows "${follows:-[]}" \
+  --argjson own_follows "${own_follows:-[]}" \
   --argjson agent "${agent_events:-[]}" --argjson context "${context:-[]}" \
   --argjson asked "${asked:-[]}" --argjson looked "${looked_at:-null}" \
   --argjson mentioned "${mention_events:-[]}" \
@@ -304,7 +309,7 @@ jq -cn --arg name "${name:-}" --arg self "$self" \
   | {online: true, name: $name, self: $self,
     activity: $activity, last_active: ($activity[0].created_at? // null),
     node: ($node // {ilp_address: "", connector: ""}),
-    requests: $requests, subscribers: $subscribers, state: $state, profiles: $profiles, follows: $follows,
+    requests: $requests, subscribers: $subscribers, state: $state, profiles: $profiles, follows: ([$own_follows[], $follows[]] | unique_by(.id)),
     events: ($events | map(select(.pubkey != $self)) | mark),
     context: ($context | map(select(.id as $i | ($events | map(.id) | index($i)) == null and ($agent | map(.id) | index($i)) == null)) | mark),
     looked_at: $looked,

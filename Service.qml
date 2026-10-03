@@ -337,6 +337,9 @@ Item {
   }
   // A Request about a thing on screen: kind is follow, unfollow, reply, react
   // or repost; the text is optional. The subject goes as arguments too.
+  readonly property var requestVerbs: ({
+    follow: "Follow", unfollow: "Unfollow", reply: "Reply to", react: "React to", repost: "Repost"
+  })
   function submitAbout(kind, pubkey, event, text) {
     var command = [requestScript, "add", "--kind", String(kind)]
     if (pubkey) command.push("--pubkey", String(pubkey))

@@ -25,6 +25,8 @@ Item {
     var event = cursor >= firstEvent ? shownEvents[cursor - firstEvent] : null
     return event && event.missing !== true ? event : null
   }
+  // Notes, comments and long-form posts: what can be replied to, reacted to or reposted.
+  function isNote(event) { return !!event && [1, 1111, 30023].indexOf(event.kind) !== -1 }
   readonly property bool viewingSelf: authorPage && profilePubkey === service.selfPubkey
 
   // The "LABEL value" lines of an author page that have a value.
@@ -66,10 +68,7 @@ Item {
   readonly property bool typing: composeInput.activeFocus
   signal leaveInput()
 
-  readonly property var composeVerbs: ({
-    follow: "Follow", unfollow: "Unfollow", reply: "Reply to", react: "React to", repost: "Repost"
-  })
-  readonly property string composeText: composeKind === "" ? "" : (composeVerbs[composeKind] + " "
+  readonly property string composeText: composeKind === "" ? "" : (service.requestVerbs[composeKind] + " "
     + (composeEvent !== "" ? "this note" : service.nameOf(composePubkey)) + " — add a line of your own, or none")
 
   // Starts a Request, unless the same kind is already waiting on the same subject.
@@ -93,9 +92,12 @@ Item {
   }
 
   function cancelCompose() {
+    if (root.composeKind === "") return
     root.composeKind = ""
     root.leaveInput()
   }
+  // Leaving the view or the section leaves the Request unwritten.
+  onVisibleChanged: if (!visible) cancelCompose()
 
   // The label of the detail row whose value was just copied, for its "copied" flash.
   property string copiedLabel: ""
@@ -168,7 +170,9 @@ Item {
   }
 
   // `y` or `c` copies the detail under the cursor, `o` opens a web address,
-  // `a` opens the author of the event under the cursor.
+  // `a` opens the author of the event under the cursor. `f` asks the agent to
+  // follow or unfollow the author of the page; `w`, `e` and `b` to reply to,
+  // react to or repost the note under the cursor.
   function key(text) {
     var detail = root.cursor < root.details.length ? root.details[root.cursor] : null
     if (text === "o" && detail && detail.openable) service.openUrl(detail.value)
@@ -176,9 +180,9 @@ Item {
     else if (text === "a" && root.cursorEvent && !root.authorPage) service.openAuthor(root.cursorEvent.pubkey)
     else if (text === "f" && root.authorPage && !root.viewingSelf)
       root.compose(service.followsAuthor(root.profilePubkey) ? "unfollow" : "follow", root.profilePubkey, "")
-    else if (root.cursorEvent) {
-      var kind = text === "w" ? "reply" : (text === "l" ? "react" : (text === "b" ? "repost" : ""))
-      if (kind !== "") root.compose(kind, root.cursorEvent.pubkey, root.cursorEvent.id)
+    else if (root.isNote(root.cursorEvent)) {
+      var kind = ({ w: "reply", e: "react", b: "repost" })[text]
+      if (kind) root.compose(kind, root.cursorEvent.pubkey, root.cursorEvent.id)
     }
   }
 
@@ -186,6 +190,7 @@ Item {
   Connections {
     target: root.service
     function onViewOpened() {
+      root.cancelCompose()
       pointerGate.reset()
       root.scrollOnCursor = true
       root.copiedLabel = ""
@@ -591,7 +596,7 @@ Item {
         text: {
           var waiting = root.service.waitingKinds(root.profilePubkey, "")
           var verb = root.service.followsAuthor(root.profilePubkey) ? "unfollow" : "follow"
-          if (waiting.indexOf(verb) !== -1) return "A " + verb + " Request is waiting."
+          if (waiting.length > 0) return "A " + waiting.join(" and an ") + " Request is waiting."
           return "Your agent " + (verb === "unfollow" ? "follows" : "does not follow") + " this author. f asks it to " + verb + "."
         }
         color: root.dim
@@ -808,8 +813,8 @@ Item {
       Text {
         textFormat: Text.PlainText
         width: parent.width
-        visible: row.hasCursor
-        text: "w replies · l reacts · b reposts"
+        visible: row.hasCursor && root.isNote(row.modelData)
+        text: "w replies · e reacts · b reposts"
         color: root.dim
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
