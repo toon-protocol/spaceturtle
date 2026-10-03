@@ -346,6 +346,42 @@ Item {
     if (String(text).trim() === "") return
     runRequest([requestScript, "add", "--", String(text)])
   }
+  // A Request about a thing on screen: kind is follow, unfollow, reply, react
+  // or repost; the text is optional. The subject goes as arguments too.
+  readonly property var requestVerbs: ({
+    follow: "Follow", unfollow: "Unfollow", reply: "Reply to", react: "React to", repost: "Repost"
+  })
+  function submitAbout(kind, pubkey, event, text) {
+    var command = [requestScript, "add", "--kind", String(kind)]
+    if (pubkey) command.push("--pubkey", String(pubkey))
+    if (event) command.push("--event", String(event))
+    command.push("--", String(text || "").trim())
+    runRequest(command)
+  }
+  // The agent follows this author, as its own follow list says.
+  function followsAuthor(pubkey) {
+    return selfPubkey !== "" && (followMap[selfPubkey] || []).indexOf(pubkey) !== -1
+  }
+  // Waiting Requests of a kind about an author (pubkey) or a note (event).
+  function waitingAbout(kind, pubkey, event) {
+    return requests.filter(function(r) {
+      var subject = r.subject || {}
+      return r.state === "waiting" && r.kind === kind
+        && (event ? subject.event === event : (!subject.event && subject.pubkey === pubkey))
+    })
+  }
+  // The kinds still waiting on this author or note, for showing next to it.
+  function waitingKinds(pubkey, event) {
+    var kinds = event ? ["reply", "react", "repost"] : ["follow", "unfollow"]
+    return kinds.filter(function(k) { return waitingAbout(k, pubkey, event).length > 0 })
+  }
+  // Opens the note or author a Request is about; false if there is nothing to open.
+  function openSubject(request) {
+    var subject = request.subject || {}
+    if (subject.event && openEvent(subject.event)) return true
+    if (subject.pubkey) { openAuthor(subject.pubkey); return true }
+    return false
+  }
   function withdrawRequest(id) {
     runRequest([requestScript, "withdraw", String(id)])
   }

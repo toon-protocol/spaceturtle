@@ -43,6 +43,7 @@ case "$1 $2" in
         elif [[ -r $STUB_DIR/by-id ]]; then cat "$STUB_DIR/by-id"; else echo '{"events":[]}'; fi ;;
       *'"#e"'*) if [[ -r $STUB_DIR/replies ]]; then cat "$STUB_DIR/replies"; else echo '{"events":[]}'; fi ;;
       *'"#p"'*) if [[ -r $STUB_DIR/mentions ]]; then cat "$STUB_DIR/mentions"; else echo '{"events":[]}'; fi ;;
+      *'"kinds":[3],"authors"'*) if [[ -r $STUB_DIR/own-follows ]]; then cat "$STUB_DIR/own-follows"; else echo '{"events":[]}'; fi ;;
       *'"authors"'*) if [[ -r $STUB_DIR/agent-events ]]; then cat "$STUB_DIR/agent-events"; else echo '{"events":[]}'; fi ;;
       *'"kinds":[0]'*) cat "$STUB_DIR/profiles" ;;
       *'"kinds":[3]'*) cat "$STUB_DIR/follows" ;;
@@ -102,6 +103,10 @@ out=$("$root/relay-events")
 check "events: the public key file marks the agent" ".self == \"$pk\""
 check "activity: the agent's events, apart from the Network's" '[.activity[].id] == ["e1"] and ([.events[].id] == ["e2"])'
 check "activity: the time of the latest activity" '.last_active == 10'
+echo "{\"events\":[{\"id\":\"f0\",\"pubkey\":\"$pk\",\"kind\":3,\"created_at\":3,\"tags\":[[\"p\",\"$other\"]],\"content\":\"\"}]}" > "$STUB_DIR/own-follows"
+echo '{"events":[]}' > "$STUB_DIR/follows"
+out=$("$root/relay-events"); rm "$STUB_DIR/own-follows"
+check "events: the agent's own follow list, asked for by author" "[.follows[] | select(.pubkey == \"$pk\") | .id] == [\"f0\"]"
 echo "{\"events\":[{\"id\":\"e0\",\"pubkey\":\"$pk\",\"kind\":7,\"created_at\":20,\"tags\":[[\"e\",\"e2\"],[\"p\",\"$other\"]],\"content\":\"+\"}]}" > "$STUB_DIR/agent-events"
 out=$("$root/relay-events")
 check "activity: an agent event beyond the feed's limit is found, and says what it refers to" '[.activity[].id] == ["e0","e1"] and .activity[0].refers_to == "e2" and .activity[1].refers_to == null and .last_active == 20'
@@ -432,6 +437,24 @@ else echo "FAIL request: text changed"; fails=$((fails + 1)); fi
 id=$("$root/request" add --kind follow --pubkey "$pk" "and say hello")
 out=$(jq -c . "$queue/$id.json")
 check "request: a kind and a subject" ".kind == \"follow\" and .subject == {pubkey: \"$pk\", event: null}"
+for k in follow unfollow; do
+  id=$("$root/request" add --kind $k --pubkey "$pk" "")
+  out=$(jq -c . "$queue/$id.json")
+  check "request: $k names its author, the text is optional" ".kind == \"$k\" and .subject == {pubkey: \"$pk\", event: null} and .text == \"\" and .state == \"waiting\""
+  bad "request: $k with no subject is refused" "$root/request" add --kind $k "text"
+  bad "request: $k with only a note is refused" "$root/request" add --kind $k --event "$pk"
+done
+note_id=$(printf 'b%.0s' {1..64})
+for k in reply react repost; do
+  id=$("$root/request" add --kind $k --event "$note_id" --pubkey "$pk" "my words")
+  out=$(jq -c . "$queue/$id.json")
+  check "request: $k names its note and author" ".kind == \"$k\" and .subject == {pubkey: \"$pk\", event: \"$note_id\"} and .text == \"my words\""
+  id=$("$root/request" add --kind $k --event "$pk" "")
+  out=$(jq -c . "$queue/$id.json")
+  check "request: $k without text is written" ".kind == \"$k\" and .subject.event == \"$pk\" and .text == \"\""
+  bad "request: $k with no subject is refused" "$root/request" add --kind $k "text"
+  bad "request: $k with only an author is refused" "$root/request" add --kind $k --pubkey "$pk" "text"
+done
 
 # --- requests in the observation document
 new_env; install_toon; running_relay
