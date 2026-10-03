@@ -3,8 +3,8 @@ import qs.Commons
 import qs.Ui
 
 // The Activity section, where the panel opens: when the agent was last active,
-// and what it did, newest first. Enter or a click opens the event an entry
-// refers to on its author's page in the Network. Where the cursor is lives on
+// and what it did, newest first. Enter or a click opens the thread of the event
+// an entry refers to in the Network. Where the cursor is lives on
 // the service.
 Item {
   id: root
@@ -38,7 +38,8 @@ Item {
 
   // Nothing to go back to: the panel closes.
   function back() { return false }
-  function key(text) {}
+  // `a` opens the agent's own page.
+  function key(text) { if (text === "a" && known) service.openAuthor(service.selfPubkey) }
 
   function ensureVisible(item) {
     if (!item) return

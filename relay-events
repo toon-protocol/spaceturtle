@@ -1,12 +1,16 @@
 #!/bin/bash
 # Print what can be observed of this agent node as one JSON document:
 # {"online", "name", "self", "node", "subscribers", "state", "profiles",
-# "follows", "activity", "last_active", "events", "requests", "attention",
-# "looked_at"}. "activity" is what the agent identity signed and the Requests it
-# answered, newest first, each entry with the id of the event it refers to
-# ("refers_to", or null); an answered Request is an entry with a "request" field
-# and the id "request:<id>". "last_active" is the newest created_at of the
-# entries, or null; "events" is the rest of the feed, without the agent's;
+# "follows", "activity", "last_active", "events", "context", "requests",
+# "attention", "looked_at"}. "activity" is what the agent identity signed and
+# the Requests it answered, newest first; an answered Request is an entry with a
+# "request" field and the id "request:<id>". "last_active" is the newest
+# created_at of the entries, or null; "events" is the rest of the feed, without
+# the agent's. Every event, in either and in "context", says what it refers to
+# ("refers_to", an id or null), whether the relay lacks that event
+# ("refers_missing"), and which events refer to it ("referenced_by", ids, oldest
+# first). "context" holds the events a thread needs that the feed's limit left
+# out: those that shown events refer to, and those that refer to them.
 # "requests" is every Request in the queue, newest first (a file that is not a
 # valid Request is skipped). "attention" is "none", "news" (an Activity entry,
 # or an event tagging the agent, is newer than the last time the Observer
@@ -90,7 +94,7 @@ fi
 # Without the relay, the Activity is what the agent answered, which is local.
 offline() {
   command -v jq >/dev/null || {
-    printf '{"online":false,"name":"","self":"","node":{"ilp_address":"","connector":""},"subscribers":null,"profiles":[],"follows":[],"state":null,"activity":[],"last_active":null,"events":[],"requests":[],"attention":"urgent","looked_at":null}\n'
+    printf '{"online":false,"name":"","self":"","node":{"ilp_address":"","connector":""},"subscribers":null,"profiles":[],"follows":[],"state":null,"activity":[],"last_active":null,"events":[],"context":[],"requests":[],"attention":"urgent","looked_at":null}\n'
     exit 0
   }
   jq -cn --argjson requests "${requests:-[]}" \
@@ -98,7 +102,7 @@ offline() {
     --argjson answered "$(request_activity "$self" "${requests:-[]}")" \
     '($answered | sort_by(-.created_at)) as $activity
     | {online:false,name:"",self:"",node:{ilp_address:"",connector:""},subscribers:null,state:$state,profiles:[],follows:[],
-       activity:$activity,last_active:($activity[0].created_at? // null),events:[],requests:$requests,
+       activity:$activity,last_active:($activity[0].created_at? // null),events:[],context:[],requests:$requests,
        attention:"urgent",looked_at:$looked}'
   exit 0
 }
@@ -234,6 +238,29 @@ name=$(jq -r '.relay.name // ""' <<<"$relay_config" 2>/dev/null)
 agent_events='[]'
 [[ -n $self ]] && agent_events=$(relay_query "{\"authors\":[\"$self\"],\"limit\":$limit}" | with_parts)
 
+# The events a thread needs beyond the limit: what shown events refer to, up
+# the chain a few levels, and what refers to them. Asked for by id and by "e"
+# tag; an event asked for by id that the relay does not return is missing.
+# One higher up than the walk reaches is neither held nor missing.
+ref_of='[.tags[]? | select(type == "array" and .[0] == "e" and (.[1] | strings))]
+  | ((map(select(.[3]? == "reply")) | first) // last) | .[1]? // null'
+context='[]'
+asked='[]'
+for _ in 1 2 3; do
+  want=$(jq -cn --argjson a "$events" --argjson b "${agent_events:-[]}" --argjson c "$context" --argjson asked "$asked" \
+    "[\$a[], \$b[], \$c[]] | (map(.id) | unique) as \$held
+     | [.[] | $ref_of | select(. != null)] | unique - \$held - \$asked | .[0:100]" 2>/dev/null || echo '[]')
+  [[ $want == '[]' ]] && break
+  asked=$(jq -cn --argjson a "$asked" --argjson b "$want" '$a + $b' 2>/dev/null || echo "$asked")
+  found=$(relay_query "{\"ids\":$want}")
+  context=$(jq -cn --argjson a "$context" --argjson b "$found" '$a + $b | unique_by(.id)' 2>/dev/null || echo "$context")
+  [[ $found == '[]' ]] && break
+done
+ids=$(jq -cn --argjson a "$events" --argjson b "${agent_events:-[]}" --argjson c "$context" '[$a[], $b[], $c[] | .id | strings] | unique | .[0:100]' 2>/dev/null || echo '[]')
+replies=$(relay_query "{\"#e\":$ids,\"limit\":200}")
+context=$(jq -cn --argjson a "$context" --argjson b "$replies" '$a + $b | unique_by(.id)' 2>/dev/null || echo "$context")
+context=$(printf '%s' "$context" | with_parts)
+
 # Events tagging the agent identity, asked for by tag for the same reason.
 mention_events='[]'
 [[ -n $self ]] && mention_events=$(relay_query "{\"#p\":[\"$self\"],\"limit\":$limit}")
@@ -252,16 +279,23 @@ jq -cn --arg name "${name:-}" --arg self "$self" \
   --argjson node "${node:-null}" \
   --argjson subscribers "${subscribers:-null}" --argjson state "$state" --argjson events "${events:-[]}" \
   --argjson profiles "${profiles:-[]}" --argjson follows "${follows:-[]}" \
-  --argjson agent "${agent_events:-[]}" --argjson looked "${looked_at:-null}" \
+  --argjson agent "${agent_events:-[]}" --argjson context "${context:-[]}" \
+  --argjson asked "${asked:-[]}" --argjson looked "${looked_at:-null}" \
   --argjson mentioned "${mention_events:-[]}" \
   --argjson requests "${requests:-[]}" \
   --argjson answered "$(request_activity "$self" "${requests:-[]}")" \
-  '(if $self == "" then []
+  '# The "e" tag marked "reply" (NIP-10), else the last one.
+  def ref: '"$ref_of"';
+  ([$agent[], $events[], $context[]] | unique_by(.id)) as $all
+  | ($all | map(.id)) as $held
+  | ($all | map(select(ref != null)) | sort_by(.created_at)
+      | reduce .[] as $e ({}; .[$e | ref] += [$e.id])) as $referrers
+  | def mark: map((ref) as $r | . + {refers_to: $r,
+      refers_missing: ($r != null and ($held | index($r) == null) and ($asked | index($r) != null)),
+      referenced_by: ($referrers[.id] // [])});
+  (if $self == "" then []
     else ([$agent[], $events[]] | map(select(.pubkey == $self)) | unique_by(.id)
-      | sort_by(-.created_at)
-      # The "e" tag marked "reply" (NIP-10), else the last one.
-      | map(. + {refers_to: ([.tags[]? | select(.[0] == "e" and (.[1] | strings))]
-          | ((map(select(.[3]? == "reply")) | first) // last) | .[1]? // null)}))
+      | sort_by(-.created_at) | mark)
     end) as $signed
   # Answers count whether or not the public key is known.
   | ($signed + $answered | sort_by(-.created_at)) as $activity
@@ -271,7 +305,8 @@ jq -cn --arg name "${name:-}" --arg self "$self" \
     activity: $activity, last_active: ($activity[0].created_at? // null),
     node: ($node // {ilp_address: "", connector: ""}),
     requests: $requests, subscribers: $subscribers, state: $state, profiles: $profiles, follows: $follows,
-    events: ($events | map(select(.pubkey != $self))),
+    events: ($events | map(select(.pubkey != $self)) | mark),
+    context: ($context | map(select(.id as $i | ($events | map(.id) | index($i)) == null and ($agent | map(.id) | index($i)) == null)) | mark),
     looked_at: $looked,
     # Without a record of looking there is nothing to compare with.
     attention: (if $looked == null then "none"
