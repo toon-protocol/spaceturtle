@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs relay-events against a stub `toon` and `curl` in a temporary home.
+# Runs relay-events and mark-seen against a stub `toon` and `curl` in a temporary home.
 # Needs only bash and jq. Usage: tests/run
 set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -9,7 +9,7 @@ trap 'rm -rf "${tmps[@]}"' EXIT
 
 new_env() {
   tmp=$(mktemp -d); tmps+=("$tmp")
-  export HOME=$tmp/home SPACETURTLE_CONFIG_DIR=$tmp/config
+  export HOME=$tmp/home SPACETURTLE_CONFIG_DIR=$tmp/config SPACETURTLE_STATE_DIR=$tmp/state
   mkdir -p "$HOME/.local/bin" "$SPACETURTLE_CONFIG_DIR" "$tmp/bin"
   export SPACETURTLE_TOON=$tmp/bin/toon
   export STUB_DIR=$tmp/stub; mkdir -p "$STUB_DIR"
@@ -39,6 +39,10 @@ case "$1 $2" in
     f="$STUB_DIR/$1$2"; [[ -r $f ]] && cat "$f" || exit 1 ;;
   "event query")
     case "$*" in
+      *'"ids"'*) if [[ -r $STUB_DIR/pool ]]; then jq -c --argjson f "$5" '{events: [.events[] | select(.id as $i | $f.ids | index($i))]}' "$STUB_DIR/pool"
+        elif [[ -r $STUB_DIR/by-id ]]; then cat "$STUB_DIR/by-id"; else echo '{"events":[]}'; fi ;;
+      *'"#e"'*) if [[ -r $STUB_DIR/replies ]]; then cat "$STUB_DIR/replies"; else echo '{"events":[]}'; fi ;;
+      *'"#p"'*) if [[ -r $STUB_DIR/mentions ]]; then cat "$STUB_DIR/mentions"; else echo '{"events":[]}'; fi ;;
       *'"authors"'*) if [[ -r $STUB_DIR/agent-events ]]; then cat "$STUB_DIR/agent-events"; else echo '{"events":[]}'; fi ;;
       *'"kinds":[0]'*) cat "$STUB_DIR/profiles" ;;
       *'"kinds":[3]'*) cat "$STUB_DIR/follows" ;;
@@ -57,11 +61,12 @@ running_relay() {
 
 check() { # name, jq expression that must be true of $out
   count=$((count + 1))
-  if jq -e "$2" <<<"$out" >/dev/null 2>&1; then echo "ok   $1"
+  # jq 1.6 -e succeeds on empty input, so an empty document must fail here.
+  if [[ -n $out ]] && jq -e "$2" <<<"$out" >/dev/null 2>&1; then echo "ok   $1"
   else echo "FAIL $1"; echo "     expression: $2"; echo "     document:   $out"; fails=$((fails + 1)); fi
 }
 
-OFFLINE='.online == false and .name == "" and .self == "" and .subscribers == null and .profiles == [] and .follows == [] and .activity == [] and .last_active == null and .events == [] and .node == {ilp_address: "", connector: ""}'
+OFFLINE='.online == false and .attention == "urgent" and .name == "" and .self == "" and .subscribers == null and .profiles == [] and .follows == [] and .activity == [] and .last_active == null and .events == [] and .context == [] and .requests == [] and .node == {ilp_address: "", connector: ""}'
 pk=$(printf 'a%.0s' {1..64}); other=$(printf 'b%.0s' {1..64})
 
 # --- no toon
@@ -120,6 +125,46 @@ rm "$STUB_DIR/nip11"
 out=$("$root/relay-events")
 check "events: without NIP-11 the feed still works" '.online == true and (.events | length) == 2 and .node.ilp_address == ""'
 ! grep -q "wallet" "$STUB_DIR/calls" || { echo "FAIL ran a wallet command"; fails=$((fails + 1)); }
+
+# --- attention
+new_env; install_toon; running_relay
+echo "$pk" > "$SPACETURTLE_CONFIG_DIR/agent-pubkey"
+echo '{"events":[]}' > "$STUB_DIR/profiles"; echo '{"events":[]}' > "$STUB_DIR/follows"
+note() { echo "{\"id\":\"$1\",\"pubkey\":\"$2\",\"kind\":1,\"created_at\":$3,\"tags\":$4,\"content\":\"x\"}"; }
+echo "{\"events\":[$(note s1 "$other" 50 '[]')]}" > "$STUB_DIR/events"
+out=$("$root/relay-events")
+check "attention: never looked, nothing to compare with" '.attention == "none" and .looked_at == null'
+mkdir -p "$SPACETURTLE_STATE_DIR"; echo 100 > "$SPACETURTLE_STATE_DIR/last-looked"
+out=$("$root/relay-events")
+check "attention: nothing new" '.attention == "none" and .looked_at == 100'
+echo "{\"events\":[$(note s1 "$other" 150 '[]')]}" > "$STUB_DIR/events"
+out=$("$root/relay-events")
+check "attention: a stranger's note stays none" '.attention == "none"'
+echo "{\"events\":[$(note s1 "$other" 150 "[[\"p\",\"$other\"]]")]}" > "$STUB_DIR/events"
+out=$("$root/relay-events")
+check "attention: a note tagging someone else stays none" '.attention == "none"'
+echo "{\"events\":[$(note m1 "$other" 150 "[[\"p\",\"$pk\"]]")]}" > "$STUB_DIR/events"
+out=$("$root/relay-events")
+check "attention: a new event tagging the agent is news" '.attention == "news"'
+echo "{\"events\":[$(note m1 "$other" 90 "[[\"p\",\"$pk\"]]")]}" > "$STUB_DIR/events"
+out=$("$root/relay-events")
+check "attention: an event tagging the agent from before looking is none" '.attention == "none"'
+echo "{\"events\":[$(note m2 "$other" 150 "[[\"p\",\"$pk\"]]")]}" > "$STUB_DIR/mentions"
+out=$("$root/relay-events")
+check "attention: a new event tagging the agent outside the feed's limit is news" '.attention == "news"'
+rm "$STUB_DIR/mentions"
+echo "{\"events\":[$(note a1 "$pk" 150 '[]')]}" > "$STUB_DIR/events"
+out=$("$root/relay-events")
+check "attention: a new Activity entry is news" '.attention == "news"'
+"$root/mark-seen"
+out=$("$root/relay-events")
+check "attention: mark-seen returns news to none" '.attention == "none" and (.looked_at | . > 150)'
+echo "{\"events\":[$(note a1 "$pk" 150 '[]')]}" > "$STUB_DIR/events"
+echo '{"agent_node":{"toon_apps":[{"apps":[{"name":"relay","running":false}]}]}}' > "$STUB_DIR/status"
+out=$("$root/relay-events")
+check "attention: node down is urgent, and keeps when the Observer looked" '.attention == "urgent" and .looked_at > 150'
+# relay-events keeps the node's snapshot in the same directory.
+[[ $(ls "$SPACETURTLE_STATE_DIR" | grep -vx node-snapshot.json) == last-looked ]] || { echo "FAIL mark-seen: left stray files"; fails=$((fails + 1)); }
 
 # --- the node's state
 new_env; install_toon
@@ -286,10 +331,10 @@ out=$(at 1062)
 check "node changes: a price set and removed, a peering changing in place" '[.activity[0:3][].text] | sort == ["Peering with bob is now disconnected","Price read set to 2","Price write removed"]'
 echo '{"per_command":"100","per_day":"1000","remaining_today":"0"}' > "$STUB_DIR/limitshow"
 out=$(at 1070)
-check "urgent: nothing left of today's limit" '.urgent == true and .activity[0].text == "Spending limit used up for today"'
+check "urgent: nothing left of today's limit" '.urgent == true and .attention == "urgent" and .activity[0].text == "Spending limit used up for today"'
 echo '{"per_command":"100","per_day":"1000","remaining_today":"5"}' > "$STUB_DIR/limitshow"
 out=$(at 1080)
-check "urgent: not while something is left" '.urgent == false'
+check "urgent: not while something is left" '.urgent == false and .attention != "urgent"'
 echo '{"per_command":"100","per_day":"1000"}' > "$STUB_DIR/limitshow"
 out=$(at 1090)
 check "urgent: not when the limit is not known" '.urgent == false'
@@ -322,6 +367,105 @@ echo '{"peers":[]}' > "$STUB_DIR/peerlist"
 out=$(at 1020)
 check "node changes: beside what the agent published, newest first, last_active its own" '[.activity[].id] == ["node-1020-0","e1"] and .last_active == 1015'
 unset SPACETURTLE_STATE_DIR
+
+# --- threads: what each event refers to, and what refers to it
+new_env; install_toon; running_relay
+echo '{"events":[]}' > "$STUB_DIR/profiles"; echo '{"events":[]}' > "$STUB_DIR/follows"
+echo "$pk" > "$SPACETURTLE_CONFIG_DIR/agent-pubkey"
+t() { jq -cn --arg id "$1" --arg pk "$2" --argjson at "$3" --argjson tags "$4" --argjson kind "${5:-1}" '{id:$id,pubkey:$pk,kind:$kind,created_at:$at,tags:$tags,content:("c"+$id)}'; }
+# feed: a reply to a root the limit left out, and a reply to an event nobody holds
+echo "{\"events\":[$(t r1 "$other" 20 '[["e","root","","reply"]]'),$(t lost "$other" 15 '[["e","gone"]]')]}" > "$STUB_DIR/events"
+echo "{\"events\":[$(t root "$other" 10 '[]')]}" > "$STUB_DIR/by-id"
+echo "{\"events\":[$(t r2 "$pk" 30 '[["e","r1","","reply"],["e","root","","root"]]'),$(t like "$other" 25 '[["e","r1"]]' 7)]}" > "$STUB_DIR/replies"
+echo "{\"events\":[$(t r2 "$pk" 30 '[["e","r1","","reply"],["e","root","","root"]]')]}" > "$STUB_DIR/agent-events"
+out=$("$root/relay-events")
+check "threads: an event outside the limit is fetched by id, as context" '[.context[].id] | index("root") != null'
+check "threads: replies to shown events are fetched, as context" '[.context[].id] | index("like") != null'
+check "threads: a reply refers to the event marked reply, and is not missing when the relay holds it" '.events[] | select(.id == "r1") | .refers_to == "root" and .refers_missing == false'
+check "threads: what refers to an event, oldest first" '(.context[] | select(.id == "root") | .referenced_by) == ["r1"] and (.events[] | select(.id == "r1") | .referenced_by) == ["like","r2"]'
+check "threads: a reply to a missing event is marked missing" '.events[] | select(.id == "lost") | .refers_to == "gone" and .refers_missing == true and .referenced_by == []'
+check "threads: the agent's reply is activity, apart from context" '[.activity[].id] == ["r2"] and ([.context[].id] | index("r2") == null)'
+check "threads: a note refers to nothing" '.context[] | select(.id == "root") | .refers_to == null and .refers_missing == false'
+rm "$STUB_DIR/by-id"
+out=$("$root/relay-events")
+check "threads: a root the relay does not return is missing" '.events[] | select(.id == "r1") | .refers_missing == true'
+
+# a chain deeper than the walk: what is past it is not asked for, so not missing
+rm -f "$STUB_DIR/replies" "$STUB_DIR/agent-events"
+echo "{\"events\":[$(t d4 "$other" 40 '[["e","d3"]]')]}" > "$STUB_DIR/events"
+echo "{\"events\":[$(t d3 "$other" 30 '[["e","d2"]]'),$(t d2 "$other" 20 '[["e","d1"]]'),$(t d1 "$other" 10 '[["e","d0"]]'),$(t d0 "$other" 5 '[]')]}" > "$STUB_DIR/pool"
+out=$("$root/relay-events")
+check "threads: a chain is fetched up to the walk's depth" '[.context[].id] | sort == ["d1","d2","d3"]'
+check "threads: a reference past the walk is not marked missing" '.context[] | select(.id == "d1") | .refers_to == "d0" and .refers_missing == false'
+
+# --- requests: the request script
+bad() { # name, command...: must exit non-zero
+  local name=$1; shift; count=$((count + 1))
+  if "$@" >/dev/null 2>&1; then echo "FAIL $name"; fails=$((fails + 1)); else echo "ok   $name"; fi
+}
+new_env
+queue=$SPACETURTLE_STATE_DIR/requests
+id=$("$root/request" add "Please follow someone interesting")
+out=$(jq -c . "$queue/$id.json")
+check "request: written as a waiting free Request" ".id == \"$id\" and .kind == \"free\" and .state == \"waiting\" and .text == \"Please follow someone interesting\" and (.created_at | type) == \"number\" and .answered_at == null and .result == null and .reason == null"
+[[ $(ls "$queue" | wc -l) -eq 1 ]] || { echo "FAIL request: leftover files in the queue"; fails=$((fails + 1)); }
+"$root/request" withdraw "$id"
+count=$((count + 1))
+if [[ ! -e $queue/$id.json ]]; then echo "ok   request: a waiting Request is withdrawn"; else echo "FAIL request: not withdrawn"; fails=$((fails + 1)); fi
+bad "request: withdrawing it again is refused" "$root/request" withdraw "$id"
+for state in done declined; do
+  id=$("$root/request" add "answered $state")
+  jq --arg s "$state" '.state = $s | .answered_at = 99' "$queue/$id.json" > "$tmp/x" && mv "$tmp/x" "$queue/$id.json"
+  bad "request: a $state Request is not withdrawn" "$root/request" withdraw "$id"
+  count=$((count + 1))
+  if [[ -e $queue/$id.json ]]; then echo "ok   request: the $state Request is still there"; else echo "FAIL request: the $state Request was removed"; fails=$((fails + 1)); fi
+done
+bad "request: an id with a path is refused" "$root/request" withdraw "../../x"
+bad "request: no text for a free Request is refused" "$root/request" add "  "
+bad "request: an unknown kind is refused" "$root/request" add --kind nonsense "x"
+nasty=$'He said "hi" \\ \'quoted\'\nsecond line $(touch '"$tmp"'/pwned) `touch '"$tmp"'/pwned`; touch pwned #\ttab *'
+id=$("$root/request" add "$nasty")
+count=$((count + 1))
+if jq -e --arg t "$nasty" '.text == $t' "$queue/$id.json" >/dev/null; then echo "ok   request: quotes, newlines and shell characters are kept as text"
+else echo "FAIL request: text changed"; fails=$((fails + 1)); fi
+[[ ! -e $tmp/pwned && ! -e pwned ]] || { echo "FAIL request: a command ran"; fails=$((fails + 1)); }
+id=$("$root/request" add --kind follow --pubkey "$pk" "and say hello")
+out=$(jq -c . "$queue/$id.json")
+check "request: a kind and a subject" ".kind == \"follow\" and .subject == {pubkey: \"$pk\", event: null}"
+
+# --- requests in the observation document
+new_env; install_toon; running_relay
+queue=$SPACETURTLE_STATE_DIR/requests; mkdir -p "$queue"
+echo '{"events":[]}' > "$STUB_DIR/events"; echo '{"events":[]}' > "$STUB_DIR/profiles"; echo '{"events":[]}' > "$STUB_DIR/follows"
+echo "$pk" > "$SPACETURTLE_CONFIG_DIR/agent-pubkey"
+ev=$(printf 'c%.0s' {1..64})
+out=$("$root/relay-events")
+check "requests: none in the queue" '.requests == [] and .activity == []'
+echo "{\"id\":\"w\",\"created_at\":100,\"kind\":\"free\",\"subject\":{},\"text\":\"waiting one\",\"state\":\"waiting\",\"answered_at\":null,\"result\":null,\"reason\":null}" > "$queue/1-aa.json"
+echo "{\"id\":\"d\",\"created_at\":110,\"kind\":\"free\",\"subject\":{},\"text\":\"done one\",\"state\":\"done\",\"answered_at\":150,\"result\":{\"event\":\"$ev\"},\"reason\":null}" > "$queue/2-bb.json"
+echo "{\"id\":\"x\",\"created_at\":120,\"kind\":\"free\",\"subject\":{},\"text\":\"declined one\",\"state\":\"declined\",\"answered_at\":140,\"result\":null,\"reason\":\"Not in character\"}" > "$queue/3-cc.json"
+out=$("$root/relay-events")
+check "requests: listed newest first with their states" '[.requests[] | [.id, .state]] == [["3-cc","declined"],["2-bb","done"],["1-aa","waiting"]]'
+check "requests: the answer and the reason" '.requests[1].result.event == "'"$ev"'" and .requests[0].reason == "Not in character"'
+check "requests: answered ones are Activity entries, newest first; a waiting one is not" '[.activity[].id] == ["request:2-bb","request:3-cc"]'
+check "requests: a done entry refers to what the agent published" '.activity[0].refers_to == "'"$ev"'" and .activity[0].request.state == "done" and .activity[0].created_at == 150'
+check "requests: a declined entry carries the reason" '.activity[1].refers_to == null and .activity[1].request.reason == "Not in character"'
+check "requests: an outcome is the agent's last activity" '.last_active == 150'
+echo '{"events":[{"id":"e1","pubkey":"'"$pk"'","kind":1,"created_at":200,"tags":[],"content":"hi"}]}' > "$STUB_DIR/events"
+out=$("$root/relay-events")
+check "requests: outcomes and events share the Activity" '[.activity[].id] == ["e1","request:2-bb","request:3-cc"] and .last_active == 200'
+echo '{ not json' > "$queue/4-dd.json"
+echo '[1,2]' > "$queue/5-ee.json"
+echo '{"id":"m","created_at":"soon","kind":"free","text":"t","state":"waiting"}' > "$queue/6-ff.json"
+echo '{"id":"m","created_at":1,"kind":"free","text":"t","state":"whatever"}' > "$queue/7-gg.json"
+: > "$queue/8-hh.json"
+echo '{"bad' > "$queue/9-ii.json" # last in the queue, so it is the last file read
+out=$("$root/relay-events")
+check "requests: malformed files are skipped and the document is whole" '.online == true and [.requests[].id] == ["3-cc","2-bb","1-aa"] and (.activity | length) == 3'
+echo '{"agent_node":{"toon_apps":[{"apps":[{"name":"relay","running":false}]}]}}' > "$STUB_DIR/status"
+out=$("$root/relay-events")
+check "requests: still listed while the relay is not running" '.online == false and (.requests | length) == 3'
+check "requests: without the relay, the answers are the Activity and the last activity" '[.activity[].id] == ["request:2-bb","request:3-cc"] and .last_active == 150'
 
 echo; echo "$count checks, $fails failed"
 [[ $fails -eq 0 ]]

@@ -34,6 +34,9 @@ Item {
 
   readonly property string script: Qt.resolvedUrl("relay-events").toString().replace(/^file:\/\//, "")
 
+  readonly property string requestScript: Qt.resolvedUrl("request").toString().replace(/^file:\/\//, "")
+  readonly property string markScript: Qt.resolvedUrl("mark-seen").toString().replace(/^file:\/\//, "")
+
   property bool loaded: false
   property bool online: false
   property string relayName: ""
@@ -52,6 +55,11 @@ Item {
   property real lastActive: 0
   // The rest of the relay's feed: the Network.
   property var events: []
+  // Events a thread needs that the feed's limit left out.
+  property var context: []
+  // Every Request, newest first; the agent answers them in its next session.
+  property var requests: []
+  readonly property int waitingCount: requests.filter(function(r) { return r.state === "waiting" }).length
   // The node's state as `relay-events` reports it; null when there is no agent
   // node. Each group in it is null when its command failed.
   property var nodeState: null
@@ -60,34 +68,53 @@ Item {
   // The item an Activity entry asked the Node section to stand on, { group, label },
   // until the section has moved its cursor there.
   property var nodeFocus: null
-  // True while nothing is left of today's spending limit.
-  property bool urgent: false
 
-  // True while the panel is open. Newest created_at seen in the panel; anything
-  // newer puts the dot on the turtle.
+  // True while the panel is open. Opening it records that the Observer looked
+  // (the `mark-seen` script, which keeps the time on disk, so it holds across
+  // restarts and is the same on every monitor).
   property bool looking: false
-  property real seenAt: 0
-  readonly property real newestAt: Math.max(events.length > 0 ? events[0].created_at : 0, lastActive)
-  readonly property bool hasUnseen: loaded && newestAt > seenAt
+  // "none", "news" or "urgent", as relay-events reports it.
+  property string attention: "none"
+  readonly property bool hasUnseen: loaded && attention === "news"
+  readonly property bool urgent: loaded && attention === "urgent"
+  // Set when the Observer looks while a refresh is running: that refresh read
+  // the time of the look before, so its "news" is already seen.
+  property bool lookedDuringFetch: false
 
   // Where the panel was, kept here because the panel is unloaded when it closes.
-  // Sections are numbered as their keys are, from 1; Activity is 1 and Network 2.
+  // Sections are numbered as their keys are, from 1; Activity is 1, Network 2, Requests 4 and Node 5.
   readonly property int activitySection: 1
   readonly property int networkSection: 2
+  readonly property int requestsSection: 4
   readonly property int nodeSection: 5
   property int section: activitySection
   property int cursor: 0
   // The Activity's cursor.
   property int activityCursor: 0
-  // The author page being shown in Network; empty while the feed is.
+  // The Requests section's cursor.
+  property int requestCursor: 0
+  // What Network shows: a thread (the id of the event it was opened on), an
+  // author page (a pubkey), or, while both are empty, the feed.
+  property string threadId: ""
   property string profilePubkey: ""
-  // The feed's cursor, to come back to from an author page.
-  property int feedCursor: 0
+  // The views Esc comes back to, oldest first, each { profile, thread, cursor };
+  // empty while the feed shows, else the first is the feed.
+  property var trail: []
 
-  onLookingChanged: if (looking) seenAt = newestAt
+  onLookingChanged: if (looking) markSeen()
 
+  function markSeen() {
+    if (attention === "news") attention = "none"
+    if (fetchProc.running) lookedDuringFetch = true
+    if (!markProc.running) markProc.running = true
+  }
+
+  // Asked for while a fetch runs, another follows it, so it sees what changed since.
+  property bool refreshAgain: false
   function refresh() {
-    if (!fetchProc.running) fetchProc.running = true
+    if (fetchProc.running) { refreshAgain = true; return }
+    lookedDuringFetch = false
+    fetchProc.running = true
   }
 
   function applyReport(report) {
@@ -117,14 +144,23 @@ Item {
     list.sort(function(a, b) { return b.created_at - a.created_at })
 
     // The cursor stays on its event when newer ones arrive above it.
-    if (root.profilePubkey === "") root.cursor = indexAfter(root.events, list, root.cursor)
-    else root.feedCursor = indexAfter(root.events, list, root.feedCursor)
+    if (root.trail.length === 0) {
+      if (root.profilePubkey === "" && root.threadId === "") root.cursor = indexAfter(root.events, list, root.cursor)
+    } else if (root.trail[0].profile === "" && root.trail[0].thread === "") {
+      var views = root.trail.slice()
+      views[0] = { profile: "", thread: "", cursor: indexAfter(root.events, list, views[0].cursor) }
+      root.trail = views
+    }
+    // In a thread too, showing or kept for Esc: its rows before, by thread id.
+    var threadsBefore = {}
+    root.trail.concat([{ thread: root.threadId }]).forEach(function(view) {
+      if (view.thread !== "") threadsBefore[view.thread] = threadRows(view.thread)
+    })
 
     var acts = report.activity || []
     acts.sort(function(a, b) { return b.created_at - a.created_at })
     root.activityCursor = indexAfter(root.activity, acts, root.activityCursor)
 
-    var first = !root.loaded
     root.profiles = map
     root.followMap = followed
     root.selfPubkey = report.self || ""
@@ -135,13 +171,25 @@ Item {
     root.activity = acts
     root.lastActive = typeof report.last_active === "number" ? report.last_active : 0
     root.events = list
-    root.urgent = report.urgent === true
+    root.context = report.context || []
+    root.trail = root.trail.map(function(view) {
+      if (view.thread === "") return view
+      return { profile: view.profile, thread: view.thread,
+        cursor: indexAfter(threadsBefore[view.thread], threadRows(view.thread), view.cursor) }
+    })
+    if (root.threadId !== "") root.cursor = indexAfter(threadsBefore[root.threadId], threadRows(root.threadId), root.cursor)
+    var reqs = report.requests || []
+    reqs.sort(function(a, b) { return b.created_at - a.created_at })
+    root.requestCursor = indexAfter(root.requests, reqs, root.requestCursor)
+    root.requests = reqs
     root.nodeState = report.state && typeof report.state === "object" ? report.state : null
     root.online = report.online === true
     root.relayName = report.name || ""
     root.loaded = true
-    // Nothing is "new" on the first load, nor while the panel is showing it.
-    if (first || root.looking) root.seenAt = root.newestAt
+    root.attention = report.attention === "urgent" || (report.attention === "news" && !root.lookedDuringFetch)
+      ? report.attention : "none"
+    // Nothing is "new" before the Observer has ever looked, nor while the panel is showing it.
+    if (report.looked_at === null || root.looking) root.markSeen()
   }
 
   // Where the event at `index` of `before` is in `after`; `index` if it is gone.
@@ -164,25 +212,108 @@ Item {
   }
 
   function eventsBy(pubkey) {
-    // The agent's events are only in the Activity, everyone else's only in the Network.
-    var all = pubkey === selfPubkey ? activity : events
+    // The agent's events are only in the Activity, everyone else's only in the
+    // Network; either may have more that only a thread brought in.
+    var all = (pubkey === selfPubkey ? activity : events).concat(context)
     return all.filter(function(e) { return e.pubkey === pubkey })
+      .sort(function(a, b) { return b.created_at - a.created_at })
   }
 
-  // The event an Activity entry refers to, if the feed holds it.
+  // An event the relay held at the last refresh, wherever it was found.
   function eventById(id) {
-    var all = activity.concat(events)
-    for (var i = 0; i < all.length; i++)
-      if (all[i].id === id) return all[i]
+    var all = [activity, events, context]
+    for (var l = 0; l < all.length; l++)
+      for (var i = 0; i < all[l].length; i++)
+        if (all[l][i].id === id) return all[l][i]
     return null
   }
 
-  // Asks the Network to show an event on its author's page, with the cursor on it.
-  signal eventOpened(string id)
+  // Asks the Network to start a view at the top of its page, with the cursor
+  // restored and nothing copied.
+  signal viewOpened()
 
-  // Opens an Activity entry: a node change in the Node section; else the event
-  // it refers to if the feed holds it, else the entry's own, on its author's
-  // page in the Network. The feed's place is kept for Esc.
+  // The conversation an event is part of, in reading order: from the event at
+  // its top (a placeholder, if the relay lacks that one) down through what
+  // refers to each, oldest first. Each row is the event with its `depth`, or
+  // { missing: true, id } for an event the relay does not hold.
+  function threadRows(id) {
+    var focus = eventById(id)
+    if (!focus) return []
+    var top = focus
+    var seen = {}
+    seen[top.id] = true
+    while (top.refers_to) {
+      var parent = eventById(top.refers_to)
+      if (!parent || seen[parent.id]) break
+      seen[parent.id] = true
+      top = parent
+    }
+    var rows = []
+    if (top.refers_missing === true)
+      rows.push({ missing: true, id: top.refers_to, depth: 0, pubkey: "", created_at: 0, parts: ({}) })
+    var visited = {}
+    function walk(event, depth) {
+      if (visited[event.id]) return
+      visited[event.id] = true
+      var row = {}
+      for (var key in event) row[key] = event[key]
+      row.depth = depth
+      rows.push(row)
+      var kids = (event.referenced_by || []).map(eventById).filter(function(e) { return e !== null })
+      kids.sort(function(a, b) { return a.created_at - b.created_at })
+      for (var k = 0; k < kids.length; k++) walk(kids[k], depth + 1)
+    }
+    walk(top, rows.length)
+    return rows
+  }
+
+  // Remembers the view showing, to come back to with Esc.
+  function pushView() {
+    var views = trail.slice()
+    views.push({ profile: profilePubkey, thread: threadId, cursor: cursor })
+    trail = views
+  }
+
+  // Shows the thread an event is in, with the cursor on the event.
+  function openThread(id) {
+    if (!eventById(id)) return
+    pushView()
+    threadId = id
+    profilePubkey = ""
+    var rows = threadRows(id)
+    cursor = 0
+    for (var i = 0; i < rows.length; i++)
+      if (rows[i].id === id) { cursor = i; break }
+    section = networkSection
+    viewOpened()
+  }
+
+  // Shows an author's page.
+  function openAuthor(pubkey) {
+    if (!pubkey) return
+    pushView()
+    threadId = ""
+    profilePubkey = pubkey
+    cursor = 0
+    section = networkSection
+    viewOpened()
+  }
+
+  // Esc in Network: back to the view before. False when the feed is showing.
+  function goBack() {
+    if (trail.length === 0) return false
+    var views = trail.slice()
+    var view = views.pop()
+    trail = views
+    profilePubkey = view.profile
+    threadId = view.thread
+    cursor = view.cursor
+    return true
+  }
+
+  // Opens an Activity entry: a node change in the Node section, a Request's
+  // outcome as below, else the thread of the event it refers to if the feed
+  // holds it, else of the entry itself.
   function openActivity(entry) {
     // A change noticed in the node: the Node section, at the item it concerns.
     if (entry.node_change === true) {
@@ -190,12 +321,43 @@ Item {
       section = nodeSection
       return
     }
+    // A Request's outcome: what the agent published, or the Request and its reason.
+    if (entry.request) {
+      if (entry.refers_to && openEvent(entry.refers_to)) return
+      requestCursor = Math.max(0, requests.map(function(r) { return r.id }).indexOf(entry.request.id))
+      section = requestsSection
+      return
+    }
     var target = (entry.refers_to ? eventById(entry.refers_to) : null) || entry
-    if (profilePubkey === "") feedCursor = cursor
-    profilePubkey = target.pubkey
-    cursor = 0
-    section = networkSection
-    eventOpened(target.id)
+    openThread(target.id)
+  }
+
+  // Opens the thread of an event in the Network; false if the relay does not hold it.
+  function openEvent(id) {
+    if (!eventById(id)) return false
+    openThread(id)
+    return true
+  }
+
+  // Writes a Request, or withdraws a waiting one. The text goes to the script
+  // as an argument, never through a shell.
+  property var pendingCommands: []
+  function submitRequest(text) {
+    if (String(text).trim() === "") return
+    runRequest([requestScript, "add", "--", String(text)])
+  }
+  function withdrawRequest(id) {
+    runRequest([requestScript, "withdraw", String(id)])
+  }
+  function runRequest(command) {
+    pendingCommands = pendingCommands.concat([command])
+    if (!requestProc.running) nextRequestCommand()
+  }
+  function nextRequestCommand() {
+    if (pendingCommands.length === 0) return
+    requestProc.command = pendingCommands[0]
+    pendingCommands = pendingCommands.slice(1)
+    requestProc.running = true
   }
 
   function followingCount(pubkey) {
@@ -223,6 +385,7 @@ Item {
   Process {
     id: fetchProc
     command: [root.script, String(root.eventLimit), String(root.refreshSeconds)]
+    onExited: if (root.refreshAgain) { root.refreshAgain = false; Qt.callLater(root.refresh) }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -235,6 +398,19 @@ Item {
         }
       }
     }
+  }
+
+  Process {
+    id: requestProc
+    onExited: {
+      root.refresh()
+      root.nextRequestCommand()
+    }
+  }
+
+  Process {
+    id: markProc
+    command: [root.markScript]
   }
 
   Timer {
