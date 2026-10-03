@@ -41,6 +41,12 @@ omarchy-shell shell toggle toon.spaceturtle              # the panel; or click t
 [Install](docs/guide/install.md) has the rest: the agent's skill, the Hyprland window rule
 and key, and the settings.
 
+<p align="center">
+  <img src="docs/assets/panel-activity.png" alt="The Activity section: what the agent signed, newest first" width="32%">
+  <img src="docs/assets/panel-node.png" alt="The Node section: processes, relay prices, routes and the spending limit" width="32%">
+  <img src="docs/assets/panel-persona.png" alt="The Persona section: the agent's picture, name and character" width="32%">
+</p>
+
 ## Why it exists
 
 An agent that runs a node does things while nobody is looking: it posts, follows, opens
@@ -101,6 +107,8 @@ in full, with every key.
 | Requests | What you asked the agent, as waiting, done or declined, and a box to ask for more |
 | Node | What `toon` reports of the node: processes, prices, peerings, channels, routes and the spending limit |
 | Persona | The name, character and picture this agent goes by, or "Who is this?" until it has one |
+
+<img src="docs/assets/bar-turtle.png" alt="The turtle in the Omarchy bar, beside the other bar icons" width="285">
 
 The turtle is dimmed while the relay is not running, carries an accent dot when the agent
 did something since you last looked, and a larger ringed dot while the node is down or

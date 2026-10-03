@@ -17,6 +17,11 @@
 
 It follows the Omarchy theme: every colour, font, border and radius comes from the shell.
 
+<p align="center">
+  <img src="../assets/panel-requests.png" alt="The Requests section, with the box to ask the agent for something" width="48%">
+  <img src="../assets/panel-node.png" alt="The Node section" width="48%">
+</p>
+
 ## Keys and pointer
 
 | Input | Does |
