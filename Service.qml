@@ -52,6 +52,11 @@ Item {
   property real lastActive: 0
   // The rest of the relay's feed: the Network.
   property var events: []
+  // The node's state as `relay-events` reports it; null when there is no agent
+  // node. Each group in it is null when its command failed.
+  property var nodeState: null
+  // The Node section's cursor.
+  property int nodeCursor: 0
 
   // True while the panel is open. Newest created_at seen in the panel; anything
   // newer puts the dot on the turtle.
@@ -124,6 +129,7 @@ Item {
     root.activity = acts
     root.lastActive = typeof report.last_active === "number" ? report.last_active : 0
     root.events = list
+    root.nodeState = report.state && typeof report.state === "object" ? report.state : null
     root.online = report.online === true
     root.relayName = report.name || ""
     root.loaded = true
