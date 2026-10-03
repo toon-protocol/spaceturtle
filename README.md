@@ -4,8 +4,9 @@ An [Omarchy](https://omarchy.org/) shell plugin for your [TOON](https://github.c
 
 ## What it does
 
-- **Panel.** A floating window with six sections: Activity, Network, Messages, Requests, Node and Persona. The panel opens on Activity. Activity and Network have content so far; Messages says that private messages are locked.
+- **Panel.** A floating window with six sections: Activity, Network, Messages, Requests, Node and Persona. The panel opens on Activity. Activity, Network and Requests have content so far; Messages says that private messages are locked.
 - **Activity.** What the agent identity signed, newest first, with when it was last active in words. Enter opens the event an entry refers to (or the entry itself) on its author's page in Network, with the cursor on it. Without the public key file it says the agent is not yet known.
+- **Requests.** Ask the agent for something in your own words: a text box, and every Request below it as waiting, done or declined. A done one opens the event the agent published (Enter); a declined one shows the agent's reason; a waiting one can be withdrawn (`x`). The section says how many are waiting and that the agent answers in its next session. An answer also appears in Activity and puts the dot on the turtle. Writing a Request needs no passphrase and costs nothing.
 - **Network.** The rest of the relay's feed, without the agent's own events. Notes, replies, reposts, reactions, comments and long-form posts from the relay, newest first, each with its author's picture and name.
 - **Author page.** Open an event: picture, name, about, website and public key (as `npub1…`); on the agent's own page also the node's ILP address and connector URL, then that author's events. Each value can be copied.
 - **Counters.** Followers and following on every page; on the agent's own, also how many hold a subscription to your relay's live feed (`–` while the relay does not sell it).
@@ -52,6 +53,8 @@ Omarchy 4.0.4 leaves `SUPER + CTRL + U` free; any key will do. Without the windo
 | Enter, Space, Right, `l` | Open the author of the event under the cursor; on an author page, copy the value |
 | `o` | Open the web address under the cursor in the browser |
 | `r` | Refresh now |
+| `i` | In Requests, write a new Request (Enter sends, Esc leaves the box; while it has focus the panel's keys are off) |
+| `x` | In Requests, withdraw the waiting Request under the cursor |
 | Esc | Back from an author page; at the top level, close the panel |
 | Left, `h` | Back from an author page |
 
@@ -83,11 +86,13 @@ Nothing here opens the wallet's keystore, so nothing needs its passphrase. Only 
 
 A profile is untrusted input: everything from it is rendered as plain text, a picture is loaded only from an `http(s)` URL, and copied values are passed to `wl-copy` as an argument, never through a shell.
 
-`relay-events` takes `SPACETURTLE_TOON` (the `toon` command) and `SPACETURTLE_CONFIG_DIR` from the environment, which is how the tests run it against a stub.
+A Request is one JSON file in `~/.local/state/spaceturtle/requests/`, written by the `request` script (`request add TEXT`, `request withdraw ID`); the UI runs it with arguments, never through a shell. Only the agent changes a file's `state` (`waiting`, `done`, `declined`), `result` (`{"event": id}`) and `reason`. A file that is not a valid Request is skipped.
+
+`relay-events` takes `SPACETURTLE_TOON` (the `toon` command) and `SPACETURTLE_CONFIG_DIR` from the environment (and `request` and `relay-events` `SPACETURTLE_STATE_DIR`), which is how the tests run it against a stub.
 
 ## Tests
 
-`tests/run` runs `relay-events` against a stub `toon` and `curl` in a temporary home. It needs only bash and `jq`, and is what the `gate` job of `.github/workflows/ci.yml` runs.
+`tests/run` runs `relay-events` and `request` against a stub `toon` and `curl` in a temporary home. It needs only bash and `jq`, and is what the `gate` job of `.github/workflows/ci.yml` runs.
 
 ## Files
 
@@ -97,9 +102,10 @@ A profile is untrusted input: everything from it is rendered as plain text, a pi
 | `Service.qml` | Runs the scripts and holds the relay's state, and where the panel was |
 | `BarWidget.qml` | The turtle in the bar |
 | `Panel.qml` | The floating window, its keys and its sections |
-| `SectionTabs.qml`, `ActivitySection.qml`, `NetworkSection.qml` | The section tabs; what the agent did; the feed and the author pages |
+| `SectionTabs.qml`, `ActivitySection.qml`, `NetworkSection.qml`, `RequestsSection.qml` | The section tabs; what the agent did; the feed and the author pages; the Requests |
 | `Avatar.qml`, `TurtleIcon.qml` | Profile picture and the icon |
-| `relay-events` | Prints the agent's activity, the relay's other events, profiles, follow lists and node addresses as one JSON document |
+| `relay-events` | Prints the agent's activity, the relay's other events, profiles, follow lists and node addresses and the Requests as one JSON document |
+| `request` | Writes a Request into the queue, or withdraws a waiting one |
 | `tests/run` | The tests of `relay-events` |
 
 Saving a file in an installed copy reloads the plugin. If a change does not show, run `omarchy restart shell`.

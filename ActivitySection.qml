@@ -58,6 +58,7 @@ Item {
   }
 
   function verbOf(event) {
+    if (event.request) return event.request.state === "done" ? "Request done" : "Request declined"
     switch (event.kind) {
     case 6:
     case 16: return "Reposted"
@@ -69,6 +70,10 @@ Item {
   }
 
   function bodyOf(event) {
+    if (event.request) {
+      var reason = event.request.reason ? "\n" + event.request.reason : ""
+      return String(event.request.text) + reason
+    }
     switch (event.kind) {
     case 6:
     case 16: return ""

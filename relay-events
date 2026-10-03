@@ -1,17 +1,22 @@
 #!/bin/bash
 # Print what can be observed of this agent node as one JSON document:
 # {"online", "name", "self", "node", "subscribers", "profiles", "follows",
-# "activity", "last_active", "events"}. "activity" is what the agent identity
-# signed, newest first, each entry with the id of the event it refers to
-# ("refers_to", or null); "last_active" is its newest created_at, or null;
-# "events" is the rest of the feed, without the agent's. Read-only: nothing
-# here opens the keystore or publishes.
+# "activity", "last_active", "events", "requests"}. "activity" is what the agent
+# identity signed and the Requests it answered, newest first, each entry with
+# the id of the event it refers to ("refers_to", or null); an answered Request
+# is an entry with a "request" field and the id "request:<id>". "last_active"
+# is the newest created_at of the entries, or null; "events" is the rest of
+# the feed, without the agent's; "requests" is every Request in the queue,
+# newest first (a file that is not a valid Request is skipped). Read-only:
+# nothing here opens the keystore or publishes.
 #
 # The relay's read port changes on every `toon up`, so it is looked up from
 # `toon status` each time. Environment, so that tests can run against a stub:
 #   SPACETURTLE_TOON        the toon command (default: toon)
 #   SPACETURTLE_CONFIG_DIR  where the agent writes its public key, in the file
 #                           `agent-pubkey` (default: ~/.config/spaceturtle)
+#   SPACETURTLE_STATE_DIR   where `request` keeps its queue, in `requests`
+#                           (default: ~/.local/state/spaceturtle)
 #   HOME                    ~/.local/bin is put on PATH
 set -uo pipefail
 PATH="$HOME/.local/bin:$PATH"
@@ -19,11 +24,46 @@ PATH="$HOME/.local/bin:$PATH"
 toon_cmd=${SPACETURTLE_TOON:-toon}
 config_dir=${SPACETURTLE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/spaceturtle}
 
+state_dir=${SPACETURTLE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/spaceturtle}
+
 limit=${1:-40}
 [[ $limit =~ ^[0-9]+$ ]] || limit=40
 
+# The Requests in the queue, newest first. They are local files, so they are
+# listed whether or not the relay runs. The id is the file's name.
+read_requests() {
+  local file
+  [[ -d $state_dir/requests ]] || { echo '[]'; return; }
+  for file in "$state_dir"/requests/*.json; do
+    [[ -f $file ]] || continue
+    jq -ce --arg id "$(basename "$file" .json)" '
+      select(type == "object"
+        and (.created_at | type == "number")
+        and (.kind | type == "string")
+        and (.text | type == "string")
+        and (.state == "waiting" or .state == "done" or .state == "declined"))
+      | {id: $id, created_at, kind, text, state,
+         subject: (.subject | if type == "object" then . else {} end),
+         answered_at: (.answered_at | numbers // null),
+         result: (.result | if type == "object" then . else null end),
+         reason: (.reason | strings // null)}' "$file" 2>/dev/null
+  done | jq -sc 'sort_by(-.created_at)' 2>/dev/null || echo '[]'
+}
+
+# What the agent answered, as Activity entries.
+request_activity() {
+  jq -c --arg self "$1" '
+    map(select(.state != "waiting")
+      | {id: ("request:" + .id), pubkey: $self, kind: null, tags: [], content: .text,
+         created_at: (.answered_at // .created_at),
+         refers_to: (.result.event | strings // null), request: .})' <<<"$2"
+}
+
+requests=$(read_requests)
+
 offline() {
-  printf '{"online":false,"name":"","self":"","node":{"ilp_address":"","connector":""},"subscribers":null,"profiles":[],"follows":[],"activity":[],"last_active":null,"events":[]}\n'
+  jq -cn --argjson requests "${requests:-[]}" \
+    '{online:false,name:"",self:"",node:{ilp_address:"",connector:""},subscribers:null,profiles:[],follows:[],activity:[],last_active:null,events:[],requests:$requests}'
   exit 0
 }
 
@@ -75,15 +115,19 @@ jq -cn --arg name "${name:-}" --arg self "$self" \
   --argjson subscribers "${subscribers:-null}" --argjson events "${events:-[]}" \
   --argjson profiles "${profiles:-[]}" --argjson follows "${follows:-[]}" \
   --argjson agent "${agent_events:-[]}" \
+  --argjson requests "${requests:-[]}" \
+  --argjson answered "$(request_activity "$self" "${requests:-[]}")" \
   '(if $self == "" then []
     else ([$agent[], $events[]] | map(select(.pubkey == $self)) | unique_by(.id)
       | sort_by(-.created_at)
       # The "e" tag marked "reply" (NIP-10), else the last one.
       | map(. + {refers_to: ([.tags[]? | select(.[0] == "e" and (.[1] | strings))]
           | ((map(select(.[3]? == "reply")) | first) // last) | .[1]? // null)}))
-    end) as $activity
+    end) as $signed
+  # Answers count whether or not the public key is known.
+  | ($signed + $answered | sort_by(-.created_at)) as $activity
   | {online: true, name: $name, self: $self,
     activity: $activity, last_active: ($activity[0].created_at? // null),
     node: ($node // {ilp_address: "", connector: ""}),
-    subscribers: $subscribers, profiles: $profiles, follows: $follows,
+    requests: $requests, subscribers: $subscribers, profiles: $profiles, follows: $follows,
     events: ($events | map(select(.pubkey != $self)))}'
