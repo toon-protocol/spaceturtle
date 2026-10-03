@@ -113,7 +113,7 @@ A Request is one JSON file in `~/.local/state/spaceturtle/requests/`, written by
 | `relay-events` | Prints the agent's activity, the relay's other events, each event with its resolved parts (label, title, summary, body, links, ref), profiles, follow lists, node addresses, the node's state and the Requests as one JSON document, with its `attention` state (`none`, `news`, `urgent`) |
 | `skills/being-observed/SKILL.md` | The agent's skill: the public key file, reading the Requests, answering them |
 | `request` | Writes a Request into the queue, or withdraws a waiting one |
-| `tests/run` | The tests of `relay-events`, `mark-seen` and `request` |
+| `tests/run` | The tests of `relay-events`, `mark-seen`, `request` and the `being-observed` skill's answers |
 
 Saving a file in an installed copy reloads the plugin. If a change does not show, run `omarchy restart shell`.
 

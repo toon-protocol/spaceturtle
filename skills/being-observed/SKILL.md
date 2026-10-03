@@ -9,23 +9,25 @@ Spaceturtle is a bar widget and panel that watches your node. The person at the 
 
 ## Setup: the public key file
 
-The UI recognises you by one file: `~/.config/spaceturtle/agent-pubkey`, holding your public key as 64 lowercase hex characters and a newline. Write it once, during setup, and again if your identity changes.
+The UI recognises you by one file: `~/.config/spaceturtle/agent-pubkey` (`SPACETURTLE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/spaceturtle`, moves its folder), holding your public key as 64 lowercase hex characters and a newline. Write it once, during setup, and again if your identity changes.
 
 Take the key from your own identity. You already hold it, and a public key needs no passphrase. If you only have the `npub1…` form, decode it to hex. Never ask the Observer for a passphrase, never paste one anywhere, and never put a secret key (`nsec1…`, or 64 hex characters that are not your public key) in that file. The UI must not be able to sign as you.
 
 ```sh
-mkdir -p ~/.config/spaceturtle
-printf '%s\n' "$PUBKEY_HEX" > ~/.config/spaceturtle/agent-pubkey   # PUBKEY_HEX: 64 lowercase hex characters
+config=${SPACETURTLE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/spaceturtle}
+mkdir -p "$config"
+printf '%s\n' "$PUBKEY_HEX" > "$config/agent-pubkey"   # PUBKEY_HEX: 64 lowercase hex characters
 ```
 
 Without the file, or if it is not 64 lowercase hex characters, the panel says the agent is not yet known and marks none of the pages as yours.
 
 ## Start of a session: read the Requests
 
-The queue is a directory of JSON files, `~/.local/state/spaceturtle/requests/` (the `SPACETURTLE_STATE_DIR` variable moves its parent). Read the waiting ones first thing:
+The queue is a directory of JSON files, `~/.local/state/spaceturtle/requests/` (`SPACETURTLE_STATE_DIR`, else `$XDG_STATE_HOME/spaceturtle`, moves its parent). Read the waiting ones first thing:
 
 ```sh
-for f in ~/.local/state/spaceturtle/requests/*.json; do
+queue=${SPACETURTLE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/spaceturtle}/requests
+for f in "$queue"/*.json; do
   [ -f "$f" ] && jq -e '.state == "waiting"' "$f" >/dev/null 2>&1 && { echo "== $f"; jq . "$f"; }
 done
 ```
@@ -58,6 +60,7 @@ Decide for each one. You may do it, or decline it. Decline a Request that goes a
 
 ```sh answer-done
 # FILE: the Request's path; EVENT: the id of the event you published (64 lowercase hex characters); NOW: date +%s
+jq -e '.state == "waiting"' "$FILE" >/dev/null &&
 jq --argjson now "$NOW" --arg event "$EVENT" \
   '.state = "done" | .answered_at = $now | .result = {event: $event}' "$FILE" > "$FILE.tmp" && mv "$FILE.tmp" "$FILE"
 ```
@@ -68,10 +71,11 @@ The panel opens that event from the Request, shows it in Activity, and lights th
 
 ```sh answer-declined
 # FILE: the Request's path; REASON: one sentence; NOW: date +%s
+jq -e '.state == "waiting"' "$FILE" >/dev/null &&
 jq --argjson now "$NOW" --arg reason "$REASON" \
   '.state = "declined" | .answered_at = $now | .reason = $reason' "$FILE" > "$FILE.tmp" && mv "$FILE.tmp" "$FILE"
 ```
 
 ### What you may change
 
-In a Request file you change `state`, `answered_at`, `result` and `reason`, and nothing else. Do not edit `id`, `created_at`, `kind`, `subject` or `text`, do not create, rename or delete Request files, and do not touch a Request that is already `done` or `declined`: the file is the record of what you did. Only the Observer removes a waiting Request (withdraws it). Write the file whole and move it into place, as above, so the UI never reads half a file.
+In a Request file you change `state`, `answered_at`, `result` and `reason`, and nothing else. Do not edit `id`, `created_at`, `kind`, `subject` or `text`, do not create, rename or delete Request files (beyond the `.tmp` file each answer writes and moves into place), and do not touch a Request that is already `done` or `declined`: the file is the record of what you did. Only the Observer removes a waiting Request (withdraws it); the answers above write nothing if the Request is gone or no longer waiting. Write the file whole and move it into place, as above, so the UI never reads half a file.

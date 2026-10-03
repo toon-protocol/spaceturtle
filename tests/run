@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs relay-events and mark-seen against a stub `toon` and `curl` in a temporary home.
+# Runs relay-events, mark-seen, request and the being-observed skill's answers against a stub `toon` and `curl` in a temporary home.
 # Needs only bash and jq. Usage: tests/run
 set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -362,10 +362,20 @@ check "skill: a declined answer shows as declined with its reason" ".requests[] 
 check "skill: both answers are Activity entries" "[.activity[].id] == [\"request:$b\", \"request:$a\"] and .activity[1].refers_to == \"$ev\""
 # Nothing but state, answered_at, result and reason changed.
 count=$((count + 1))
-if [[ $(jq -S 'del(.state, .answered_at, .result, .reason)' "$queue/$a.json") == $(jq -S 'del(.state, .answered_at, .result, .reason)' "$tmp/a.before") \
-   && $(jq -S 'del(.state, .answered_at, .result, .reason)' "$queue/$b.json") == $(jq -S 'del(.state, .answered_at, .result, .reason)' "$tmp/b.before") \
+unanswered() { jq -S 'del(.state, .answered_at, .result, .reason)' "$1"; }
+if [[ $(unanswered "$queue/$a.json") == $(unanswered "$tmp/a.before") \
+   && $(unanswered "$queue/$b.json") == $(unanswered "$tmp/b.before") \
    && $(ls -A "$queue" | wc -l) -eq 2 ]]; then echo "ok   skill: only state, answered_at, result and reason changed, and no file was left or added"
 else echo "FAIL skill: an answer changed more than it may"; fails=$((fails + 1)); fi
+# An answered Request is left alone, and a withdrawn one is not brought back.
+c=$("$root/request" add "withdraw me"); "$root/request" withdraw "$c" >/dev/null
+FILE=$queue/$a.json REASON="Changed my mind" NOW=700 bash -c "$(block answer-declined)" 2>/dev/null
+FILE=$queue/$c.json EVENT=$ev NOW=700 bash -c "$(block answer-done)" 2>/dev/null
+out=$("$root/relay-events")
+check "skill: an answer leaves a done Request and a withdrawn one alone" ".requests[] | select(.id == \"$a\") | .state == \"done\" and .answered_at == 500"
+count=$((count + 1))
+if [[ ! -e $queue/$c.json && $(ls -A "$queue" | wc -l) -eq 2 ]]; then echo "ok   skill: a withdrawn Request stays withdrawn"
+else echo "FAIL skill: a withdrawn Request came back"; fails=$((fails + 1)); fi
 
 echo; echo "$count checks, $fails failed"
 [[ $fails -eq 0 ]]
