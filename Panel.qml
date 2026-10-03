@@ -22,13 +22,14 @@ Item {
 
   // In key order: section n is opened by number key n.
   readonly property var sections: ["Activity", "Network", "Messages", "Requests", "Node", "Persona"]
+  readonly property int activitySection: 1
   readonly property int networkSection: 2
   readonly property int messagesSection: 3
   readonly property int nodeSection: 5
-  readonly property int section: service ? service.section : networkSection
+  readonly property int section: service ? service.section : activitySection
   // The section that has a cursor to move, if the one showing does.
-  readonly property var cursorSection: section === networkSection ? network.item
-    : (section === nodeSection ? node.item : null)
+  readonly property var cursorSection: section === activitySection ? activity.item
+    : (section === networkSection ? network.item : (section === nodeSection ? node.item : null))
 
   function open(payloadJson) {
     closingFromHost = false
@@ -133,6 +134,14 @@ Item {
 
           // Waits for the service, so the section never has to ask whether it has one.
           Loader {
+            id: activity
+            anchors.fill: parent
+            active: root.service !== null
+            visible: root.section === root.activitySection
+            sourceComponent: ActivitySection { service: root.service }
+          }
+
+          Loader {
             id: network
             anchors.fill: parent
             active: root.service !== null
@@ -150,7 +159,7 @@ Item {
 
           // The sections that are still to be built; and a panel with no service.
           Text {
-            visible: (root.section !== root.networkSection && root.section !== root.nodeSection) || !root.service
+            visible: (root.section !== root.activitySection && root.section !== root.networkSection && root.section !== root.nodeSection) || !root.service
             anchors.centerIn: parent
             width: parent.width
             horizontalAlignment: Text.AlignHCenter

@@ -39,6 +39,7 @@ case "$1 $2" in
     f="$STUB_DIR/$1$2"; [[ -r $f ]] && cat "$f" || exit 1 ;;
   "event query")
     case "$*" in
+      *'"authors"'*) if [[ -r $STUB_DIR/agent-events ]]; then cat "$STUB_DIR/agent-events"; else echo '{"events":[]}'; fi ;;
       *'"kinds":[0]'*) cat "$STUB_DIR/profiles" ;;
       *'"kinds":[3]'*) cat "$STUB_DIR/follows" ;;
       *) cat "$STUB_DIR/events" ;;
@@ -60,7 +61,7 @@ check() { # name, jq expression that must be true of $out
   else echo "FAIL $1"; echo "     expression: $2"; echo "     document:   $out"; fails=$((fails + 1)); fi
 }
 
-OFFLINE='.online == false and .name == "" and .self == "" and .subscribers == null and .profiles == [] and .follows == [] and .events == [] and .node == {ilp_address: "", connector: ""}'
+OFFLINE='.online == false and .name == "" and .self == "" and .subscribers == null and .profiles == [] and .follows == [] and .activity == [] and .last_active == null and .events == [] and .node == {ilp_address: "", connector: ""}'
 pk=$(printf 'a%.0s' {1..64}); other=$(printf 'b%.0s' {1..64})
 
 # --- no toon
@@ -84,15 +85,31 @@ echo '{"name":"Shelly relay","ilp_address":"g.toon.shelly","connector":"https://
 out=$("$root/relay-events" 25)
 check "events: online, with the relay's name" '.online == true and .name == "Shelly"'
 check "events: every event the relay returned" '[.events[].id] == ["e1","e2"]'
-grep -q '"kinds":\[1,6,7,16,1111,30023\]' "$STUB_DIR/calls" || { echo "FAIL events: feed kinds not asked for"; fails=$((fails + 1)); }
+! grep -q '"limit":25.*"kinds"\|"kinds".*"limit":25' "$STUB_DIR/calls" || { echo "FAIL events: the feed query is limited to kinds"; fails=$((fails + 1)); }
 check "events: profiles and follow lists" '(.profiles | length) == 1 and (.follows[0].tags == [["p","'"$other"'"]])'
 grep -q '"limit":25' "$STUB_DIR/calls" || { echo "FAIL events: limit not passed"; fails=$((fails + 1)); }
 check "events: ILP and connector come from NIP-11" '.node == {ilp_address: "g.toon.shelly", connector: "https://node.example:8080"}'
 check "events: no public key file, no self" '.self == ""'
+check "events: without a key the agent is unknown, and the Network holds every event" '.activity == [] and .last_active == null and ([.events[].id] == ["e1","e2"])'
 check "events: subscribers null while not sold" '.subscribers == null'
 echo "$pk" > "$SPACETURTLE_CONFIG_DIR/agent-pubkey"
 out=$("$root/relay-events")
 check "events: the public key file marks the agent" ".self == \"$pk\""
+check "activity: the agent's events, apart from the Network's" '[.activity[].id] == ["e1"] and ([.events[].id] == ["e2"])'
+check "activity: the time of the latest activity" '.last_active == 10'
+echo "{\"events\":[{\"id\":\"e0\",\"pubkey\":\"$pk\",\"kind\":7,\"created_at\":20,\"tags\":[[\"e\",\"e2\"],[\"p\",\"$other\"]],\"content\":\"+\"}]}" > "$STUB_DIR/agent-events"
+out=$("$root/relay-events")
+check "activity: an agent event beyond the feed's limit is found, and says what it refers to" '[.activity[].id] == ["e0","e1"] and .activity[0].refers_to == "e2" and .activity[1].refers_to == null and .last_active == 20'
+check "activity: the Network excludes the agent's events" '[.events[].id] == ["e2"]'
+echo "{\"events\":[{\"id\":\"e0\",\"pubkey\":\"$pk\",\"kind\":1,\"created_at\":5,\"tags\":[[\"e\",\"p1\",\"\",\"reply\"],[\"e\",\"r1\",\"\",\"root\"]],\"content\":\"re\"}]}" > "$STUB_DIR/agent-events"
+out=$("$root/relay-events")
+check "activity: newest first, wherever each event was found" '[.activity[].id] == ["e1","e0"] and .last_active == 10'
+check "activity: a reply refers to the event marked reply, not the root" '.activity[1].refers_to == "p1"'
+rm "$STUB_DIR/agent-events"
+echo "{\"events\":[{\"id\":\"e2\",\"pubkey\":\"$other\",\"kind\":1,\"created_at\":5,\"tags\":[],\"content\":\"x\"}]}" > "$STUB_DIR/events"
+out=$("$root/relay-events")
+check "activity: an agent that has done nothing" '.self != "" and .activity == [] and .last_active == null'
+echo "{\"events\":[{\"id\":\"e1\",\"pubkey\":\"$pk\",\"kind\":1,\"created_at\":10,\"tags\":[],\"content\":\"hi\"},{\"id\":\"e2\",\"pubkey\":\"$other\",\"kind\":30023,\"created_at\":5,\"tags\":[],\"content\":\"long form\"}]}" > "$STUB_DIR/events"
 echo '{"ilp_address":5,"connector":"https://node.example:8080"}' > "$STUB_DIR/nip11"
 out=$("$root/relay-events")
 check "events: a non-string NIP-11 field leaves the other" '.node == {ilp_address: "", connector: "https://node.example:8080"}'
@@ -143,6 +160,61 @@ check "state: a failing status is unavailable, the rest shows" '.state.status ==
 echo '{}' > "$STUB_DIR/status"
 out=$("$root/relay-events")
 check "state: no agent node, no state" '.state == null and .online == false'
+
+# --- the parts of each kind
+new_env; install_toon; running_relay
+echo '{"events":[]}' > "$STUB_DIR/profiles"; echo '{"events":[]}' > "$STUB_DIR/follows"
+ev() { jq -cn --argjson k "$1" --arg c "$2" --argjson t "$3" '{id:("k"+($k|tostring)+$c[0:3]),pubkey:"'"$pk"'",kind:$k,created_at:1,tags:$t,content:$c}'; }
+{
+  echo '{"events":['
+  ev 0 '{"name":"Shelly","about":"turtle"}' '[]'; echo ,
+  ev 1 'hello' '[]'; echo ,
+  ev 1 'a reply' '[["e","'"$other"'"]]'; echo ,
+  ev 3 '' '[["p","'"$other"'"],["p","'"$pk"'"]]'; echo ,
+  ev 5 'mistake' '[["e","'"$other"'"]]'; echo ,
+  ev 6 '' '[["e","'"$other"'"]]'; echo ,
+  ev 7 '+' '[["e","'"$other"'"]]'; echo ,
+  ev 16 '' '[["e","'"$other"'"]]'; echo ,
+  ev 1111 'a comment' '[["e","'"$other"'"]]'; echo ,
+  ev 30023 'long text' '[["title","A Title"],["summary","Sum"],["r","https://a.example/x"],["r","javascript:alert(1)"]]'; echo ,
+  ev 30817 'draft text' '[["d","nip-x"],["title","Draft"]]'; echo ,
+  ev 31337 'raw' '[["alt","A thing"],["x","y","z"]]'; echo ,
+  ev 31338 'raw2' '[]'; echo ,
+  ev 31339 'raw3' '[["k","v"],["e","'"$other"'"]]'
+  echo ']}'
+} > "$STUB_DIR/events"
+out=$("$root/relay-events")
+P() { echo ".events[] | select(.kind == $1) | .parts | $2"; }
+check "parts 0: name and about" "$(P 0 '.label == "updated profile" and .title == "Shelly" and .summary == "turtle" and .body == ""')"
+check "parts 1: a note" "$(P 1 'select(.ref == "") | .label == "" and .body == "hello"')"
+check "parts 1: a reply refers to its event" "$(P 1 'select(.body == "a reply") | .label == "replied" and .ref == "'"$other"'"')"
+check "parts 3: follows counted" "$(P 3 '.label == "updated follows" and .body == "2 followed"')"
+check "parts 5: deletion refers to its target" "$(P 5 '.label == "deleted" and .ref == "'"$other"'" and .summary == "1 deleted"')"
+check "parts 6: repost" "$(P 6 '.label == "reposted" and .ref == "'"$other"'" and .body == ""')"
+check "parts 7: reaction" "$(P 7 '.label == "reacted" and .body == "󰋑"')"
+check "parts 16: generic repost" "$(P 16 '.label == "reposted" and .ref == "'"$other"'"')"
+check "parts 1111: comment" "$(P 1111 '.label == "commented" and .body == "a comment"')"
+check "parts 30023: article, only http(s) links" "$(P 30023 '.label == "published" and .title == "A Title" and .summary == "Sum" and .links == ["https://a.example/x"]')"
+check "parts 30817: NIP draft" "$(P 30817 '.label == "drafted" and .title == "Draft" and .body == "draft text"')"
+check "parts unknown with alt: alt, kind, tags, content" "$(P 31337 '.label == "kind 31337" and .title == "A thing" and .summary == "alt A thing, x y z" and .body == "raw"')"
+check "parts unknown without alt: kind, content" "$(P 31338 '.label == "kind 31338" and .title == "" and .summary == "" and .body == "raw2"')"
+check "parts unknown without alt, with tags: kind, tags, content" "$(P 31339 '.label == "kind 31339" and .title == "" and .summary == "k v, e '"$other"'" and .body == "raw3"')"
+check "parts: every event has all the parts" '[.events[].parts | keys == ["body","label","links","ref","summary","title"]] | all'
+
+# --- malformed tags and content cost only the odd part, never the feed
+new_env; install_toon; running_relay
+echo '{"events":[]}' > "$STUB_DIR/profiles"; echo '{"events":[]}' > "$STUB_DIR/follows"
+echo '{"events":[
+  {"id":"m3","kind":3,"tags":["p",{"a":1}],"content":""},
+  {"id":"m5","kind":5,"tags":[{"a":1},"e"],"content":""},
+  {"id":"m1","kind":1,"tags":"oops","content":"still here"},
+  {"id":"m7","kind":7,"tags":[],"content":null}
+]}' > "$STUB_DIR/events"
+out=$("$root/relay-events")
+check "malformed: every event survives" '[.events[].id] == ["m3","m5","m1","m7"]'
+check "malformed: no tags counted" '[.events[] | select(.id == "m3" or .id == "m5") | .parts | .body, .summary] == ["0 followed","","","0 deleted"]'
+check "malformed: a note with string tags" '.events[] | select(.id == "m1") | .parts | .body == "still here" and .ref == "" and .links == []'
+check "malformed: a reaction without content" '.events[] | select(.id == "m7") | .parts.body == "󰋑"'
 
 # --- hostile profile fields stay data
 new_env; install_toon; running_relay
