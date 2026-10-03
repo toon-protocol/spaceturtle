@@ -1,21 +1,34 @@
 #!/bin/bash
 # Print what can be observed of this agent node as one JSON document:
-# {"online", "name", "self", "node", "subscribers", "profiles", "follows",
-# "activity", "last_active", "events", "requests"}. "activity" is what the agent
-# identity signed and the Requests it answered, newest first, each entry with
-# the id of the event it refers to ("refers_to", or null); an answered Request
-# is an entry with a "request" field and the id "request:<id>". "last_active"
-# is the newest created_at of the entries, or null; "events" is the rest of
-# the feed, without the agent's; "requests" is every Request in the queue,
-# newest first (a file that is not a valid Request is skipped). Read-only:
-# nothing here opens the keystore or publishes.
+# {"online", "name", "self", "node", "subscribers", "state", "profiles",
+# "follows", "activity", "last_active", "events", "requests", "attention",
+# "looked_at"}. "activity" is what the agent identity signed and the Requests it
+# answered, newest first, each entry with the id of the event it refers to
+# ("refers_to", or null); an answered Request is an entry with a "request" field
+# and the id "request:<id>". "last_active" is the newest created_at of the
+# entries, or null; "events" is the rest of the feed, without the agent's;
+# "requests" is every Request in the queue, newest first (a file that is not a
+# valid Request is skipped). "attention" is "none", "news" (an Activity entry,
+# or an event tagging the agent, is newer than the last time the Observer
+# looked) or "urgent" (the node is not running); "looked_at" is when the
+# Observer last looked, or null.
+# Read-only: nothing here opens the keystore, spends, changes state or
+# publishes. Only free `toon` commands are run: status, relay config, peer list,
+# channel list, route list, limit show, relay subscriptions and logs. Wallet
+# balances are never read (they need the passphrase, ADR 0001).
+#
+# "state" is the node as `toon` reports it, or null when there is no agent node.
+# Each group in it (status, relay, peers, channels, routes, limits,
+# subscriptions, logs) is null when its command failed, returned an error
+# document or answered in a shape not understood, so the rest still shows.
 #
 # The relay's read port changes on every `toon up`, so it is looked up from
 # `toon status` each time. Environment, so that tests can run against a stub:
 #   SPACETURTLE_TOON        the toon command (default: toon)
 #   SPACETURTLE_CONFIG_DIR  where the agent writes its public key, in the file
 #                           `agent-pubkey` (default: ~/.config/spaceturtle)
-#   SPACETURTLE_STATE_DIR   where `request` keeps its queue, in `requests`
+#   SPACETURTLE_STATE_DIR   where `request` keeps its queue, in `requests`, and
+#                           `mark-seen` records that the Observer looked
 #                           (default: ~/.local/state/spaceturtle)
 #   HOME                    ~/.local/bin is put on PATH
 set -uo pipefail
@@ -23,7 +36,6 @@ PATH="$HOME/.local/bin:$PATH"
 
 toon_cmd=${SPACETURTLE_TOON:-toon}
 config_dir=${SPACETURTLE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/spaceturtle}
-
 state_dir=${SPACETURTLE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/spaceturtle}
 
 limit=${1:-40}
@@ -68,44 +80,163 @@ if [[ -r $config_dir/agent-pubkey ]]; then
   [[ $self =~ ^[0-9a-f]{64}$ ]] || self=
 fi
 
+# When the Observer last looked, from the file `mark-seen` writes.
+looked_at=
+if [[ -r $state_dir/last-looked ]]; then
+  read -r looked_at < "$state_dir/last-looked" || true
+  [[ $looked_at =~ ^[0-9]+$ ]] || looked_at=
+fi
+
 # Without the relay, the Activity is what the agent answered, which is local.
 offline() {
   command -v jq >/dev/null || {
-    printf '{"online":false,"name":"","self":"","node":{"ilp_address":"","connector":""},"subscribers":null,"profiles":[],"follows":[],"activity":[],"last_active":null,"events":[],"requests":[]}\n'
+    printf '{"online":false,"name":"","self":"","node":{"ilp_address":"","connector":""},"subscribers":null,"profiles":[],"follows":[],"state":null,"activity":[],"last_active":null,"events":[],"requests":[],"attention":"urgent","looked_at":null}\n'
     exit 0
   }
   jq -cn --argjson requests "${requests:-[]}" \
+    --argjson state "${state:-null}" --argjson looked "${looked_at:-null}" \
     --argjson answered "$(request_activity "$self" "${requests:-[]}")" \
     '($answered | sort_by(-.created_at)) as $activity
-    | {online:false,name:"",self:"",node:{ilp_address:"",connector:""},subscribers:null,profiles:[],follows:[],
-       activity:$activity,last_active:($activity[0].created_at? // null),events:[],requests:$requests}'
+    | {online:false,name:"",self:"",node:{ilp_address:"",connector:""},subscribers:null,state:$state,profiles:[],follows:[],
+       activity:$activity,last_active:($activity[0].created_at? // null),events:[],requests:$requests,
+       attention:"urgent",looked_at:$looked}'
   exit 0
 }
 
 toon() { command "$toon_cmd" "$@"; }
 
+# The JSON a free toon command printed, or null if it failed, printed nothing
+# or printed an error document.
+toon_json() {
+  local out
+  out=$(if command -v timeout >/dev/null; then timeout 10 "$toon_cmd" "$@"; else "$toon_cmd" "$@"; fi 2>/dev/null) || { echo null; return; }
+  # Several JSON values, one per line, are read as one array of them.
+  out=$(jq -cs 'if length == 0 then null elif length == 1 then .[0] else . end | if type == "object" and has("error") then null else . end' <<<"$out" 2>/dev/null)
+  echo "${out:-null}"
+}
+
 relay_query() {
   toon event query "ws://$read_address" --filter "$1" --json 2>/dev/null | jq -c '.events // []' 2>/dev/null || echo '[]'
 }
 
+state=null
+
+# Renderers: resolve an event into its parts, {label, title, summary, body,
+# links, ref}. A built-in Renderer handles a known kind and the fallback every
+# other; the panel lays out parts and never interprets a kind. The part names
+# are the ones an agent-written description (ADR 0002) will use.
+#   label    what the event did, shown by its author ("" for a plain note)
+#   title    one headline line, or ""
+#   summary  a short line under the title, or ""
+#   body     the text
+#   links    http(s) addresses only
+#   ref      the id of the event this one refers to, or ""
+renderers=$(cat <<'JQ'
+def tags: (.tags | arrays // [])[] | arrays;
+def tag($n): [tags | select(.[0] == $n and length > 1) | .[1] | strings] | first // "";
+def text: (.content | strings) // "" | gsub("^\\s+|\\s+$"; "");
+def links: [tags | select((.[0] == "r" or .[0] == "url" or .[0] == "web") and length > 1) | .[1] | strings | select(test("^https?://"))] | unique;
+def base: {label: "", title: "", summary: "", body: text, links: links, ref: tag("e")};
+def meta: (.content | strings | try fromjson catch null) | if type == "object" then . else {} end;
+def fallback:
+  base + {label: ("kind " + (.kind | tostring)),
+    title: tag("alt"),
+    summary: ([tags | map(strings) | join(" ")] | join(", "))};
+def parts:
+  if .kind == 0 then (meta) as $m | base + {label: "updated profile", title: ($m.name | strings // ""), summary: ($m.about | strings // ""), body: "", ref: ""}
+  elif .kind == 1 then base + {label: (if tag("e") != "" then "replied" else "" end)}
+  elif .kind == 3 then base + {label: "updated follows", body: ([tags | select(.[0] == "p")] | length | tostring + " followed"), ref: ""}
+  elif .kind == 5 then base + {label: "deleted", summary: ([tags | select(.[0] == "e" or .[0] == "a") | .[1] | strings] | length | tostring + " deleted")}
+  elif .kind == 6 or .kind == 16 then base + {label: "reposted", body: ""}
+  elif .kind == 7 then base + {label: "reacted", body: (text | if . == "+" or . == "" then "󰋑" elif . == "-" then "󰋕" else . end)}
+  elif .kind == 1111 then base + {label: "commented"}
+  elif .kind == 30023 then base + {label: "published", title: tag("title"), summary: tag("summary")}
+  elif .kind == 30817 then base + {label: "drafted", title: (tag("title") | if . == "" then tag("d") else . end), summary: tag("summary")}
+  else fallback end;
+JQ
+)
+
 command -v "$toon_cmd" >/dev/null && command -v jq >/dev/null || offline
-read_address=$(toon status --json 2>/dev/null |
-  jq -r '.agent_node.toon_apps[]?.apps[]? | select(.name == "relay" and .running) | .read_address // empty' 2>/dev/null |
+status=$(toon_json status --json)
+relay_config=$(toon_json relay config --json)
+
+# The node's state, from free commands only. Each group is mapped on its own, so
+# a group whose command failed, or whose answer has a shape not understood, is
+# null and the rest still shows. A failing `toon status` leaves its group null;
+# a status with no agent node leaves the whole state null.
+incoming=$(toon_json relay subscriptions --incoming --json)
+if [[ $status == null ]] || jq -e '.agent_node | type == "object"' <<<"$status" >/dev/null 2>&1; then
+  state=$(jq -cn --argjson status "$status" --argjson relay "$relay_config" \
+    --argjson peers "$(toon_json peer list --json)" \
+    --argjson channels "$(toon_json channel list --json)" \
+    --argjson routes "$(toon_json route list --json)" \
+    --argjson limits "$(toon_json limit show --json)" \
+    --argjson held "$(toon_json relay subscriptions --json)" \
+    --argjson incoming "$incoming" \
+    --argjson logs "$(toon_json logs --json)" '
+    def str: if . == null then "" elif type == "string" then . else tojson end;
+    def count: if type == "number" then . else (tonumber? // 0) end;
+    def items(key): if . == null then null
+      elif type == "array" then . else (.[key] // ([.. | arrays] | first) // []) end;
+    def process: if . == null then {running: null, restarts: 0}
+      elif type == "boolean" then {running: ., restarts: 0}
+      else {running: ([.running, .up] | map(select(. != null)) | if length > 0 then .[0] == true else null end),
+        restarts: (.restarts // .restart_count // 0 | count)} end;
+    def group(f): if . == null then null else (try f catch null) end;
+    {
+      status: ($status | group(.agent_node as $n | {
+        supervisor: ($n.supervisor | process),
+        connector: ($n.connector | process),
+        apps: [$n.toon_apps[]?.apps[]? | {name: (.name | str), running: (.running == true),
+          restarts: (.restarts // .restart_count // 0 | count)}]
+      })),
+      relay: ($relay | group({
+        name: (.relay.name // .name | str),
+        prices: [(.relay.prices // .relay.pricing // .prices // {}) | to_entries[]? | {name: (.key | str), price: (.value | str)}],
+        blocklist: [(.relay.blocklist // .blocklist // [])[]? | str]
+      })),
+      peers: ($peers | group(items("peers") | [.[] | {
+        id: (.id // .peer_id // .peer // .address // .name | str),
+        direction: (.direction | str), status: (.status // .state | str)}])),
+      channels: ($channels | group(items("channels") | [.[] | {
+        peer: (.peer // .peer_id // .counterparty // .id | str),
+        direction: (.direction | str), status: (.status // .state | str),
+        collateral: (.collateral // .capacity // .deposit | str)}])),
+      routes: ($routes | group(items("routes") | [.[] | {
+        prefix: (.prefix // .destination // .route | str),
+        peer: (.peer // .next_hop // .via | str), price: (.price // .rate | str)}])),
+      limits: ($limits | group({
+        per_command: (.per_command // .limits.per_command // .command | str),
+        per_day: (.per_day // .limits.per_day // .daily // .day | str),
+        remaining_today: (.remaining_today // .remaining | str)})),
+      subscriptions: (if $held == null and $incoming == null then null else {
+        held: ($held | group(items("subscriptions") | [.[] | str])),
+        incoming: ($incoming | group(items("subscriptions") | length))} end),
+      logs: ($logs | group(items("lines") | [.[-20:][] | (if type == "object" then (.message // .line // .) else . end) | str]))
+    }' 2>/dev/null) || state=null
+fi
+
+read_address=$(jq -r '.agent_node.toon_apps[]?.apps[]? | select(.name == "relay" and .running) | .read_address // empty' <<<"$status" 2>/dev/null |
   head -n1)
 [[ -n $read_address ]] || offline
 
-# Notes, reposts, reactions, comments and long-form posts; then the profiles
-# that name their authors and the follow lists that count their followers.
-kinds='[1,6,7,16,1111,30023]'
-events=$(relay_query "{\"kinds\":$kinds,\"limit\":$limit}")
+# Every event, whatever its kind, each with the parts a Renderer resolves for
+# it; then the profiles that name their authors and the follow lists that count
+# their followers.
+with_parts() { jq -c "$renderers"' map(. + {parts: parts})' 2>/dev/null || echo '[]'; }
+events=$(relay_query "{\"limit\":$limit}" | with_parts)
 profiles=$(relay_query '{"kinds":[0],"limit":200}')
 follows=$(relay_query '{"kinds":[3],"limit":500}')
-name=$(toon relay config --json 2>/dev/null | jq -r '.relay.name // ""' 2>/dev/null)
+name=$(jq -r '.relay.name // ""' <<<"$relay_config" 2>/dev/null)
 
 # What the agent itself signed, asked for by author so a busy network cannot
 # push it out of the feed's limit.
 agent_events='[]'
-[[ -n $self ]] && agent_events=$(relay_query "{\"authors\":[\"$self\"],\"kinds\":$kinds,\"limit\":$limit}")
+[[ -n $self ]] && agent_events=$(relay_query "{\"authors\":[\"$self\"],\"limit\":$limit}" | with_parts)
+
+# Events tagging the agent identity, asked for by tag for the same reason.
+mention_events='[]'
+[[ -n $self ]] && mention_events=$(relay_query "{\"#p\":[\"$self\"],\"limit\":$limit}")
 
 # The node's ILP address and connector address, from the relay's NIP-11 document.
 node=
@@ -115,14 +246,14 @@ if command -v curl >/dev/null; then
 fi
 
 # Who holds a subscription to this relay's live feed; null while it is not sold.
-subscribers=$(toon relay subscriptions --incoming --json 2>/dev/null |
-  jq -c 'if .error then null else ([.. | arrays] | first // [] | length) end' 2>/dev/null)
+subscribers=$(jq -c 'if . == null then null else ([.. | arrays] | first // [] | length) end' <<<"$incoming" 2>/dev/null)
 
 jq -cn --arg name "${name:-}" --arg self "$self" \
   --argjson node "${node:-null}" \
-  --argjson subscribers "${subscribers:-null}" --argjson events "${events:-[]}" \
+  --argjson subscribers "${subscribers:-null}" --argjson state "$state" --argjson events "${events:-[]}" \
   --argjson profiles "${profiles:-[]}" --argjson follows "${follows:-[]}" \
-  --argjson agent "${agent_events:-[]}" \
+  --argjson agent "${agent_events:-[]}" --argjson looked "${looked_at:-null}" \
+  --argjson mentioned "${mention_events:-[]}" \
   --argjson requests "${requests:-[]}" \
   --argjson answered "$(request_activity "$self" "${requests:-[]}")" \
   '(if $self == "" then []
@@ -134,8 +265,15 @@ jq -cn --arg name "${name:-}" --arg self "$self" \
     end) as $signed
   # Answers count whether or not the public key is known.
   | ($signed + $answered | sort_by(-.created_at)) as $activity
+  | ([$mentioned[], $events[] | select(.pubkey != $self and $self != ""
+      and any(.tags[]?; .[0] == "p" and .[1] == $self))]) as $mentions
   | {online: true, name: $name, self: $self,
     activity: $activity, last_active: ($activity[0].created_at? // null),
     node: ($node // {ilp_address: "", connector: ""}),
-    requests: $requests, subscribers: $subscribers, profiles: $profiles, follows: $follows,
-    events: ($events | map(select(.pubkey != $self)))}'
+    requests: $requests, subscribers: $subscribers, state: $state, profiles: $profiles, follows: $follows,
+    events: ($events | map(select(.pubkey != $self))),
+    looked_at: $looked,
+    # Without a record of looking there is nothing to compare with.
+    attention: (if $looked == null then "none"
+      elif any(($activity + $mentions)[]; .created_at > $looked) then "news"
+      else "none" end)}'

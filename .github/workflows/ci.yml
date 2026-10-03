@@ -9,6 +9,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Syntax of the scripts
-        run: bash -n relay-events && bash -n request && bash -n tests/run
+        run: bash -n relay-events && bash -n mark-seen && bash -n request && bash -n tests/run
       - name: Tests
         run: tests/run

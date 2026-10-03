@@ -50,23 +50,14 @@ Item {
       scroll.contentY = Math.max(0, Math.min(scroll.contentHeight - scroll.height, bottom + margin - scroll.height))
   }
 
-  function tagValue(event, name) {
-    var tags = event.tags || []
-    for (var i = 0; i < tags.length; i++)
-      if (tags[i][0] === name && tags[i].length > 1) return String(tags[i][1])
-    return ""
-  }
+  // An event's parts are resolved by relay-events; nothing here looks at a kind.
+  function partsOf(event) { return event.parts || ({}) }
 
   function verbOf(event) {
     if (event.request) return event.request.state === "done" ? "Request done" : "Request declined"
-    switch (event.kind) {
-    case 6:
-    case 16: return "Reposted"
-    case 7: return "Reacted"
-    case 1111: return "Commented"
-    case 30023: return "Published"
-    default: return event.refers_to ? "Replied" : "Posted"
-    }
+    var label = String(partsOf(event).label || "")
+    if (label) return label.charAt(0).toUpperCase() + label.slice(1)
+    return event.refers_to ? "Replied" : "Posted"
   }
 
   function bodyOf(event) {
@@ -74,13 +65,8 @@ Item {
       var reason = event.request.reason ? "\n" + event.request.reason : ""
       return String(event.request.text) + reason
     }
-    switch (event.kind) {
-    case 6:
-    case 16: return ""
-    case 7: return event.content === "+" || event.content === "" ? "󰋑" : (event.content === "-" ? "󰋕" : String(event.content))
-    case 30023: return tagValue(event, "title") || tagValue(event, "summary") || String(event.content || "")
-    default: return String(event.content || "").trim()
-    }
+    var parts = partsOf(event)
+    return String(parts.title || parts.summary || parts.body || "").trim()
   }
 
   function ago(seconds) {

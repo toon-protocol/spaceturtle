@@ -26,11 +26,13 @@ Item {
   readonly property int networkSection: 2
   readonly property int messagesSection: 3
   readonly property int requestsSection: 4
+  readonly property int nodeSection: 5
   readonly property int section: service ? service.section : activitySection
   // The section that has a cursor to move, if the one showing does.
   readonly property var cursorSection: section === activitySection ? activity.item
     : (section === networkSection ? network.item
-    : (section === requestsSection ? requests.item : null))
+    : (section === requestsSection ? requests.item
+    : (section === nodeSection ? node.item : null)))
 
   function open(payloadJson) {
     closingFromHost = false
@@ -166,9 +168,17 @@ Item {
             function onLeaveInput() { keyCatcher.forceActiveFocus() }
           }
 
+          Loader {
+            id: node
+            anchors.fill: parent
+            active: root.service !== null
+            visible: root.section === root.nodeSection
+            sourceComponent: NodeSection { service: root.service }
+          }
+
           // The sections that are still to be built; and a panel with no service.
           Text {
-            visible: (root.section !== root.activitySection && root.section !== root.networkSection && root.section !== root.requestsSection) || !root.service
+            visible: (root.section !== root.activitySection && root.section !== root.networkSection && root.section !== root.requestsSection && root.section !== root.nodeSection) || !root.service
             anchors.centerIn: parent
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
