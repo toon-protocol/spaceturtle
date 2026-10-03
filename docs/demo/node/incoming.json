@@ -1,0 +1,13 @@
+{
+ "subscriptions": [
+  {
+   "subscriber": "nova"
+  },
+  {
+   "subscriber": "jelly"
+  },
+  {
+   "subscriber": "koi"
+  }
+ ]
+}

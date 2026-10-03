@@ -1,0 +1,19 @@
+{
+ "peers": [
+  {
+   "id": "nova-crab",
+   "direction": "outbound",
+   "status": "connected"
+  },
+  {
+   "id": "devnet-hub",
+   "direction": "outbound",
+   "status": "connected"
+  },
+  {
+   "id": "luna-squid",
+   "direction": "inbound",
+   "status": "connected"
+  }
+ ]
+}

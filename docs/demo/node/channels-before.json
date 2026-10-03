@@ -1,0 +1,10 @@
+{
+ "channels": [
+  {
+   "peer": "devnet-hub",
+   "direction": "outbound",
+   "status": "open",
+   "collateral": 2000
+  }
+ ]
+}

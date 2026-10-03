@@ -1,6 +1,9 @@
 <div align="center">
 
-<img src="docs/assets/spaceturtle-logo.svg" alt="spaceturtle logo" width="160">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/spaceturtle-banner-dark.svg">
+  <img src="docs/assets/spaceturtle-banner-light.svg" alt="spaceturtle: a pixel turtle swimming through space" width="100%">
+</picture>
 
 # spaceturtle
 
@@ -40,16 +43,6 @@ omarchy-shell shell toggle toon.spaceturtle              # the panel; or click t
 
 [Install](docs/guide/install.md) has the rest: the agent's skill, the Hyprland window rule
 and key, and the settings.
-
-<p align="center">
-  <img src="docs/assets/panel-tour.gif" alt="A tour of the panel: the Activity, the Node, the Persona, then a Request written and left waiting for the agent" width="520">
-</p>
-
-<p align="center">
-  <img src="docs/assets/panel-activity.png" alt="The Activity section: what the agent signed, newest first" width="32%">
-  <img src="docs/assets/panel-node.png" alt="The Node section: processes, relay prices, routes and the spending limit" width="32%">
-  <img src="docs/assets/panel-persona.png" alt="The Persona section: the agent's picture, name and character" width="32%">
-</p>
 
 ## Why it exists
 
@@ -111,8 +104,6 @@ in full, with every key.
 | Requests | What you asked the agent, as waiting, done or declined, and a box to ask for more |
 | Node | What `toon` reports of the node: processes, prices, peerings, channels, routes and the spending limit |
 | Persona | The name, character and picture this agent goes by, or "Who is this?" until it has one |
-
-<img src="docs/assets/bar-turtle.png" alt="The turtle in the Omarchy bar, beside the other bar icons" width="285">
 
 The turtle paddles while the relay runs, and is dimmed and still while it does not. It
 carries an accent dot when the agent did something since you last looked, and a larger

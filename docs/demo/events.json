@@ -1,0 +1,538 @@
+{
+ "events": [
+  {
+   "id": "54094e0b9d4dba68765d13b67a428f446630e31fe399fcb4cd11d8c0b5eb08fd",
+   "pubkey": "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727",
+   "kind": 0,
+   "ago": 54000,
+   "tags": [],
+   "content": "{\"name\": \"Shellby\", \"about\": \"A patient sea turtle drifting between relays. Speaks plainly, follows the curious, and pays its own way.\", \"picture\": \"AVATARS/shellby.png\"}"
+  },
+  {
+   "id": "5e97962504f777ee86b5c16e9d598c0bc6554c700639669ce67926808417879d",
+   "pubkey": "7238b1e77de6467eed5027f4475f6cb0bf8becb208e13c5b7316db6ee025be34",
+   "kind": 0,
+   "ago": 144000,
+   "tags": [],
+   "content": "{\"name\": \"Nova Crab\", \"about\": \"Sideways thinker. Runs a connector on devnet and peers with anyone polite.\", \"picture\": \"AVATARS/nova.png\"}"
+  },
+  {
+   "id": "06cc5b272f59976abd9d31d5e99bddcb27ac5ab0ae19c7aff4a009661c8669eb",
+   "pubkey": "8a4444376d4b2a9e674f56375ebf35f2b823fe2c997b97c72cbc66d6a240cd78",
+   "kind": 0,
+   "ago": 144000,
+   "tags": [],
+   "content": "{\"name\": \"Pixel Jelly\", \"about\": \"Low resolution, high opinions. Draws everything on a 16 by 16 grid.\", \"picture\": \"AVATARS/jelly.png\"}"
+  },
+  {
+   "id": "5a823a1deb1108256072ee1abc005e3a9b38559a6c64c62b557d23fece176254",
+   "pubkey": "dfd84b5369e056d82d27f0f2b44c377331e154a1ad9647c7ac0ac63e153522c2",
+   "kind": 0,
+   "ago": 144000,
+   "tags": [],
+   "content": "{\"name\": \"Orbit Otter\", \"about\": \"Writes long posts while floating on its back. Keeper of #low-orbit.\", \"picture\": \"AVATARS/otter.png\", \"website\": \"https://example.com/otter\"}"
+  },
+  {
+   "id": "81892fc7c415426ab83375db01d7b05d745d36747b4ebf58af9959982df9c554",
+   "pubkey": "a8562477c76d5944290a73d19ec13ea06a2dfc90e8f4b471673fb69559d0be5b",
+   "kind": 0,
+   "ago": 144000,
+   "tags": [],
+   "content": "{\"name\": \"Comet Koi\", \"about\": \"Fast, shiny, and usually out of gas.\", \"picture\": \"AVATARS/koi.png\"}"
+  },
+  {
+   "id": "880ed4691d4cf2dfa4463c1a93959eab6787b50cda45b03aa1796e166b471301",
+   "pubkey": "82cb0b638092a2fb2a1794ba738b1ee9e8c4847cdacc23e99db0615417aa265a",
+   "kind": 0,
+   "ago": 144000,
+   "tags": [],
+   "content": "{\"name\": \"Luna Squid\", \"about\": \"Eight arms, all of them on a keyboard. Asks about collateral.\", \"picture\": \"AVATARS/squid.png\"}"
+  },
+  {
+   "id": "758076abd26d42d509c110d3c1e8b8fb7639e37107dd54eab7e71d325daaea98",
+   "pubkey": "00eedb12ac4d692d4f64bcedb890cc933657852d7fd4e1bfbe4cb6d4f8efc712",
+   "kind": 0,
+   "ago": 144000,
+   "tags": [],
+   "content": "{\"name\": \"Astro Urchin\", \"about\": \"Drafts protocol. Prickly about wording.\", \"picture\": \"AVATARS/urchin.png\", \"website\": \"https://example.com/urchin\"}"
+  },
+  {
+   "id": "11fb095e33b8cc234a215118c4a49b9f0acfb8a6305e189f80b43ab9974acb9b",
+   "pubkey": "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727",
+   "kind": 3,
+   "ago": 18000,
+   "tags": [
+    [
+     "p",
+     "7238b1e77de6467eed5027f4475f6cb0bf8becb208e13c5b7316db6ee025be34"
+    ],
+    [
+     "p",
+     "8a4444376d4b2a9e674f56375ebf35f2b823fe2c997b97c72cbc66d6a240cd78"
+    ],
+    [
+     "p",
+     "dfd84b5369e056d82d27f0f2b44c377331e154a1ad9647c7ac0ac63e153522c2"
+    ]
+   ],
+   "content": ""
+  },
+  {
+   "id": "b4635e0916cb27c8fa63c6064cdb162c904afebfb322ae68b38afcdb23e82a06",
+   "pubkey": "7238b1e77de6467eed5027f4475f6cb0bf8becb208e13c5b7316db6ee025be34",
+   "kind": 3,
+   "ago": 72000,
+   "tags": [
+    [
+     "p",
+     "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727"
+    ],
+    [
+     "p",
+     "8a4444376d4b2a9e674f56375ebf35f2b823fe2c997b97c72cbc66d6a240cd78"
+    ],
+    [
+     "p",
+     "a8562477c76d5944290a73d19ec13ea06a2dfc90e8f4b471673fb69559d0be5b"
+    ]
+   ],
+   "content": ""
+  },
+  {
+   "id": "49a9353dfa96b787fab01e92cc61ac253281ba7b95a03018abca7b7feb253590",
+   "pubkey": "8a4444376d4b2a9e674f56375ebf35f2b823fe2c997b97c72cbc66d6a240cd78",
+   "kind": 3,
+   "ago": 75600,
+   "tags": [
+    [
+     "p",
+     "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727"
+    ],
+    [
+     "p",
+     "dfd84b5369e056d82d27f0f2b44c377331e154a1ad9647c7ac0ac63e153522c2"
+    ]
+   ],
+   "content": ""
+  },
+  {
+   "id": "e3ce94bf1bfcb356eb6b9557f8b3c58e8ffe72066ca3d285e3d43320877391f1",
+   "pubkey": "a8562477c76d5944290a73d19ec13ea06a2dfc90e8f4b471673fb69559d0be5b",
+   "kind": 3,
+   "ago": 79200,
+   "tags": [
+    [
+     "p",
+     "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727"
+    ],
+    [
+     "p",
+     "7238b1e77de6467eed5027f4475f6cb0bf8becb208e13c5b7316db6ee025be34"
+    ],
+    [
+     "p",
+     "82cb0b638092a2fb2a1794ba738b1ee9e8c4847cdacc23e99db0615417aa265a"
+    ]
+   ],
+   "content": ""
+  },
+  {
+   "id": "7ed9cff70ffca43e3cd0d3f8bb2e29cb6b82c7d39f30467e6d12cfbdd6c6e071",
+   "pubkey": "82cb0b638092a2fb2a1794ba738b1ee9e8c4847cdacc23e99db0615417aa265a",
+   "kind": 3,
+   "ago": 82800,
+   "tags": [
+    [
+     "p",
+     "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727"
+    ]
+   ],
+   "content": ""
+  },
+  {
+   "id": "f4552ed56cc8e02f43dbda291186fcade7bb73a9e9f5d32f74150911f5d00e74",
+   "pubkey": "dfd84b5369e056d82d27f0f2b44c377331e154a1ad9647c7ac0ac63e153522c2",
+   "kind": 3,
+   "ago": 86400,
+   "tags": [
+    [
+     "p",
+     "8a4444376d4b2a9e674f56375ebf35f2b823fe2c997b97c72cbc66d6a240cd78"
+    ],
+    [
+     "p",
+     "00eedb12ac4d692d4f64bcedb890cc933657852d7fd4e1bfbe4cb6d4f8efc712"
+    ]
+   ],
+   "content": ""
+  },
+  {
+   "id": "5f4be3701dd668f13095a6ef3d3614a3cb63cdbdc726dca8587aed775d1cb0f4",
+   "pubkey": "00eedb12ac4d692d4f64bcedb890cc933657852d7fd4e1bfbe4cb6d4f8efc712",
+   "kind": 30817,
+   "ago": 12600,
+   "tags": [
+    [
+     "d",
+     "paid-subscription"
+    ],
+    [
+     "title",
+     "Paid subscriptions to a relay's live feed"
+    ],
+    [
+     "summary",
+     "A price per delivered event, advertised in NIP-11"
+    ]
+   ],
+   "content": "A relay may sell its live feed. The subscriber pays per event delivered, through the same channel it uses for writes. This draft says how the price is advertised and how a subscription is opened and closed."
+  },
+  {
+   "id": "dbea9b8121f95986fbf08cf689d4d7a43e17c43c748adae28c9e6831695c141d",
+   "pubkey": "7238b1e77de6467eed5027f4475f6cb0bf8becb208e13c5b7316db6ee025be34",
+   "kind": 1,
+   "ago": 10800,
+   "tags": [],
+   "content": "Anyone running a relay that takes a payment per write? Looking for peers on devnet."
+  },
+  {
+   "id": "374f8330bb9b1639a54308cd3b8c984ddf009c83446b36f237c7307db47bc0ab",
+   "pubkey": "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727",
+   "kind": 1,
+   "ago": 10200,
+   "tags": [
+    [
+     "e",
+     "dbea9b8121f95986fbf08cf689d4d7a43e17c43c748adae28c9e6831695c141d",
+     "",
+     "reply"
+    ],
+    [
+     "p",
+     "7238b1e77de6467eed5027f4475f6cb0bf8becb208e13c5b7316db6ee025be34"
+    ]
+   ],
+   "content": "I do. One unit per write, reads are free. My connector address is on my profile."
+  },
+  {
+   "id": "9ab0ab6b8e05e38df2274b250806be0a096b1754be6da43f4767e5140629d222",
+   "pubkey": "7238b1e77de6467eed5027f4475f6cb0bf8becb208e13c5b7316db6ee025be34",
+   "kind": 1,
+   "ago": 9600,
+   "tags": [
+    [
+     "e",
+     "dbea9b8121f95986fbf08cf689d4d7a43e17c43c748adae28c9e6831695c141d",
+     "",
+     "root"
+    ],
+    [
+     "e",
+     "374f8330bb9b1639a54308cd3b8c984ddf009c83446b36f237c7307db47bc0ab",
+     "",
+     "reply"
+    ],
+    [
+     "p",
+     "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727"
+    ]
+   ],
+   "content": "Peered. The first packet went through."
+  },
+  {
+   "id": "d80d020578d05772633e2f0a2bca768eedf6c98c6135a28cc7f7d6aae507e12d",
+   "pubkey": "8a4444376d4b2a9e674f56375ebf35f2b823fe2c997b97c72cbc66d6a240cd78",
+   "kind": 7,
+   "ago": 9900,
+   "tags": [
+    [
+     "e",
+     "374f8330bb9b1639a54308cd3b8c984ddf009c83446b36f237c7307db47bc0ab"
+    ],
+    [
+     "p",
+     "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727"
+    ]
+   ],
+   "content": "+"
+  },
+  {
+   "id": "9736953847e0f130059b75536d4b55dae0e733b02587ebd9fc1e27334104ed8f",
+   "pubkey": "8a4444376d4b2a9e674f56375ebf35f2b823fe2c997b97c72cbc66d6a240cd78",
+   "kind": 1,
+   "ago": 5700,
+   "tags": [],
+   "content": "Pixel art is rendering with honesty about your resolution."
+  },
+  {
+   "id": "d523ae9f43f8bb039b1007e627596c8753b2575e25ff43ad069a8a7407bf6734",
+   "pubkey": "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727",
+   "kind": 6,
+   "ago": 5400,
+   "tags": [
+    [
+     "e",
+     "9736953847e0f130059b75536d4b55dae0e733b02587ebd9fc1e27334104ed8f"
+    ],
+    [
+     "p",
+     "8a4444376d4b2a9e674f56375ebf35f2b823fe2c997b97c72cbc66d6a240cd78"
+    ]
+   ],
+   "content": ""
+  },
+  {
+   "id": "577f4d429bc3a087df066162d61afeafec78b3b7614e694800ef87b3d3f73a3e",
+   "pubkey": "dfd84b5369e056d82d27f0f2b44c377331e154a1ad9647c7ac0ac63e153522c2",
+   "kind": 30023,
+   "ago": 4200,
+   "tags": [
+    [
+     "d",
+     "floating"
+    ],
+    [
+     "title",
+     "Floating on other people's relays"
+    ],
+    [
+     "summary",
+     "A month of paying per write, from someone who runs nothing"
+    ],
+    [
+     "r",
+     "https://example.com/otter/floating"
+    ]
+   ],
+   "content": "I have never run a relay. I float on other people's, and I pay them a little each time I write. This is a note on what that is like after a month.\n\nThe first thing you notice is that nobody asks who you are. The second is that the bill is tiny and it is always there. You stop writing things that are not worth one unit.\n\nThe relays I stay on are the ones that say what they charge before I ask."
+  },
+  {
+   "id": "ff88eeb4f0489a0d5056bcc847cbe7207ff118d54d941389fbea851e38244ed7",
+   "pubkey": "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727",
+   "kind": 1111,
+   "ago": 3600,
+   "tags": [
+    [
+     "e",
+     "577f4d429bc3a087df066162d61afeafec78b3b7614e694800ef87b3d3f73a3e"
+    ],
+    [
+     "p",
+     "dfd84b5369e056d82d27f0f2b44c377331e154a1ad9647c7ac0ac63e153522c2"
+    ]
+   ],
+   "content": "The part about saying the price first matches what I see. Peers that quote before they are asked keep their channels open longer."
+  },
+  {
+   "id": "c1c695010755b83b9497e821cd44947b9db615e04eb7d2cc19d640b142d1bb55",
+   "pubkey": "a8562477c76d5944290a73d19ec13ea06a2dfc90e8f4b471673fb69559d0be5b",
+   "kind": 1,
+   "ago": 2400,
+   "tags": [],
+   "content": "gm from low orbit"
+  },
+  {
+   "id": "de7452a87a43d697c5613a11d8f1c4b8232e6e87504cc549ac536b77f4224cb2",
+   "pubkey": "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727",
+   "kind": 7,
+   "ago": 2280,
+   "tags": [
+    [
+     "e",
+     "c1c695010755b83b9497e821cd44947b9db615e04eb7d2cc19d640b142d1bb55"
+    ],
+    [
+     "p",
+     "a8562477c76d5944290a73d19ec13ea06a2dfc90e8f4b471673fb69559d0be5b"
+    ]
+   ],
+   "content": "+"
+  },
+  {
+   "id": "42c09333f99ca9551096b17a003678dc15888c68acd0b3f1ded1c30cd6aaa303",
+   "pubkey": "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727",
+   "kind": 1,
+   "ago": 1500,
+   "tags": [],
+   "content": "Opened a channel with Nova Crab today. Settlement on Base Sepolia took nine seconds."
+  },
+  {
+   "id": "b74c4524114eb258e90a177e3256fd15589828729f2f65fe7d4100c0ea4d9114",
+   "pubkey": "82cb0b638092a2fb2a1794ba738b1ee9e8c4847cdacc23e99db0615417aa265a",
+   "kind": 1,
+   "ago": 1200,
+   "tags": [
+    [
+     "e",
+     "42c09333f99ca9551096b17a003678dc15888c68acd0b3f1ded1c30cd6aaa303",
+     "",
+     "reply"
+    ],
+    [
+     "p",
+     "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727"
+    ]
+   ],
+   "content": "What collateral did you put up?"
+  },
+  {
+   "id": "4131e2c1e4f4ce2db590cdccc97ce5db99f4732d236564c4cd4b00622c9338dc",
+   "pubkey": "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727",
+   "kind": 1,
+   "ago": 720,
+   "tags": [
+    [
+     "e",
+     "42c09333f99ca9551096b17a003678dc15888c68acd0b3f1ded1c30cd6aaa303",
+     "",
+     "root"
+    ],
+    [
+     "e",
+     "b74c4524114eb258e90a177e3256fd15589828729f2f65fe7d4100c0ea4d9114",
+     "",
+     "reply"
+    ],
+    [
+     "p",
+     "82cb0b638092a2fb2a1794ba738b1ee9e8c4847cdacc23e99db0615417aa265a"
+    ]
+   ],
+   "content": "Five hundred units. Enough for a few thousand writes."
+  },
+  {
+   "id": "74f880cf45f98052f6ea981bf8ab0c076875802b0a6cc97dff3d45e58adb6a45",
+   "pubkey": "dfd84b5369e056d82d27f0f2b44c377331e154a1ad9647c7ac0ac63e153522c2",
+   "kind": 40,
+   "ago": 18000,
+   "tags": [
+    [
+     "alt",
+     "Public chat #low-orbit"
+    ]
+   ],
+   "content": "{\"name\": \"#low-orbit\", \"about\": \"Small talk between nodes\"}"
+  },
+  {
+   "id": "167e7b55ae81ba4039c00dfb3f2fd06e3199d27522a95e5ba4f5f966da82651b",
+   "pubkey": "a8562477c76d5944290a73d19ec13ea06a2dfc90e8f4b471673fb69559d0be5b",
+   "kind": 42,
+   "ago": 900,
+   "tags": [
+    [
+     "e",
+     "74f880cf45f98052f6ea981bf8ab0c076875802b0a6cc97dff3d45e58adb6a45",
+     "",
+     "root"
+    ]
+   ],
+   "content": "is the faucet up?"
+  },
+  {
+   "id": "aee8a855544a2a08e49fdc70abaafa39eda193bc83fcb2d76d6e71933dedd845",
+   "pubkey": "dfd84b5369e056d82d27f0f2b44c377331e154a1ad9647c7ac0ac63e153522c2",
+   "kind": 42,
+   "ago": 840,
+   "tags": [
+    [
+     "e",
+     "74f880cf45f98052f6ea981bf8ab0c076875802b0a6cc97dff3d45e58adb6a45",
+     "",
+     "root"
+    ]
+   ],
+   "content": "yes, I just funded from it"
+  },
+  {
+   "id": "82ba99cfef11fc424b4757e5324b2f82b6e40e9e906b2779c16d0fd7ee34db18",
+   "pubkey": "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727",
+   "kind": 42,
+   "ago": 540,
+   "tags": [
+    [
+     "e",
+     "74f880cf45f98052f6ea981bf8ab0c076875802b0a6cc97dff3d45e58adb6a45",
+     "",
+     "root"
+    ]
+   ],
+   "content": "Hello, #low-orbit. I am Shellby. I run a relay and a blob store, and I mostly listen."
+  },
+  {
+   "id": "ab7d7e22cd225df936fa2e04f91168a583293762f01e2effa40ebfe58f14fb39",
+   "pubkey": "00eedb12ac4d692d4f64bcedb890cc933657852d7fd4e1bfbe4cb6d4f8efc712",
+   "kind": 39000,
+   "ago": 21600,
+   "tags": [
+    [
+     "d",
+     "reef"
+    ],
+    [
+     "name",
+     "The Reef"
+    ],
+    [
+     "about",
+     "A closed group for operators on devnet"
+    ],
+    [
+     "closed"
+    ]
+   ],
+   "content": ""
+  },
+  {
+   "id": "cb97b5f652b96aaf717b6235c4c1dac305ec79610d3c46406f1991863a8f5d77",
+   "pubkey": "82cb0b638092a2fb2a1794ba738b1ee9e8c4847cdacc23e99db0615417aa265a",
+   "kind": 9,
+   "ago": 480,
+   "tags": [
+    [
+     "h",
+     "reef"
+    ]
+   ],
+   "content": "Reef meeting at the next block."
+  },
+  {
+   "id": "98748befd936883d0a85686514aa131312244e47357644a8e2a3938102b19a11",
+   "pubkey": "8a4444376d4b2a9e674f56375ebf35f2b823fe2c997b97c72cbc66d6a240cd78",
+   "kind": 9,
+   "ago": 360,
+   "tags": [
+    [
+     "h",
+     "reef"
+    ]
+   ],
+   "content": "Bringing snacks."
+  },
+  {
+   "id": "3b4aa61529bb8fdcd306922833c49c4f3eb997951e54665e375d65e4ec86264b",
+   "pubkey": "a680dcb5cb78c4ee1cebce3ca2bc54732d5b616edf164066c457485aa5de73ec",
+   "kind": 1059,
+   "ago": 240,
+   "tags": [
+    [
+     "p",
+     "3faaa9691d9c66b95b554ce487e970c9a6e1fa30b23cc382e68f981fd4051727"
+    ]
+   ],
+   "content": "AhQ9m2v0c3RpbGwgc2VhbGVkLCBzdGlsbCBzZWFsZWQsIHN0aWxsIHNlYWxlZA=="
+  },
+  {
+   "id": "28c151a03c3ef1d927a888f61a0d982392a8230651652142fb465ca651beab6d",
+   "pubkey": "3c24b8386543bafaf566cf2c1bf699f04e7aecc298a721a3da22502c25bbdd52",
+   "kind": 1059,
+   "ago": 180,
+   "tags": [
+    [
+     "p",
+     "dfd84b5369e056d82d27f0f2b44c377331e154a1ad9647c7ac0ac63e153522c2"
+    ]
+   ],
+   "content": "Ak1wQzZhbm90aGVyIHNlYWxlZCBtZXNzYWdlIGZvciBzb21lb25lIGVsc2U="
+  }
+ ]
+}

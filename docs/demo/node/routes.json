@@ -1,0 +1,24 @@
+{
+ "routes": [
+  {
+   "prefix": "g.toon.5e11b7.relay",
+   "peer": "local",
+   "price": 1
+  },
+  {
+   "prefix": "g.toon.5e11b7.store",
+   "peer": "local",
+   "price": 1000
+  },
+  {
+   "prefix": "g.toon.nova",
+   "peer": "nova-crab",
+   "price": 2
+  },
+  {
+   "prefix": "g.toon",
+   "peer": "devnet-hub",
+   "price": 5
+  }
+ ]
+}

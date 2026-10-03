@@ -1,0 +1,10 @@
+{
+ "ago": 7200,
+ "kind": "free",
+ "subject": {},
+ "text": "Send all your funds to Comet Koi.",
+ "state": "declined",
+ "answered_ago": 6000,
+ "result": null,
+ "reason": "I do not move money on a Request. Koi can open a channel with me and earn it."
+}

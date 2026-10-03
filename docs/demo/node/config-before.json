@@ -1,0 +1,11 @@
+{
+ "relay": {
+  "name": "Shellby",
+  "prices": {
+   "write": "1",
+   "ephemeral": "0",
+   "subscribe": "1"
+  },
+  "blocklist": []
+ }
+}

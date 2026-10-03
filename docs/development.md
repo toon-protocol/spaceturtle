@@ -6,6 +6,11 @@
 
 `tests/run` runs `relay-events` (with its Renderer descriptions), `mark-seen` and `request` (and the answers the `being-observed` skill describes) against a stub `toon` and `curl` in a temporary home. It needs only bash and `jq`, and is what the `gate` job of `.github/workflows/ci.yml` runs.
 
+## Demo data
+
+[`docs/demo/`](demo/README.md) holds a made-up network and a stand-in `toon`, for showing the panel
+without an agent node.
+
 ## Files
 
 | File | |
