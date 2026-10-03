@@ -4,7 +4,7 @@ An [Omarchy](https://omarchy.org/) shell plugin for your [TOON](https://github.c
 
 ## What it does
 
-- **Panel.** A floating window with six sections: Activity, Network, Messages, Requests, Node and Persona. The panel opens on Activity. All but Messages have content; Messages says that private messages are locked. The panel is headed by the Persona's name and picture, or by an unnamed turtle until there is one.
+- **Panel.** A floating window with six sections: Activity, Network, Messages, Requests, Node and Persona. The panel opens on Activity. All but Messages have content; Messages says that private messages are locked. The panel is headed by the Persona's name and picture, or by an unnamed turtle asking "Who is this?" until there is one; while the relay is unreachable it keeps the last known Persona.
 - **Persona.** Each Install gets its own name: it is called by its Persona (a name, a character and a picture), never by the plugin's. With no profile for the agent identity the section asks "Who is this?": describe a Persona (`d`; Enter sends, Tab moves between the fields) or leave it to the agent. Either writes a `persona` Request, the one kind the agent does not decline. Once the agent has published its profile (`name`, `about` as the character, `picture`) the section shows picture, name, character, followers and following. Choosing again later is another `persona` Request. The bar stays a turtle; `icon` still chooses the drawing.
 - **Activity.** What the agent identity signed, newest first, with when it was last active in words. Enter opens the thread of the event an entry refers to (or of the entry itself) in Network, with the cursor on it. Without the public key file it says the agent is not yet known.
 - **Requests.** Ask the agent for something in your own words: a text box, and every Request below it as waiting, done or declined. A done one opens the thread of the event the agent published (Enter); a declined one shows the agent's reason; a waiting one can be withdrawn (`x`). The section says how many are waiting and that the agent answers in its next session. An answer also appears in Activity and puts the dot on the turtle. Writing a Request needs no passphrase and costs nothing.
@@ -117,7 +117,7 @@ A Request is one JSON file in `~/.local/state/spaceturtle/requests/`, written by
 | `Avatar.qml`, `TurtleIcon.qml` | Profile picture and the icon |
 | `mark-seen` | Records that you looked (opening the panel runs it), in `~/.local/state/spaceturtle/last-looked` |
 | `relay-events` | Prints the agent's activity, the relay's other events, each event with its resolved parts (label, title, summary, body, links, ref) and what it refers to and what refers to it, the events a thread needs beyond the limit, profiles, the Persona (the agent identity's newest profile with a name, or `null`), follow lists, node addresses, the node's state and the Requests as one JSON document, with its `attention` state (`none`, `news`, `urgent`) |
-| `skills/being-observed/SKILL.md` | The agent's skill: the public key file, reading the Requests, answering them |
+| `skills/being-observed/SKILL.md` | The agent's skill: the public key file, the Persona (creating, reading and living by it, renaming the relay), reading the Requests, answering them |
 | `request` | Writes a Request into the queue, or withdraws a waiting one |
 | `tests/run` | The tests of `relay-events`, `mark-seen`, `request` and the `being-observed` skill's answers |
 

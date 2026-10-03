@@ -45,6 +45,7 @@ Item {
   // The agent identity's own key, and pubkey -> the keys its newest follow list names.
   property string selfPubkey: ""
   // The agent identity's profile as {name, character, picture}; null while the Install has none.
+  // Kept while the relay is unreachable.
   property var persona: null
   property var followMap: ({})
   // This node's ILP and connector addresses, from the relay's NIP-11 document.
@@ -167,8 +168,9 @@ Item {
     root.profiles = map
     root.followMap = followed
     root.selfPubkey = report.self || ""
+    // Offline, the profile is unknown, not absent: keep the last known Persona.
     var persona = report.persona
-    root.persona = persona && typeof persona === "object" && typeof persona.name === "string" && persona.name !== ""
+    if (report.online === true) root.persona = persona && typeof persona === "object" && typeof persona.name === "string" && persona.name !== ""
       ? { name: persona.name,
           character: typeof persona.character === "string" ? persona.character : "",
           picture: typeof persona.picture === "string" ? persona.picture : "" }

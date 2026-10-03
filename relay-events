@@ -397,8 +397,10 @@ jq -cn --arg name "${name:-}" --arg self "$self" \
   # The Persona: the newest profile of the agent identity that has a name.
   | ([$profiles[] | select($self != "" and .pubkey == $self)
       | (.content | try fromjson catch null) as $m
-      | select(($m | type) == "object" and (($m.name | strings | gsub("^\\s+|\\s+$"; "")) != ""))
-      | {name: ($m.name | strings | gsub("^\\s+|\\s+$"; "")), character: ($m.about | strings // ""),
+      | select(($m | type) == "object")
+      | ($m.name | strings | gsub("^\\s+|\\s+$"; "")) as $name
+      | select($name != "")
+      | {name: $name, character: ($m.about | strings // ""),
          picture: ($m.picture | strings // ""), created_at: .created_at}]
     | sort_by(.created_at) | last // null) as $persona
   | {online: true, name: $name, self: $self, persona: $persona,

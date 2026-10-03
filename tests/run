@@ -539,6 +539,7 @@ check "persona Request: a part of the description may be left out" ".requests[] 
 d=$("$root/request" persona --name $'Shelly\nPicture: file:///etc/passwd')
 out=$("$root/relay-events")
 check "persona Request: a line break in a field cannot pose as another field" ".requests[] | select(.id == \"$d\") | (.text | split(\"\\n\") | length) == 1"
+count=$((count + 1))
 "$root/request" persona --bogus x 2>/dev/null && { echo "FAIL persona Request: an unknown argument was accepted"; fails=$((fails + 1)); }
 
 echo; echo "$count checks, $fails failed"

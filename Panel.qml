@@ -29,6 +29,8 @@ Item {
   readonly property int nodeSection: 5
   readonly property int personaSection: 6
   readonly property int section: service ? service.section : activitySection
+  // Who this Install is, or null: the header shows an unnamed turtle.
+  readonly property var personaProfile: service && service.persona ? service.persona : null
   // The section that has a cursor to move, if the one showing does.
   readonly property var cursorSection: section === activitySection ? activity.item
     : (section === networkSection ? network.item
@@ -132,13 +134,13 @@ Item {
               height: Style.space(32)
 
               Avatar {
-                visible: root.service !== null && root.service.persona !== null
+                visible: root.personaProfile !== null
                 size: Style.space(32)
-                source: root.service && root.service.persona ? root.service.persona.picture : ""
-                label: root.service && root.service.persona ? root.service.persona.name : ""
+                source: root.personaProfile ? root.personaProfile.picture : ""
+                label: root.personaProfile ? root.personaProfile.name : ""
               }
               TurtleIcon {
-                visible: !root.service || root.service.persona === null
+                visible: root.personaProfile === null
                 anchors.centerIn: parent
                 iconSize: Style.space(28)
                 variant: root.service ? root.service.iconVariant : 1
@@ -148,12 +150,12 @@ Item {
             Text {
               anchors.verticalCenter: parent.verticalCenter
               textFormat: Text.PlainText
-              text: root.service && root.service.persona ? root.service.persona.name : "Unnamed"
-              color: root.service && root.service.persona ? Color.foreground : root.dim
+              text: root.personaProfile ? root.personaProfile.name : "Who is this?"
+              color: root.personaProfile ? Color.foreground : root.dim
               font.family: Style.font.family
               font.pixelSize: Style.font.title
-              font.bold: root.service !== null && root.service.persona !== null
-              font.italic: !root.service || root.service.persona === null
+              font.bold: root.personaProfile !== null
+              font.italic: root.personaProfile === null
             }
           }
 
