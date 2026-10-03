@@ -44,7 +44,8 @@ BarWidget {
       else root.togglePanel()
     }
 
-    // Attention dot: a plain accent dot for news, a larger ringed one when the node is down.
+    // Attention dot: a plain accent dot for news, a larger ringed one when the node
+    // is down or nothing is left of today's spending limit.
     Rectangle {
       visible: root.hasUnseen || root.urgent
       width: Style.space(root.urgent ? 7 : 5)

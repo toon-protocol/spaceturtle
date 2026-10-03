@@ -27,10 +27,11 @@ Item {
     var list = []
     var st = node
     if (!st) return list
-    function group(name) { list.push({ group: name }) }
-    function row(label, value) { list.push({ label: label, value: String(value) }) }
-    function unavailable() { list.push({ label: "", value: "unavailable", note: true }) }
-    function none() { list.push({ label: "", value: "none", note: true }) }
+    var current = ""
+    function group(name) { current = name; list.push({ group: name }) }
+    function row(label, value) { list.push({ label: label, value: String(value), under: current }) }
+    function unavailable() { list.push({ label: "", value: "unavailable", note: true, under: current }) }
+    function none() { list.push({ label: "", value: "none", note: true, under: current }) }
 
     group("Processes")
     if (!st.status) unavailable()
@@ -117,6 +118,31 @@ Item {
     service.nodeCursor = Math.max(0, Math.min(root.cursor + dy, root.targets.length - 1))
     if (service.nodeCursor === 0) scroll.contentY = 0
   }
+
+  // Stand on the item an Activity entry concerns: its row in its group, or the
+  // group's first row when the item is gone (a channel that closed). Before the
+  // rows are in, the focus waits for them.
+  function focusOn(focus) {
+    if (!focus || root.targets.length === 0) return
+    var first = -1
+    for (var t = 0; t < root.targets.length; t++) {
+      var r = root.rows[root.targets[t]]
+      if (r.under !== focus.group) continue
+      if (first < 0) first = t
+      if (r.label === focus.label) { first = t; break }
+    }
+    service.nodeFocus = null
+    root.scrollOnCursor = true
+    service.nodeCursor = first < 0 ? 0 : first
+    if (service.nodeCursor === 0) scroll.contentY = 0
+  }
+
+  Connections {
+    target: root.service
+    function onNodeFocusChanged() { root.focusOn(root.service.nodeFocus) }
+  }
+  onTargetsChanged: focusOn(service.nodeFocus)
+  Component.onCompleted: focusOn(service.nodeFocus)
 
   function hover(target) {
     root.scrollOnCursor = false
