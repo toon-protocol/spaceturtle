@@ -139,7 +139,9 @@ export async function runGate(sandbox: Sandbox, steps: readonly GateStep[]): Pro
   for (const step of steps) {
     console.log(`  [gate] ${step.name}: ${step.command}`);
     const lines: string[] = [];
-    const result = await sandbox.exec(`set -eo pipefail\n${step.command}`, {
+    // sandbox.exec runs under sh (dash in the image), which has no pipefail.
+    const script = `set -eo pipefail\n${step.command}`;
+    const result = await sandbox.exec(`bash -c '${script.replace(/'/g, `'\\''`)}'`, {
       onLine: (line) => {
         lines.push(line);
         // Stream sparingly: full build output would bury the runner log.
