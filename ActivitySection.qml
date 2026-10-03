@@ -3,8 +3,8 @@ import qs.Commons
 import qs.Ui
 
 // The Activity section, where the panel opens: when the agent was last active,
-// and what it did, newest first. Enter or a click opens the event an entry
-// refers to on its author's page in the Network. Where the cursor is lives on
+// and what it did, newest first. Enter or a click opens the thread of the event
+// an entry refers to in the Network. Where the cursor is lives on
 // the service.
 Item {
   id: root
@@ -38,7 +38,8 @@ Item {
 
   // Nothing to go back to: the panel closes.
   function back() { return false }
-  function key(text) {}
+  // `a` opens the agent's own page.
+  function key(text) { if (text === "a" && known) service.openAuthor(service.selfPubkey) }
 
   function ensureVisible(item) {
     if (!item) return
@@ -54,6 +55,7 @@ Item {
   function partsOf(event) { return event.parts || ({}) }
 
   function verbOf(event) {
+    if (event.node_change === true) return "Node"
     if (event.request) return event.request.state === "done" ? "Request done" : "Request declined"
     var label = String(partsOf(event).label || "")
     if (label) return label.charAt(0).toUpperCase() + label.slice(1)
@@ -61,6 +63,7 @@ Item {
   }
 
   function bodyOf(event) {
+    if (event.node_change === true) return String(event.text || "")
     if (event.request) {
       var reason = event.request.reason ? "\n" + event.request.reason : ""
       return String(event.request.text) + reason
@@ -154,7 +157,8 @@ Item {
               }
               Text {
                 textFormat: Text.PlainText
-                text: root.ago(row.modelData.created_at)
+                // A node change is when it was noticed, not when it happened.
+                text: (row.modelData.node_change === true ? "noticed " : "") + root.ago(row.modelData.created_at)
                 color: root.dim
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption

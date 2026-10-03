@@ -1,17 +1,21 @@
 #!/bin/bash
 # Print what can be observed of this agent node as one JSON document:
 # {"online", "name", "self", "node", "subscribers", "state", "profiles",
-# "follows", "activity", "last_active", "events", "requests", "attention",
-# "looked_at"}. "activity" is what the agent identity signed and the Requests it
-# answered, newest first, each entry with the id of the event it refers to
-# ("refers_to", or null); an answered Request is an entry with a "request" field
-# and the id "request:<id>". "last_active" is the newest created_at of the
-# entries, or null; "events" is the rest of the feed, without the agent's;
+# "follows", "activity", "last_active", "events", "context", "requests",
+# "urgent", "attention", "looked_at"}. "activity" is what the agent identity signed and
+# the Requests it answered, newest first; an answered Request is an entry with a
+# "request" field and the id "request:<id>". "last_active" is the newest
+# created_at of the entries, or null; "events" is the rest of the feed, without
+# the agent's. Every event, in either and in "context", says what it refers to
+# ("refers_to", an id or null), whether the relay lacks that event
+# ("refers_missing"), and which events refer to it ("referenced_by", ids, oldest
+# first). "context" holds the events a thread needs that the feed's limit left
+# out: those that shown events refer to, and those that refer to them.
 # "requests" is every Request in the queue, newest first (a file that is not a
 # valid Request is skipped). "attention" is "none", "news" (an Activity entry,
 # or an event tagging the agent, is newer than the last time the Observer
-# looked) or "urgent" (the node is not running); "looked_at" is when the
-# Observer last looked, or null.
+# looked) or "urgent" (the node is not running, or nothing is left of today's
+# spending limit); "looked_at" is when the Observer last looked, or null.
 # Read-only: nothing here opens the keystore, spends, changes state or
 # publishes. Only free `toon` commands are run: status, relay config, peer list,
 # channel list, route list, limit show, relay subscriptions and logs. Wallet
@@ -27,19 +31,41 @@
 #   SPACETURTLE_TOON        the toon command (default: toon)
 #   SPACETURTLE_CONFIG_DIR  where the agent writes its public key, in the file
 #                           `agent-pubkey` (default: ~/.config/spaceturtle)
-#   SPACETURTLE_STATE_DIR   where `request` keeps its queue, in `requests`, and
-#                           `mark-seen` records that the Observer looked
+#   SPACETURTLE_STATE_DIR   where `request` keeps its queue, in `requests`,
+#                           `mark-seen` records that the Observer looked, and
+#                           the last snapshot of the node is kept, in the file
+#                           `node-snapshot.json`
 #                           (default: ~/.local/state/spaceturtle)
+#   SPACETURTLE_NOW         the time now, in seconds (default: the clock)
 #   HOME                    ~/.local/bin is put on PATH
+#
+# Node changes: `toon` does not report that a channel opened or a price moved, so
+# each run compares the node's state with the snapshot the run before left, and
+# every difference becomes an entry in "activity" (marked "node_change", with the
+# time it was noticed, never the time it happened, and a "target" in the Node
+# section). When the snapshot is older than four refresh intervals (the second
+# argument, in seconds) the differences are one "since you last looked" entry.
+# The first run, with no snapshot, has none. Entries are kept across runs, at
+# most 50. "urgent" is true when nothing is left of today's spending limit.
 set -uo pipefail
 PATH="$HOME/.local/bin:$PATH"
 
 toon_cmd=${SPACETURTLE_TOON:-toon}
 config_dir=${SPACETURTLE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/spaceturtle}
 state_dir=${SPACETURTLE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/spaceturtle}
+snapshot=$state_dir/node-snapshot.json
 
 limit=${1:-40}
 [[ $limit =~ ^[0-9]+$ ]] || limit=40
+interval=${2:-30}
+[[ $interval =~ ^[0-9]+$ ]] || interval=30
+now=${SPACETURTLE_NOW:-$(date +%s)}
+[[ $now =~ ^[0-9]+$ ]] || now=$(date +%s)
+
+# The entries the last snapshot kept, until this run finds a state to compare.
+changes=$(jq -c '.changes // [] | if type == "array" then . else [] end' "$snapshot" 2>/dev/null)
+[[ -n $changes ]] || changes='[]'
+urgent=false
 
 # The Requests in the queue, newest first. They are local files, so they are
 # listed whether or not the relay runs. The id is the file's name.
@@ -90,15 +116,16 @@ fi
 # Without the relay, the Activity is what the agent answered, which is local.
 offline() {
   command -v jq >/dev/null || {
-    printf '{"online":false,"name":"","self":"","node":{"ilp_address":"","connector":""},"subscribers":null,"profiles":[],"follows":[],"state":null,"activity":[],"last_active":null,"events":[],"requests":[],"attention":"urgent","looked_at":null}\n'
+    printf '{"online":false,"name":"","self":"","node":{"ilp_address":"","connector":""},"subscribers":null,"profiles":[],"follows":[],"state":null,"urgent":false,"activity":[],"last_active":null,"events":[],"context":[],"requests":[],"attention":"urgent","looked_at":null}\n'
     exit 0
   }
   jq -cn --argjson requests "${requests:-[]}" \
     --argjson state "${state:-null}" --argjson looked "${looked_at:-null}" \
     --argjson answered "$(request_activity "$self" "${requests:-[]}")" \
+    --argjson changes "$changes" --argjson urgent "$urgent" \
     '($answered | sort_by(-.created_at)) as $activity
-    | {online:false,name:"",self:"",node:{ilp_address:"",connector:""},subscribers:null,state:$state,profiles:[],follows:[],
-       activity:$activity,last_active:($activity[0].created_at? // null),events:[],requests:$requests,
+    | {online:false,name:"",self:"",node:{ilp_address:"",connector:""},subscribers:null,state:$state,urgent:$urgent,profiles:[],follows:[],
+       activity:(($activity + $changes) | sort_by(-.created_at)),last_active:($activity[0].created_at? // null),events:[],context:[],requests:$requests,
        attention:"urgent",looked_at:$looked}'
   exit 0
 }
@@ -216,6 +243,71 @@ if [[ $status == null ]] || jq -e '.agent_node | type == "object"' <<<"$status" 
     }' 2>/dev/null) || state=null
 fi
 
+# Compare the state with the last snapshot: one entry per difference, kept with
+# the earlier ones. Groups that could not be read are not compared, and keep
+# what the snapshot held of them. Without a state nothing is read or written.
+if [[ $state != null ]]; then
+  old=$(jq -c 'if type == "object" then . else null end' "$snapshot" 2>/dev/null)
+  result=$(jq -cn --argjson old "${old:-null}" --argjson state "$state" --argjson now "$now" --argjson gap "$((interval * 4))" '
+    def keyed(f): map({(f): .}) | add // {};
+    def entry($group; $name; $text): {group: $group, name: $name, text: $text};
+    # Entries for what was added, removed and changed between two lists.
+    def delta($o; $n; kf; added; removed; changed):
+      if $o == null or $n == null then []
+      else ($o | keyed(kf)) as $a | ($n | keyed(kf)) as $b
+        | [$b | to_entries[] | select($a[.key] == null) | .value | added]
+        + [$a | to_entries[] | select($b[.key] == null) | .value | removed]
+        + [$b | to_entries[] | select($a[.key] != null and $a[.key] != .value) | .value | changed] end;
+    def blank: if . == "" then null else . end;
+    ($state.limits.remaining_today | blank) as $left
+    | {peers: $state.peers, channels: $state.channels, routes: $state.routes,
+       prices: $state.relay.prices, remaining: $left} as $cur
+    | ($old // {}) as $o
+    | ([$cur | to_entries[] | {(.key): (.value // $o[.key])}] | add) as $new
+    | (if $old != null then
+        delta($o.peers; $new.peers; (.id + "|" + .direction);
+          entry("Peerings"; .id; "Peering with \(.id) added");
+          entry("Peerings"; .id; "Peering with \(.id) removed");
+          entry("Peerings"; .id; "Peering with \(.id) is now \(.status)"))
+        + delta($o.channels; $new.channels; (.peer + "|" + .direction);
+          entry("Channels"; .peer; "Channel with \(.peer) opened");
+          entry("Channels"; .peer; "Channel with \(.peer) closed");
+          entry("Channels"; .peer; "Channel with \(.peer) is now \(.status)"))
+        + delta($o.routes; $new.routes; .prefix;
+          entry("Routes"; .prefix; "Route \(.prefix) added");
+          entry("Routes"; .prefix; "Route \(.prefix) removed");
+          entry("Routes"; .prefix; "Route \(.prefix) changed"))
+        + delta($o.prices; $new.prices; .name;
+          entry("Relay"; "Price " + .name; "Price \(.name) set to \(.price)");
+          entry("Relay"; "Price " + .name; "Price \(.name) removed");
+          entry("Relay"; "Price " + .name; "Price \(.name) changed to \(.price)"))
+        + (if $o.remaining != null and $new.remaining != null and $o.remaining != $new.remaining
+            then [entry("Spending limit"; "Left today";
+              (if ($new.remaining | tonumber? // 1) <= 0 then "Spending limit used up for today"
+               else "Spending limit: \($new.remaining) left today, was \($o.remaining)" end))]
+            else [] end)
+      else [] end) as $found
+    | (if ($found | length) == 0 then []
+       elif ($now - ($o.at // 0)) > $gap then
+         [{group: null, name: null, text: ("Since you last looked: " + ($found | map(.text) | join("; ")))}]
+       else $found end) as $fresh
+    | ($fresh | to_entries | map(.value + {id: "node-\($now)-\(.key)", kind: "node-change", node_change: true,
+        noticed_at: $now, created_at: $now,
+        target: (if .value.group then {group: .value.group, label: .value.name} else null end)}
+        | del(.group, .name))) as $entries
+    | (($entries + ($o.changes // [])) | .[:50]) as $kept
+    | {changes: $kept, snapshot: ($new + {at: $now, changes: $kept})}
+  ' 2>/dev/null)
+  if [[ -n $result ]]; then
+    changes=$(jq -c '.changes' <<<"$result")
+    if mkdir -p "$state_dir" 2>/dev/null; then
+      jq -c '.snapshot' <<<"$result" > "$snapshot.$$" 2>/dev/null && mv -f "$snapshot.$$" "$snapshot" 2>/dev/null || rm -f "$snapshot.$$"
+    fi
+  fi
+  urgent=$(jq -c '.limits.remaining_today | strings | (tonumber? // null) | . != null and . <= 0' <<<"$state" 2>/dev/null)
+  [[ $urgent == true ]] || urgent=false
+fi
+
 read_address=$(jq -r '.agent_node.toon_apps[]?.apps[]? | select(.name == "relay" and .running) | .read_address // empty' <<<"$status" 2>/dev/null |
   head -n1)
 [[ -n $read_address ]] || offline
@@ -233,6 +325,29 @@ name=$(jq -r '.relay.name // ""' <<<"$relay_config" 2>/dev/null)
 # push it out of the feed's limit.
 agent_events='[]'
 [[ -n $self ]] && agent_events=$(relay_query "{\"authors\":[\"$self\"],\"limit\":$limit}" | with_parts)
+
+# The events a thread needs beyond the limit: what shown events refer to, up
+# the chain a few levels, and what refers to them. Asked for by id and by "e"
+# tag; an event asked for by id that the relay does not return is missing.
+# One higher up than the walk reaches is neither held nor missing.
+ref_of='[.tags[]? | select(type == "array" and .[0] == "e" and (.[1] | strings))]
+  | ((map(select(.[3]? == "reply")) | first) // last) | .[1]? // null'
+context='[]'
+asked='[]'
+for _ in 1 2 3; do
+  want=$(jq -cn --argjson a "$events" --argjson b "${agent_events:-[]}" --argjson c "$context" --argjson asked "$asked" \
+    "[\$a[], \$b[], \$c[]] | (map(.id) | unique) as \$held
+     | [.[] | $ref_of | select(. != null)] | unique - \$held - \$asked | .[0:100]" 2>/dev/null || echo '[]')
+  [[ $want == '[]' ]] && break
+  asked=$(jq -cn --argjson a "$asked" --argjson b "$want" '$a + $b' 2>/dev/null || echo "$asked")
+  found=$(relay_query "{\"ids\":$want}")
+  context=$(jq -cn --argjson a "$context" --argjson b "$found" '$a + $b | unique_by(.id)' 2>/dev/null || echo "$context")
+  [[ $found == '[]' ]] && break
+done
+ids=$(jq -cn --argjson a "$events" --argjson b "${agent_events:-[]}" --argjson c "$context" '[$a[], $b[], $c[] | .id | strings] | unique | .[0:100]' 2>/dev/null || echo '[]')
+replies=$(relay_query "{\"#e\":$ids,\"limit\":200}")
+context=$(jq -cn --argjson a "$context" --argjson b "$replies" '$a + $b | unique_by(.id)' 2>/dev/null || echo "$context")
+context=$(printf '%s' "$context" | with_parts)
 
 # Events tagging the agent identity, asked for by tag for the same reason.
 mention_events='[]'
@@ -252,28 +367,40 @@ jq -cn --arg name "${name:-}" --arg self "$self" \
   --argjson node "${node:-null}" \
   --argjson subscribers "${subscribers:-null}" --argjson state "$state" --argjson events "${events:-[]}" \
   --argjson profiles "${profiles:-[]}" --argjson follows "${follows:-[]}" \
-  --argjson agent "${agent_events:-[]}" --argjson looked "${looked_at:-null}" \
+  --argjson agent "${agent_events:-[]}" --argjson context "${context:-[]}" \
+  --argjson asked "${asked:-[]}" --argjson looked "${looked_at:-null}" \
   --argjson mentioned "${mention_events:-[]}" \
   --argjson requests "${requests:-[]}" \
   --argjson answered "$(request_activity "$self" "${requests:-[]}")" \
-  '(if $self == "" then []
+  --argjson changes "$changes" --argjson urgent "$urgent" \
+  '# The "e" tag marked "reply" (NIP-10), else the last one.
+  def ref: '"$ref_of"';
+  ([$agent[], $events[], $context[]] | unique_by(.id)) as $all
+  | ($all | map(.id)) as $held
+  | ($all | map(select(ref != null)) | sort_by(.created_at)
+      | reduce .[] as $e ({}; .[$e | ref] += [$e.id])) as $referrers
+  | def mark: map((ref) as $r | . + {refers_to: $r,
+      refers_missing: ($r != null and ($held | index($r) == null) and ($asked | index($r) != null)),
+      referenced_by: ($referrers[.id] // [])});
+  (if $self == "" then []
     else ([$agent[], $events[]] | map(select(.pubkey == $self)) | unique_by(.id)
-      | sort_by(-.created_at)
-      # The "e" tag marked "reply" (NIP-10), else the last one.
-      | map(. + {refers_to: ([.tags[]? | select(.[0] == "e" and (.[1] | strings))]
-          | ((map(select(.[3]? == "reply")) | first) // last) | .[1]? // null)}))
+      | sort_by(-.created_at) | mark)
     end) as $signed
   # Answers count whether or not the public key is known.
   | ($signed + $answered | sort_by(-.created_at)) as $activity
   | ([$mentioned[], $events[] | select(.pubkey != $self and $self != ""
       and any(.tags[]?; .[0] == "p" and .[1] == $self))]) as $mentions
   | {online: true, name: $name, self: $self,
-    activity: $activity, last_active: ($activity[0].created_at? // null),
+    activity: (($activity + $changes) | sort_by(-.created_at)), last_active: ($activity[0].created_at? // null),
+    urgent: $urgent,
     node: ($node // {ilp_address: "", connector: ""}),
     requests: $requests, subscribers: $subscribers, state: $state, profiles: $profiles, follows: $follows,
-    events: ($events | map(select(.pubkey != $self))),
+    events: ($events | map(select(.pubkey != $self)) | mark),
+    context: ($context | map(select(.id as $i | ($events | map(.id) | index($i)) == null and ($agent | map(.id) | index($i)) == null)) | mark),
     looked_at: $looked,
-    # Without a record of looking there is nothing to compare with.
-    attention: (if $looked == null then "none"
-      elif any(($activity + $mentions)[]; .created_at > $looked) then "news"
+    # A spent spending limit is urgent. Without a record of
+    # looking there is nothing to compare with.
+    attention: (if $urgent then "urgent"
+      elif $looked == null then "none"
+      elif any(($activity + $changes + $mentions)[]; .created_at > $looked) then "news"
       else "none" end)}'

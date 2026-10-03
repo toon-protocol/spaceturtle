@@ -2,9 +2,9 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 
-// The Network section: the relay's feed, and a page for each author. One
-// cursor runs down the page; on an author page it passes the copyable details
-// before the events. Where it is lives on the service, so it survives the panel
+// The Network section: the relay's feed, a thread for each event and a page for
+// each author. One cursor runs down the page; on an author page it passes the
+// copyable details before the events. Where it is lives on the service, so it survives the panel
 // closing.
 Item {
   id: root
@@ -14,9 +14,17 @@ Item {
   readonly property color dim: Qt.darker(Color.foreground, 1.5)
 
   readonly property string profilePubkey: service.profilePubkey
-  readonly property bool authorPage: profilePubkey !== ""
+  readonly property string threadId: service.threadId
+  readonly property bool threadView: threadId !== ""
+  readonly property bool authorPage: !threadView && profilePubkey !== ""
   readonly property var profile: service.profiles[profilePubkey] || ({})
-  readonly property var shownEvents: authorPage ? service.eventsBy(profilePubkey) : service.events
+  readonly property var shownEvents: threadView ? service.threadRows(threadId)
+    : (authorPage ? service.eventsBy(profilePubkey) : service.events)
+  // The event the cursor is on, or null (also on a missing event's row).
+  readonly property var cursorEvent: {
+    var event = cursor >= firstEvent ? shownEvents[cursor - firstEvent] : null
+    return event && event.missing !== true ? event : null
+  }
   readonly property bool viewingSelf: authorPage && profilePubkey === service.selfPubkey
 
   // The "LABEL value" lines of an author page that have a value.
@@ -55,9 +63,33 @@ Item {
     return service.events.length === 1 ? "1 event" : service.events.length + " events"
   }
 
+  // The row under the cursor, so that a row taller than the page can be read.
+  property Item cursorItem: null
+
+  // Scrolls within a row too tall to show at once, before the cursor leaves it.
+  // True when it did.
+  function scrollWithin(dy) {
+    var item = root.cursorItem
+    if (!item || item.height <= scroll.height) return false
+    var top = item.mapToItem(column, 0, 0).y
+    var bottom = top + item.height
+    var step = Math.max(Style.space(24), scroll.height / 2)
+    var maxY = Math.max(0, scroll.contentHeight - scroll.height)
+    if (dy > 0 && bottom > scroll.contentY + scroll.height + 1) {
+      scroll.contentY = Math.min(maxY, scroll.contentY + step, bottom - scroll.height)
+      return true
+    }
+    if (dy < 0 && top < scroll.contentY - 1) {
+      scroll.contentY = Math.max(0, scroll.contentY - step, top)
+      return true
+    }
+    return false
+  }
+
   function move(dy) {
     pointerGate.reset()
     root.scrollOnCursor = true
+    if (root.threadView && root.scrollWithin(dy)) return
     service.cursor = Math.max(0, Math.min(root.cursor + dy, root.targetCount - 1))
     // The first target is not the top of the page: show what is above it too.
     if (service.cursor === 0) scroll.contentY = 0
@@ -68,57 +100,49 @@ Item {
     service.cursor = index
   }
 
-  // Enter: an event opens its author's page, a detail is copied, the button is pressed.
+  // Enter: an event opens its thread (in a thread, its author's page), a detail is copied.
   function activate() {
     if (root.targetCount === 0) return
     if (root.cursor >= root.firstEvent) {
-      if (!root.authorPage) root.openProfile(root.shownEvents[root.cursor - root.firstEvent].pubkey)
+      var event = root.cursorEvent
+      if (!event) return
+      if (root.threadView) service.openAuthor(event.pubkey)
+      else service.openThread(event.id)
     } else {
       root.copy(root.details[root.cursor])
     }
   }
 
-  // Esc: from an author page to the feed. False when already on the feed.
+  // Esc: back to the view before (the feed, an author page or a thread). False
+  // when already on the feed.
   function back() {
-    if (!root.authorPage) return false
+    if (!service.goBack()) return false
     pointerGate.reset()
     root.scrollOnCursor = true
     root.copiedLabel = ""
     root.cursorToRestore = true
-    service.profilePubkey = ""
-    service.cursor = service.feedCursor
     return true
   }
 
+  // `y` or `c` copies the detail under the cursor, `o` opens a web address,
+  // `a` opens the author of the event under the cursor.
   function key(text) {
     var detail = root.cursor < root.details.length ? root.details[root.cursor] : null
     if (text === "o" && detail && detail.openable) service.openUrl(detail.value)
+    else if ((text === "y" || text === "c") && detail) root.copy(detail)
+    else if (text === "a" && root.cursorEvent && !root.authorPage) service.openAuthor(root.cursorEvent.pubkey)
   }
 
-  function openProfile(pubkey) {
-    pointerGate.reset()
-    root.scrollOnCursor = true
-    root.copiedLabel = ""
-    service.feedCursor = root.cursor
-    service.profilePubkey = pubkey
-    service.cursor = 0
-    scroll.contentY = 0
-  }
-
-  // An Activity entry opened an event: its author's page is showing, put the cursor on it.
-  function showEvent(id) {
-    pointerGate.reset()
-    root.scrollOnCursor = true
-    root.copiedLabel = ""
-    root.cursorToRestore = true
-    scroll.contentY = 0
-    for (var i = 0; i < root.shownEvents.length; i++)
-      if (root.shownEvents[i].id === id) { service.cursor = root.firstEvent + i; return }
-  }
-
+  // A thread or an author page was opened, here or from Activity.
   Connections {
     target: root.service
-    function onEventOpened(id) { root.showEvent(id) }
+    function onViewOpened() {
+      pointerGate.reset()
+      root.scrollOnCursor = true
+      root.copiedLabel = ""
+      root.cursorToRestore = true
+      scroll.contentY = 0
+    }
   }
 
   function copy(detail) {
@@ -127,9 +151,11 @@ Item {
     copiedTimer.restart()
   }
 
+  // A row taller than the page, a long-form post, is shown from its start.
   function restoreCursor(item) {
     root.cursorToRestore = false
-    root.ensureVisible(item)
+    if (item && item.height > scroll.height) scroll.contentY = Math.max(0, item.mapToItem(column, 0, 0).y)
+    else root.ensureVisible(item)
   }
 
   function ensureVisible(item) {
@@ -231,7 +257,7 @@ Item {
 
       // ---------- Hero: icon · relay name · status ----------
       PanelHero {
-        visible: !root.authorPage
+        visible: !root.authorPage && !root.threadView
         title: root.service.relayName || "Relay"
         meta: root.statusText
         iconComponent: Component {
@@ -245,7 +271,7 @@ Item {
 
       // ---------- Icon chooser, shown while "iconPreview" is set ----------
       Row {
-        visible: root.service.iconPreview && !root.authorPage
+        visible: root.service.iconPreview && !root.authorPage && !root.threadView
         spacing: Style.space(22)
 
         Repeater {
@@ -288,12 +314,12 @@ Item {
         }
       }
 
-      // =================== Author page ===================
+      // =================== Thread and author page ===================
 
       // ---------- Back ----------
       Button {
-        visible: root.authorPage
-        text: "󰅁  " + (root.service.relayName || "Relay")
+        visible: root.authorPage || root.threadView
+        text: "󰅁  " + (root.service.trail.length > 1 ? "Back" : (root.service.relayName || "Relay"))
         foreground: root.dim
         fontSize: Style.font.bodySmall
         onClicked: root.back()
@@ -441,7 +467,7 @@ Item {
       PanelSeparator {}
 
       Text {
-        visible: !root.authorPage && root.service.events.length === 0
+        visible: !root.authorPage && !root.threadView && root.service.events.length === 0
         textFormat: Text.PlainText
         text: !root.service.loaded ? "Fetching events…" : (root.service.online ? "No events yet." : "The relay is not running.")
         color: root.dim
@@ -451,9 +477,9 @@ Item {
       }
 
       Text {
-        visible: root.authorPage && root.shownEvents.length === 0
+        visible: (root.authorPage || root.threadView) && root.shownEvents.length === 0
         textFormat: Text.PlainText
-        text: "Nothing posted here yet."
+        text: root.threadView ? "This event is no longer on the relay." : "Nothing posted here yet."
         color: root.dim
         font.family: Style.font.family
         font.pixelSize: Style.font.bodySmall
@@ -480,28 +506,83 @@ Item {
     required property var modelData
     required property int index
     readonly property int target: root.firstEvent + index
+    // A thread indents a reply under what it replies to.
+    readonly property int depth: Math.min(modelData.depth || 0, 6)
+    readonly property bool missing: modelData.missing === true
+    readonly property real indent: depth * Style.space(14)
 
     hasCursor: root.cursor === target
     width: parent ? parent.width : 0
-    height: Math.max(avatar.height, rowText.implicitHeight) + Style.spacing.lg * 2
+    height: (missing ? gone.implicitHeight : Math.max(avatar.height, rowText.implicitHeight)) + Style.spacing.lg * 2
 
-    onHasCursorChanged: if (hasCursor && root.scrollOnCursor) root.ensureVisible(row)
+    onHasCursorChanged: {
+      if (!hasCursor) { if (root.cursorItem === row) root.cursorItem = null; return }
+      root.cursorItem = row
+      if (root.scrollOnCursor) root.ensureVisible(row)
+    }
     // The cursor the panel was closed on: bring it back into view.
-    Component.onCompleted: if (hasCursor && root.cursorToRestore) Qt.callLater(root.restoreCursor, row)
+    Component.onCompleted: {
+      if (hasCursor) root.cursorItem = row
+      if (hasCursor && root.cursorToRestore) Qt.callLater(root.restoreCursor, row)
+    }
+    Component.onDestruction: if (root.cursorItem === row) root.cursorItem = null
+
+    // First, so that the picture and the name sit above it.
+    MouseArea {
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onPositionChanged: function(mouse) { if (pointerGate.moved(row, mouse)) root.hover(row.target) }
+      onClicked: {
+        root.hover(row.target)
+        root.activate()
+      }
+    }
+
+    // An event the thread refers to and the relay does not hold: shown, not skipped.
+    Text {
+      id: gone
+      visible: row.missing
+      textFormat: Text.PlainText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.spacing.lg + row.indent
+      anchors.right: parent.right
+      anchors.rightMargin: Style.spacing.lg
+      anchors.top: parent.top
+      anchors.topMargin: Style.spacing.lg
+      wrapMode: Text.Wrap
+      text: "󰇘  Event " + String(row.modelData.id).slice(0, 8) + " is not on this relay"
+      color: root.dim
+      font.family: Style.font.family
+      font.pixelSize: Style.font.bodySmall
+      font.italic: true
+    }
 
     Avatar {
       id: avatar
+      visible: !row.missing
       size: Style.space(28)
       source: root.service.field(row.modelData.pubkey, "picture")
       label: root.service.nameOf(row.modelData.pubkey)
       anchors.left: parent.left
-      anchors.leftMargin: Style.spacing.lg
+      anchors.leftMargin: Style.spacing.lg + row.indent
       anchors.top: parent.top
       anchors.topMargin: Style.spacing.lg
+
+      // A picture opens its author's page.
+      MouseArea {
+        anchors.fill: parent
+        cursorShape: Qt.PointingHandCursor
+        onClicked: {
+          root.hover(row.target)
+          root.service.openAuthor(row.modelData.pubkey)
+        }
+      }
     }
 
     Column {
       id: rowText
+      visible: !row.missing
       anchors.left: avatar.right
       anchors.leftMargin: Style.space(10)
       anchors.right: parent.right
@@ -524,6 +605,16 @@ Item {
           font.family: Style.font.family
           font.pixelSize: Style.font.bodySmall
           font.bold: true
+
+          // A name opens its author's page.
+          MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+              root.hover(row.target)
+              root.service.openAuthor(row.modelData.pubkey)
+            }
+          }
         }
 
         Text {
@@ -559,19 +650,9 @@ Item {
         font.family: Style.font.family
         font.pixelSize: Style.font.body
         wrapMode: Text.Wrap
-        maximumLineCount: root.authorPage ? 12 : 4
+        // In a thread the event under the cursor is read in full; the page scrolls within it.
+        maximumLineCount: root.threadView && row.hasCursor ? 100000 : (root.authorPage ? 12 : 4)
         elide: Text.ElideRight
-      }
-    }
-
-    MouseArea {
-      anchors.fill: parent
-      hoverEnabled: true
-      cursorShape: root.authorPage ? Qt.ArrowCursor : Qt.PointingHandCursor
-      onPositionChanged: function(mouse) { if (pointerGate.moved(row, mouse)) root.hover(row.target) }
-      onClicked: {
-        root.hover(row.target)
-        root.activate()
       }
     }
   }
