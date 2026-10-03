@@ -341,6 +341,23 @@ else echo "FAIL request: text changed"; fails=$((fails + 1)); fi
 id=$("$root/request" add --kind follow --pubkey "$pk" "and say hello")
 out=$(jq -c . "$queue/$id.json")
 check "request: a kind and a subject" ".kind == \"follow\" and .subject == {pubkey: \"$pk\", event: null}"
+for k in follow unfollow; do
+  id=$("$root/request" add --kind $k --pubkey "$pk" "")
+  out=$(jq -c . "$queue/$id.json")
+  check "request: $k names its author, the text is optional" ".kind == \"$k\" and .subject == {pubkey: \"$pk\", event: null} and .text == \"\" and .state == \"waiting\""
+  bad "request: $k with no subject is refused" "$root/request" add --kind $k "text"
+  bad "request: $k with only a note is refused" "$root/request" add --kind $k --event "$pk"
+done
+for k in reply react repost; do
+  id=$("$root/request" add --kind $k --event "$pk" --pubkey "$pk" "my words")
+  out=$(jq -c . "$queue/$id.json")
+  check "request: $k names its note and author" ".kind == \"$k\" and .subject == {pubkey: \"$pk\", event: \"$pk\"} and .text == \"my words\""
+  id=$("$root/request" add --kind $k --event "$pk" "")
+  out=$(jq -c . "$queue/$id.json")
+  check "request: $k without text is written" ".kind == \"$k\" and .subject.event == \"$pk\" and .text == \"\""
+  bad "request: $k with no subject is refused" "$root/request" add --kind $k "text"
+  bad "request: $k with only an author is refused" "$root/request" add --kind $k --pubkey "$pk" "text"
+done
 
 # --- requests in the observation document
 new_env; install_toon; running_relay

@@ -6,6 +6,9 @@
 #   request add [--kind KIND] [--pubkey KEY] [--event ID] TEXT
 #       Writes a Request in the state "waiting" and prints its id. KIND is
 #       follow, unfollow, reply, react, repost, persona or free (the default).
+#       follow and unfollow need --pubkey (the author); reply, react and repost
+#       need --event (the note; --pubkey is its author, when known). TEXT is
+#       the Observer's own words and is optional for all of them but free.
 #   request withdraw ID
 #       Removes a Request that is still waiting. One the agent has answered is
 #       refused: it is a record of what the agent did.
@@ -42,6 +45,11 @@ add() {
   [[ $pubkey == "" || $pubkey =~ ^[0-9a-f]{64}$ ]] || die "--pubkey is not 64 lowercase hex characters"
   [[ $event == "" || $event =~ ^[0-9a-f]{64}$ ]] || die "--event is not 64 lowercase hex characters"
   [[ $kind != free || -n ${text//[[:space:]]/} ]] || die "a free Request needs text"
+  # A Request about a thing names it: an author to follow, a note to answer.
+  case $kind in
+    follow|unfollow) [[ -n $pubkey ]] || die "a $kind Request needs --pubkey" ;;
+    reply|react|repost) [[ -n $event ]] || die "a $kind Request needs --event" ;;
+  esac
 
   mkdir -p "$queue" || die "cannot create $queue"
   local now id
