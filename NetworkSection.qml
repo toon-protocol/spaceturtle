@@ -4,7 +4,7 @@ import qs.Ui
 
 // The Network section: the relay's feed, and a page for each author. One
 // cursor runs down the page; on an author page it passes the copyable details
-// and the follow button before the events. Where it is lives on the service,
+// before the events. Where it is lives on the service,
 // so it survives the panel closing.
 Item {
   id: root
@@ -18,26 +18,25 @@ Item {
   readonly property var profile: service.profiles[profilePubkey] || ({})
   readonly property var shownEvents: authorPage ? service.eventsBy(profilePubkey) : service.events
   readonly property bool viewingSelf: authorPage && profilePubkey === service.selfPubkey
-  readonly property bool following: service.isFollowing(profilePubkey)
-  readonly property bool canFollow: authorPage && !viewingSelf && service.selfPubkey !== ""
 
   // The "LABEL value" lines of an author page that have a value.
   readonly property var details: {
     if (!authorPage) return []
     var web = service.field(profilePubkey, "website")
+    // Only the agent's own page: the relay's NIP-11 document says where this node is paid.
+    var ilp = viewingSelf ? service.nodeIlp : ""
+    var connector = viewingSelf ? service.nodeConnector : ""
     return [
       { label: "Web", value: web, openable: /^https?:\/\//.test(web) },
       { label: "Zap", value: service.field(profilePubkey, "lud16"), openable: false },
-      // Not in NIP-01: what a TOON agent node says about where to pay it.
-      { label: "ILP", value: service.field(profilePubkey, "ilp_address"), openable: false },
-      { label: "Node", value: service.field(profilePubkey, "connector"), openable: false },
+      { label: "ILP", value: ilp, openable: false },
+      { label: "Node", value: connector, openable: false },
       { label: "Key", value: npub(profilePubkey), openable: false }
     ].filter(function(row) { return row.value !== "" })
   }
 
-  // The cursor's targets, in order: details, the follow button, events.
-  readonly property int followIndex: canFollow ? details.length : -1
-  readonly property int firstEvent: details.length + (canFollow ? 1 : 0)
+  // The cursor's targets, in order: details, events.
+  readonly property int firstEvent: details.length
   readonly property int targetCount: firstEvent + shownEvents.length
   readonly property int cursor: Math.max(0, Math.min(service.cursor, targetCount - 1))
   // False while the pointer moves the cursor, so hovering never scrolls the page.
@@ -74,8 +73,6 @@ Item {
     if (root.targetCount === 0) return
     if (root.cursor >= root.firstEvent) {
       if (!root.authorPage) root.openProfile(root.shownEvents[root.cursor - root.firstEvent].pubkey)
-    } else if (root.cursor === root.followIndex) {
-      service.toggleFollow(root.profilePubkey)
     } else {
       root.copy(root.details[root.cursor])
     }
@@ -408,11 +405,11 @@ Item {
         }
       }
 
-      // ---------- Counters, and the follow button on someone else's page ----------
+      // ---------- Counters ----------
       Item {
         visible: root.authorPage
         width: parent.width
-        implicitHeight: Math.max(counters.implicitHeight, followButton.implicitHeight)
+        implicitHeight: counters.implicitHeight
 
         Row {
           id: counters
@@ -436,21 +433,6 @@ Item {
             count: root.service.subscribers < 0 ? "–" : String(root.service.subscribers)
             label: root.service.subscribers === 1 ? "Subscriber" : "Subscribers"
           }
-        }
-
-        Button {
-          id: followButton
-          visible: root.canFollow
-          anchors.right: parent.right
-          anchors.verticalCenter: parent.verticalCenter
-          bordered: true
-          active: !root.following
-          hasCursor: root.cursor === root.followIndex
-          text: root.service.followPending !== "" ? "…" : (root.following ? "Unfollow" : "Follow")
-          fontSize: Style.font.bodySmall
-          onHovered: function(isHovered) { if (isHovered) root.hover(root.followIndex) }
-          onClicked: root.service.toggleFollow(root.profilePubkey)
-          onHasCursorChanged: if (hasCursor && root.scrollOnCursor) root.ensureVisible(followButton)
         }
       }
 

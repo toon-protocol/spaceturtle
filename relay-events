@@ -1,37 +1,69 @@
 #!/bin/bash
-# Print the social events stored on this agent node's relay as one JSON
-# document: {"online", "name", "self", "subscribers", "profiles", "follows",
-# "events"}. The relay's read port changes on every `toon up`, so it is looked
-# up from `toon status` each time.
+# Print what can be observed of this agent node as one JSON document:
+# {"online", "name", "self", "node", "subscribers", "profiles", "follows",
+# "events"}. Read-only: nothing here opens the keystore or publishes.
+#
+# The relay's read port changes on every `toon up`, so it is looked up from
+# `toon status` each time. Environment, so that tests can run against a stub:
+#   SPACETURTLE_TOON        the toon command (default: toon)
+#   SPACETURTLE_CONFIG_DIR  where the agent writes its public key, in the file
+#                           `agent-pubkey` (default: ~/.config/spaceturtle)
+#   HOME                    ~/.local/bin is put on PATH
 set -uo pipefail
 PATH="$HOME/.local/bin:$PATH"
-here=$(cd "$(dirname "$0")" && pwd)
-. "$here/relay-lib"
+
+toon_cmd=${SPACETURTLE_TOON:-toon}
+config_dir=${SPACETURTLE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/spaceturtle}
 
 limit=${1:-40}
 [[ $limit =~ ^[0-9]+$ ]] || limit=40
 
 offline() {
-  printf '{"online":false,"name":"","self":"","subscribers":null,"profiles":[],"follows":[],"events":[]}\n'
+  printf '{"online":false,"name":"","self":"","node":{"ilp_address":"","connector":""},"subscribers":null,"profiles":[],"follows":[],"events":[]}\n'
   exit 0
 }
 
-command -v toon >/dev/null && command -v jq >/dev/null || offline
-read_address=$(relay_read_address)
+toon() { command "$toon_cmd" "$@"; }
+
+relay_query() {
+  toon event query "ws://$read_address" --filter "$1" --json 2>/dev/null | jq -c '.events // []' 2>/dev/null || echo '[]'
+}
+
+command -v "$toon_cmd" >/dev/null && command -v jq >/dev/null || offline
+read_address=$(toon status --json 2>/dev/null |
+  jq -r '.agent_node.toon_apps[]?.apps[]? | select(.name == "relay" and .running) | .read_address // empty' 2>/dev/null |
+  head -n1)
 [[ -n $read_address ]] || offline
 
-# Notes, reposts, reactions, comments and long-form posts; then the profiles
-# that name their authors and the follow lists that count their followers.
-events=$(relay_query "{\"kinds\":[1,6,7,16,1111,30023],\"limit\":$limit}")
+# Every kind: the UI decides what it can show. Then the profiles that name the
+# authors and the follow lists that count their followers.
+events=$(relay_query "{\"limit\":$limit}")
 profiles=$(relay_query '{"kinds":[0],"limit":200}')
 follows=$(relay_query '{"kinds":[3],"limit":500}')
 name=$(toon relay config --json 2>/dev/null | jq -r '.relay.name // ""' 2>/dev/null)
+
+# The agent identity's public key, from a file the agent writes during setup.
+self=
+if [[ -r $config_dir/agent-pubkey ]]; then
+  read -r self < "$config_dir/agent-pubkey" || true
+  [[ $self =~ ^[0-9a-f]{64}$ ]] || self=
+fi
+
+# The node's ILP address and connector address, from the relay's NIP-11 document.
+node=
+if command -v curl >/dev/null; then
+  node=$(curl -fsS --max-time 5 -H 'Accept: application/nostr+json' "http://$read_address" 2>/dev/null |
+    jq -c '{ilp_address: (.ilp_address // "" | strings), connector: (.connector // "" | strings)}' 2>/dev/null)
+fi
 
 # Who holds a subscription to this relay's live feed; null while it is not sold.
 subscribers=$(toon relay subscriptions --incoming --json 2>/dev/null |
   jq -c 'if .error then null else ([.. | arrays] | first // [] | length) end' 2>/dev/null)
 
-jq -cn --arg name "${name:-}" --arg self "$(agent_identity)" \
+jq -cn --arg name "${name:-}" --arg self "$self" \
+  --argjson node "${node:-null}" \
   --argjson subscribers "${subscribers:-null}" --argjson events "${events:-[]}" \
   --argjson profiles "${profiles:-[]}" --argjson follows "${follows:-[]}" \
-  '{online: true, name: $name, self: $self, subscribers: $subscribers, profiles: $profiles, follows: $follows, events: $events}'
+  '{online: true, name: $name, self: $self,
+    node: ($node // {ilp_address: "", connector: ""}),
+    subscribers: $subscribers, profiles: $profiles, follows: $follows, events: $events}'

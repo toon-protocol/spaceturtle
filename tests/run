@@ -1,0 +1,110 @@
+#!/bin/bash
+# Runs relay-events against a stub `toon` and `curl` in a temporary home.
+# Needs only bash and jq. Usage: tests/run
+set -uo pipefail
+root=$(cd "$(dirname "$0")/.." && pwd)
+fails=0 count=0
+
+new_env() {
+  tmp=$(mktemp -d)
+  export HOME=$tmp/home SPACETURTLE_CONFIG_DIR=$tmp/config
+  mkdir -p "$HOME/.local/bin" "$SPACETURTLE_CONFIG_DIR" "$tmp/bin"
+  export SPACETURTLE_TOON=$tmp/bin/toon
+  export STUB_DIR=$tmp/stub; mkdir -p "$STUB_DIR"
+  # A curl that prints the NIP-11 document in $STUB_DIR/nip11, or fails.
+  cat > "$HOME/.local/bin/curl" <<'STUB'
+#!/bin/bash
+[[ -r $STUB_DIR/nip11 ]] && cat "$STUB_DIR/nip11"
+STUB
+  chmod +x "$HOME/.local/bin/curl"
+}
+
+# A toon that answers from files in $STUB_DIR; the file for `toon event query`
+# depends on the filter's kinds.
+install_toon() {
+  cat > "$SPACETURTLE_TOON" <<'STUB'
+#!/bin/bash
+echo "$*" >> "$STUB_DIR/calls"
+case "$1 $2" in
+  "status --json") cat "$STUB_DIR/status" ;;
+  "relay config") cat "$STUB_DIR/config" ;;
+  "relay subscriptions") echo '{"error":"not sold"}' ;;
+  "event query")
+    case "$*" in
+      *'"kinds":[0]'*) cat "$STUB_DIR/profiles" ;;
+      *'"kinds":[3]'*) cat "$STUB_DIR/follows" ;;
+      *) cat "$STUB_DIR/events" ;;
+    esac ;;
+  *) echo "unexpected toon $*" >&2; exit 1 ;;
+esac
+STUB
+  chmod +x "$SPACETURTLE_TOON"
+}
+
+running_relay() {
+  echo '{"agent_node":{"toon_apps":[{"apps":[{"name":"relay","running":true,"read_address":"127.0.0.1:7100"}]}]}}' > "$STUB_DIR/status"
+  echo '{"relay":{"name":"Shelly"}}' > "$STUB_DIR/config"
+}
+
+check() { # name, jq expression that must be true of $out
+  count=$((count + 1))
+  if jq -e "$2" <<<"$out" >/dev/null 2>&1; then echo "ok   $1"
+  else echo "FAIL $1"; echo "     expression: $2"; echo "     document:   $out"; fails=$((fails + 1)); fi
+}
+
+OFFLINE='.online == false and .name == "" and .self == "" and .subscribers == null and .profiles == [] and .follows == [] and .events == [] and .node == {ilp_address: "", connector: ""}'
+pk=$(printf 'a%.0s' {1..64}); other=$(printf 'b%.0s' {1..64})
+
+# --- no toon
+new_env
+out=$(SPACETURTLE_TOON=$tmp/bin/missing "$root/relay-events")
+check "no toon: the offline document" "$OFFLINE"
+
+# --- relay not running
+new_env; install_toon
+echo '{"agent_node":{"toon_apps":[{"apps":[{"name":"relay","running":false}]}]}}' > "$STUB_DIR/status"
+out=$("$root/relay-events")
+check "relay not running: the offline document" "$OFFLINE"
+! grep -q "event query" "$STUB_DIR/calls" || { echo "FAIL relay not running: queried the relay"; fails=$((fails + 1)); }
+
+# --- a relay with events
+new_env; install_toon; running_relay
+echo "{\"events\":[{\"id\":\"e1\",\"pubkey\":\"$pk\",\"kind\":1,\"created_at\":10,\"tags\":[],\"content\":\"hi\"},{\"id\":\"e2\",\"pubkey\":\"$other\",\"kind\":30817,\"created_at\":5,\"tags\":[],\"content\":\"any kind\"}]}" > "$STUB_DIR/events"
+echo "{\"events\":[{\"id\":\"p1\",\"pubkey\":\"$pk\",\"kind\":0,\"created_at\":1,\"tags\":[],\"content\":\"{\\\"name\\\":\\\"Shelly\\\"}\"}]}" > "$STUB_DIR/profiles"
+echo "{\"events\":[{\"id\":\"f1\",\"pubkey\":\"$pk\",\"kind\":3,\"created_at\":2,\"tags\":[[\"p\",\"$other\"]],\"content\":\"\"}]}" > "$STUB_DIR/follows"
+echo '{"name":"Shelly relay","ilp_address":"g.toon.shelly","connector":"https://node.example:8080"}' > "$STUB_DIR/nip11"
+out=$("$root/relay-events" 25)
+check "events: online, with the relay's name" '.online == true and .name == "Shelly"'
+check "events: every event, of any kind" '[.events[].id] == ["e1","e2"]'
+check "events: profiles and follow lists" '(.profiles | length) == 1 and (.follows[0].tags == [["p","'"$other"'"]])'
+grep -q '"limit":25' "$STUB_DIR/calls" || { echo "FAIL events: limit not passed"; fails=$((fails + 1)); }
+check "events: ILP and connector come from NIP-11" '.node == {ilp_address: "g.toon.shelly", connector: "https://node.example:8080"}'
+check "events: no public key file, no self" '.self == ""'
+check "events: subscribers null while not sold" '.subscribers == null'
+echo "$pk" > "$SPACETURTLE_CONFIG_DIR/agent-pubkey"
+out=$("$root/relay-events")
+check "events: the public key file marks the agent" ".self == \"$pk\""
+echo "not a key" > "$SPACETURTLE_CONFIG_DIR/agent-pubkey"
+out=$("$root/relay-events")
+check "events: a malformed public key file is ignored" '.self == "" and .online == true'
+rm "$STUB_DIR/nip11"
+out=$("$root/relay-events")
+check "events: without NIP-11 the feed still works" '.online == true and (.events | length) == 2 and .node.ilp_address == ""'
+! grep -q "wallet" "$STUB_DIR/calls" || { echo "FAIL ran a wallet command"; fails=$((fails + 1)); }
+
+# --- hostile profile fields stay data
+new_env; install_toon; running_relay
+hostile='{"name":"$(touch '"$tmp"'/pwned)","about":"`touch '"$tmp"'/pwned`; <script>","picture":"file:///etc/passwd","ilp_address":"evil","connector":"evil"}'
+jq -cn --arg pk "$pk" --arg c "$hostile" '{events:[{id:"p1",pubkey:$pk,kind:0,created_at:1,tags:[],content:$c}]}' > "$STUB_DIR/profiles"
+jq -cn --arg pk "$pk" --arg c '"; touch pwned #' '{events:[{id:"e1",pubkey:$pk,kind:1,created_at:2,tags:[],content:$c}]}' > "$STUB_DIR/events"
+echo '{"events":[]}' > "$STUB_DIR/follows"
+out=$("$root/relay-events")
+count=$((count + 1))
+if jq -e --arg h "$hostile" '.profiles[0].content == $h' <<<"$out" >/dev/null; then echo "ok   hostile: profile content passes through unchanged"
+else echo "FAIL hostile: profile content changed"; fails=$((fails + 1)); fi
+check "hostile: nothing becomes a node address" '.node.ilp_address == "" and .node.connector == ""'
+check "hostile: event content passes through unchanged" '.events[0].content == "\"; touch pwned #"'
+[[ ! -e $tmp/pwned && ! -e pwned ]] || { echo "FAIL hostile: a command ran"; fails=$((fails + 1)); }
+
+echo; echo "$count checks, $fails failed"
+[[ $fails -eq 0 ]]
