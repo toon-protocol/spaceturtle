@@ -33,6 +33,7 @@ case "$1 $2" in
   "relay subscriptions") echo '{"error":"not sold"}' ;;
   "event query")
     case "$*" in
+      *'"authors"'*) if [[ -r $STUB_DIR/agent-events ]]; then cat "$STUB_DIR/agent-events"; else echo '{"events":[]}'; fi ;;
       *'"kinds":[0]'*) cat "$STUB_DIR/profiles" ;;
       *'"kinds":[3]'*) cat "$STUB_DIR/follows" ;;
       *) cat "$STUB_DIR/events" ;;
@@ -54,7 +55,7 @@ check() { # name, jq expression that must be true of $out
   else echo "FAIL $1"; echo "     expression: $2"; echo "     document:   $out"; fails=$((fails + 1)); fi
 }
 
-OFFLINE='.online == false and .name == "" and .self == "" and .subscribers == null and .profiles == [] and .follows == [] and .events == [] and .node == {ilp_address: "", connector: ""}'
+OFFLINE='.online == false and .name == "" and .self == "" and .subscribers == null and .profiles == [] and .follows == [] and .activity == [] and .last_active == null and .events == [] and .node == {ilp_address: "", connector: ""}'
 pk=$(printf 'a%.0s' {1..64}); other=$(printf 'b%.0s' {1..64})
 
 # --- no toon
@@ -83,10 +84,26 @@ check "events: profiles and follow lists" '(.profiles | length) == 1 and (.follo
 grep -q '"limit":25' "$STUB_DIR/calls" || { echo "FAIL events: limit not passed"; fails=$((fails + 1)); }
 check "events: ILP and connector come from NIP-11" '.node == {ilp_address: "g.toon.shelly", connector: "https://node.example:8080"}'
 check "events: no public key file, no self" '.self == ""'
+check "events: without a key the agent is unknown, and the Network holds every event" '.activity == [] and .last_active == null and ([.events[].id] == ["e1","e2"])'
 check "events: subscribers null while not sold" '.subscribers == null'
 echo "$pk" > "$SPACETURTLE_CONFIG_DIR/agent-pubkey"
 out=$("$root/relay-events")
 check "events: the public key file marks the agent" ".self == \"$pk\""
+check "activity: the agent's events, apart from the Network's" '[.activity[].id] == ["e1"] and ([.events[].id] == ["e2"])'
+check "activity: the time of the latest activity" '.last_active == 10'
+echo "{\"events\":[{\"id\":\"e0\",\"pubkey\":\"$pk\",\"kind\":7,\"created_at\":20,\"tags\":[[\"e\",\"e2\"],[\"p\",\"$other\"]],\"content\":\"+\"}]}" > "$STUB_DIR/agent-events"
+out=$("$root/relay-events")
+check "activity: an agent event beyond the feed's limit is found, and says what it refers to" '[.activity[].id] == ["e0","e1"] and .activity[0].refers_to == "e2" and .activity[1].refers_to == null and .last_active == 20'
+check "activity: the Network excludes the agent's events" '[.events[].id] == ["e2"]'
+echo "{\"events\":[{\"id\":\"e0\",\"pubkey\":\"$pk\",\"kind\":1,\"created_at\":5,\"tags\":[[\"e\",\"p1\",\"\",\"reply\"],[\"e\",\"r1\",\"\",\"root\"]],\"content\":\"re\"}]}" > "$STUB_DIR/agent-events"
+out=$("$root/relay-events")
+check "activity: newest first, wherever each event was found" '[.activity[].id] == ["e1","e0"] and .last_active == 10'
+check "activity: a reply refers to the event marked reply, not the root" '.activity[1].refers_to == "p1"'
+rm "$STUB_DIR/agent-events"
+echo "{\"events\":[{\"id\":\"e2\",\"pubkey\":\"$other\",\"kind\":1,\"created_at\":5,\"tags\":[],\"content\":\"x\"}]}" > "$STUB_DIR/events"
+out=$("$root/relay-events")
+check "activity: an agent that has done nothing" '.self != "" and .activity == [] and .last_active == null'
+echo "{\"events\":[{\"id\":\"e1\",\"pubkey\":\"$pk\",\"kind\":1,\"created_at\":10,\"tags\":[],\"content\":\"hi\"},{\"id\":\"e2\",\"pubkey\":\"$other\",\"kind\":30023,\"created_at\":5,\"tags\":[],\"content\":\"long form\"}]}" > "$STUB_DIR/events"
 echo '{"ilp_address":5,"connector":"https://node.example:8080"}' > "$STUB_DIR/nip11"
 out=$("$root/relay-events")
 check "events: a non-string NIP-11 field leaves the other" '.node == {ilp_address: "", connector: "https://node.example:8080"}'

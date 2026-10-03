@@ -105,6 +105,22 @@ Item {
     scroll.contentY = 0
   }
 
+  // An Activity entry opened an event: its author's page is showing, put the cursor on it.
+  function showEvent(id) {
+    pointerGate.reset()
+    root.scrollOnCursor = true
+    root.copiedLabel = ""
+    root.cursorToRestore = true
+    scroll.contentY = 0
+    for (var i = 0; i < root.shownEvents.length; i++)
+      if (root.shownEvents[i].id === id) { service.cursor = root.firstEvent + i; return }
+  }
+
+  Connections {
+    target: root.service
+    function onEventOpened(id) { root.showEvent(id) }
+  }
+
   function copy(detail) {
     service.copy(detail.value)
     root.copiedLabel = detail.label

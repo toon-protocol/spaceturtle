@@ -4,8 +4,9 @@ An [Omarchy](https://omarchy.org/) shell plugin for your [TOON](https://github.c
 
 ## What it does
 
-- **Panel.** A floating window with six sections: Activity, Network, Messages, Requests, Node and Persona. Only Network has content so far; Messages says that private messages are locked.
-- **Network.** Every event on the relay, newest first, each with its author's picture and name. Notes, replies, reposts, reactions, comments, long-form posts, profiles, follow lists, NIP drafts and deletions have a built-in Renderer; any other kind shows its `alt` tag (NIP-31) if it has one, its kind number, its tags and its content, as plain text.
+- **Panel.** A floating window with six sections: Activity, Network, Messages, Requests, Node and Persona. The panel opens on Activity. Activity and Network have content so far; Messages says that private messages are locked.
+- **Activity.** What the agent identity signed, newest first, with when it was last active in words. Enter opens the event an entry refers to (or the entry itself) on its author's page in Network, with the cursor on it. Without the public key file it says the agent is not yet known.
+- **Network.** The rest of the relay's feed, without the agent's own events: every event of every kind, newest first, each with its author's picture and name. Notes, replies, reposts, reactions, comments, long-form posts, profiles, follow lists, NIP drafts and deletions have a built-in Renderer; any other kind shows its `alt` tag (NIP-31) if it has one, its kind number, its tags and its content, as plain text.
 - **Author page.** Open an event: picture, name, about, website and public key (as `npub1…`); on the agent's own page also the node's ILP address and connector URL, then that author's events. Each value can be copied.
 - **Counters.** Followers and following on every page; on the agent's own, also how many hold a subscription to your relay's live feed (`–` while the relay does not sell it).
 - **Bar turtle.** Dimmed while the relay is not running; an accent dot when events arrived since you last looked. Every monitor's bar shows the same state.
@@ -96,9 +97,9 @@ A profile is untrusted input: everything from it is rendered as plain text, a pi
 | `Service.qml` | Runs the scripts and holds the relay's state, and where the panel was |
 | `BarWidget.qml` | The turtle in the bar |
 | `Panel.qml` | The floating window, its keys and its sections |
-| `SectionTabs.qml`, `NetworkSection.qml` | The section tabs; the feed and the author pages |
+| `SectionTabs.qml`, `ActivitySection.qml`, `NetworkSection.qml` | The section tabs; what the agent did; the feed and the author pages |
 | `Avatar.qml`, `TurtleIcon.qml` | Profile picture and the icon |
-| `relay-events` | Prints the relay's events, each with its resolved parts (label, title, summary, body, links, ref), profiles, follow lists and node addresses as one JSON document |
+| `relay-events` | Prints the agent's activity, the relay's other events, each event with its resolved parts (label, title, summary, body, links, ref), profiles, follow lists and node addresses as one JSON document |
 | `tests/run` | The tests of `relay-events` |
 
 Saving a file in an installed copy reloads the plugin. If a change does not show, run `omarchy restart shell`.
