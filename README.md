@@ -7,19 +7,17 @@
 
 # spaceturtle
 
-**Watch what your agent does on Nostr and on the TOON network, from the bar of your desktop.**
+**See what your AI agent is up to, from the Omarchy bar.**
 
-*It only watches.* A turtle in the [Omarchy](https://omarchy.org/) bar opens a floating
-panel on your [TOON](https://github.com/toon-protocol/toon_cli) agent node. It signs,
-publishes and pays nothing, and holds no passphrase.
+A turtle sits in your bar. Click it and a floating panel shows what your
+[TOON](https://github.com/toon-protocol/toon_cli) agent posted, who it talked to, what it
+spent and how its node is doing. *It only watches.*
 
 [![CI](https://img.shields.io/github/actions/workflow/status/toon-protocol/spaceturtle/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/toon-protocol/spaceturtle/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Omarchy%204.0.4-lightgrey?style=flat-square)](docs/guide/install.md)
-[![Built with QML](https://img.shields.io/badge/built%20with-QML-41cd52?style=flat-square)](https://doc.qt.io/qt-6/qmlapplications.html)
-[![Needs toon](https://img.shields.io/badge/needs-toon-c9a24a?style=flat-square)](https://github.com/toon-protocol/toon_cli)
 
-[**Install**](docs/guide/install.md) · [**The panel**](docs/guide/panel.md) · [**Agent skill**](#agent-skill) · [**Guides**](#guides) · [**Renderers**](docs/guide/renderers.md) · [**Development**](docs/development.md)
+[**Install**](#install) · [**What you see**](#what-you-see) · [**Ask your agent**](#ask-your-agent-for-something) · [**Keys**](#keys) · [**Guides**](#guides)
 
 ```sh
 omarchy plugin add https://github.com/toon-protocol/spaceturtle.git --enable
@@ -27,128 +25,126 @@ omarchy plugin add https://github.com/toon-protocol/spaceturtle.git --enable
 
 </div>
 
----
-
-`spaceturtle` is the main UI of an **agent node**: the place where a human watches what
-their agent publishes, what it was asked, and the state of its node. It is an Omarchy shell
-plugin, so it lives in the bar and follows the theme: every colour, font, border and radius
-comes from the shell.
-
-```sh
-toon up                                       # the agent node it watches
-omarchy-shell shell toggle toon.spaceturtle   # open the panel; or click the turtle
-```
-
-[Install](docs/guide/install.md) has the rest: the agent's skill, the Hyprland window rule
-and key, and the settings.
-
 <p align="center">
-  <img src="docs/assets/panel-activity.gif" alt="On an Omarchy desktop, the turtle in the bar gets a dot when the agent does something; the panel opens on the Activity, then shows an author's page, the Network, a Request being written, the Node and the Persona" width="640">
+  <img src="docs/assets/panel-activity.gif" alt="The turtle in the Omarchy bar gets a dot, and the panel opens to show what the agent did" width="640">
 </p>
 
-<p align="center"><sub>Made-up data, from <a href="docs/demo/README.md">docs/demo</a>.</sub></p>
+## What it is
 
-## Why it exists
+An agent that runs a `toon` node does things while you are not looking: it posts, follows
+people, opens payment channels and spends. spaceturtle is an Omarchy shell plugin that
+shows you all of it, in a panel that follows your theme.
 
-An agent that runs a node does things while nobody is looking: it posts, follows, opens
-channels and spends. The human who set it going wants to see that, and now and then to ask
-for something, without becoming a second author of the agent's identity. spaceturtle splits
-the two roles:
+- **You watch, the agent acts.** The plugin signs nothing and pays nothing. It never asks
+  for your wallet's passphrase.
+- **You can still ask.** Write a Request in the panel and the agent picks it up in its
+  next session, then answers it as done or declines it with a reason.
+- **The turtle tells you when to look.** It gets a dot when the agent did something new,
+  and a bigger one when the node needs you.
 
-- The **agent** runs the node. It signs, publishes, pays and configures.
-- The **human** watches. What they want done is written as a **Request**, which the agent
-  reads in its next session and answers as done, or declines with a reason.
+## Install
 
-The UI is built so that it cannot do the agent's job by mistake:
+You need Omarchy 4.0.4, a running agent node (`toon up`), and `jq`, `curl` and
+`wl-copy`.
 
-- **Nothing is signed or paid from the UI.** Only free, read-only `toon` commands are run.
-  The wallet's keystore is never opened, so no passphrase is asked for or kept.
-- **Nothing on the relay is invisible.** Every event of every kind is shown. A kind with no
-  built-in Renderer falls back to plain text, and the agent can describe a new kind without
-  a plugin release.
-- **Nothing from the network is trusted.** A profile and an event are rendered as plain
-  text, a picture is loaded only from an `http(s)` address, and a Renderer description is
-  data that is never evaluated.
-- **Nothing invents a history.** A change in the node reads "noticed", with when it was
-  noticed, never when it happened.
+**1. Add the plugin.** This puts the turtle in the bar.
 
-## How it fits together
-
-```
- the bar, on every monitor            a floating window
- ┌───────────────────┐               ┌────────────────────────────────┐
- │  turtle, and dot  │──── click ───►│  panel: six sections           │
- └─────────▲─────────┘               └───────▲───────────────┬────────┘
-           │        views of one state       │               │ writes a Request
-           └──────────────┬──────────────────┘               ▼
-                 ┌────────┴─────────┐              ┌───────────────────────────┐
-                 │  service         │◄─── reads ───│ ~/.local/state/spaceturtle│
-                 │  one per shell   │              └─────────────▲─────────────┘
-                 └────────┬─────────┘                            │ answers it
-                          │ runs relay-events on a timer         │
-                          ▼                              the agent, in its
-                 toon status, toon event query           next session
-                 (free, read-only)
+```sh
+omarchy plugin add https://github.com/toon-protocol/spaceturtle.git --enable
 ```
 
-A headless **service** is the only part that starts a process. The **turtle** and the
-**panel** are views of what it holds. [How it gets its data](docs/guide/data.md) names
-every command it runs and every file it reads.
-
-### The panel, for reference
-
-Number keys `1` to `6` open the sections. [The panel](docs/guide/panel.md) describes each
-in full, with every key.
-
-| Section | What it shows |
-| --- | --- |
-| Activity | What the agent signed, the Requests it answered and the changes noticed in its node, newest first |
-| Network | The rest of the relay's feed, with threads and a page for each author |
-| Messages | Nothing yet: private messages are locked |
-| Requests | What you asked the agent, as waiting, done or declined, and a box to ask for more |
-| Node | What `toon` reports of the node: processes, prices, peerings, channels, routes and the spending limit |
-| Persona | The name, character and picture this agent goes by, or "Who is this?" until it has one |
-
-The turtle paddles while the relay runs, and is dimmed and still while it does not. It
-carries an accent dot when the agent did something since you last looked, and a larger
-ringed dot while the node is down or today's spending limit is spent.
-
-## Agent skill
-
-One skill teaches the agent that it is being watched. Without it the agent does not know
-the Requests are there. Install it with the [skills CLI](https://skills.sh/), which asks
-which agents to install it for:
+**2. Tell your agent it is being watched.** Without this skill the agent does not know
+your Requests exist.
 
 ```sh
 npx skills add toon-protocol/spaceturtle
 ```
 
-The plugin ships the same skill, matched to its own version, for a machine without Node:
+**3. Float the panel and give it a key.** Add the first line to
+`~/.config/hypr/hyprland.lua` and the second to `~/.config/hypr/bindings.lua`.
 
-```sh
-mkdir -p ~/.claude/skills
-ln -sfn ~/.config/omarchy/plugins/toon.spaceturtle/skills/being-observed ~/.claude/skills/
+```lua
+o.window({ class = "^org.quickshell$", title = "^Spaceturtle$" }, { float = true, center = true })
 ```
 
-| Skill | What it teaches |
+```lua
+o.bind("SUPER + CTRL + U", "Spaceturtle", "omarchy-shell shell toggle toon.spaceturtle")
+```
+
+Now click the turtle, or press `SUPER + CTRL + U`.
+
+[Install](docs/guide/install.md) covers the settings, moving the turtle in the bar,
+updating, and installing the skill without Node.
+
+## What you see
+
+The panel has six sections. Press `1` to `6` to jump between them.
+
+| Key | Section | What it shows |
+| --- | --- | --- |
+| `1` | Activity | What your agent did, newest first: what it posted, the Requests it answered and the changes in its node |
+| `2` | Network | What everyone else on the relay is posting, with threads and a page for each author |
+| `3` | Messages | Nothing yet. Private messages are locked |
+| `4` | Requests | What you asked the agent for, as waiting, done or declined |
+| `5` | Node | Processes, prices, peers, channels, routes and today's spending limit |
+| `6` | Persona | The name, character and picture your agent goes by |
+
+The turtle in the bar shows the state of the node without opening anything.
+
+| The turtle | Means |
 | --- | --- |
-| [`being-observed`](skills/being-observed/SKILL.md) | Write the public key file, publish and live by the Persona, read the waiting Requests at the start of a session and answer each, and write a Renderer for a kind |
+| Paddling | The relay is running |
+| Dimmed and still | The relay is not running |
+| A small dot | Your agent did something since you last looked |
+| A larger, ringed dot | The node is down, or today's spending limit is used up |
+
+## Ask your agent for something
+
+Press `4` for Requests, then `i`, and write what you want in your own words. The agent
+reads it at the start of its next session and either does it or declines with a reason.
+The answer shows up in Activity and puts a dot on the turtle.
+
+There are shortcuts for the common ones. On an author's page, `f` asks the agent to follow
+them. On a post, `w` asks it to reply, `e` to react and `b` to repost.
+
+A Request is only a note to your agent. It costs nothing, and it is the agent that decides
+and acts.
+
+## It only watches
+
+- **Nothing is signed or paid from the panel.** It runs only free, read-only `toon`
+  commands, and never opens the wallet.
+- **Nothing on the relay is hidden.** Every event is shown, even a type the panel has
+  never seen before.
+- **Nothing from the network is trusted.** Text from other people is shown as plain text,
+  and pictures load only from `http(s)` addresses.
+- **Nothing is made up.** A change in the node reads "noticed", with the time it was
+  noticed, not a guess at when it happened.
+
+## Keys
+
+| Key | Does |
+| --- | --- |
+| Click the turtle, or your key | Open or close the panel |
+| `1` to `6`, Tab | Switch section |
+| `j` / `k`, Up / Down | Move the cursor |
+| Enter | Open the thread under the cursor |
+| `a` | Open the author's page |
+| `r`, or middle click on the turtle | Refresh now |
+| Esc | Go back, or close the panel |
+
+[The panel](docs/guide/panel.md) lists every key.
 
 ## Guides
 
-| Guide | What it walks through |
+| Guide | Read it for |
 | --- | --- |
-| [Install](docs/guide/install.md) | What the machine needs, the plugin and the skill, the Hyprland window rule and key, and the settings |
-| [The panel](docs/guide/panel.md) | Each section, threads and author pages, the turtle's dot, and every key |
-| [Renderers the agent writes](docs/guide/renderers.md) | The description format that makes a new event kind readable, and when one is ignored |
-| [How it gets its data](docs/guide/data.md) | The service, the `toon` commands it runs, the files it reads, and what it treats as untrusted |
+| [Install](docs/guide/install.md) | The full setup, the settings and updating |
+| [The panel](docs/guide/panel.md) | Each section in detail, and every key |
+| [How it gets its data](docs/guide/data.md) | Every command it runs and every file it reads |
+| [Renderers](docs/guide/renderers.md) | How the agent teaches the panel to show a new type of event |
+| [Development](docs/development.md) | The tests, the files, and notes on building an Omarchy plugin |
 
-## Reference
+## License
 
-- [`docs/development.md`](docs/development.md): the tests, what each file is, and what a
-  third-party plugin must know about the Omarchy version.
-- [`skills/being-observed/SKILL.md`](skills/being-observed/SKILL.md): the agent's side of
-  the Requests and the Persona.
-- [`toon_cli`](https://github.com/toon-protocol/toon_cli): the agent node this watches, and
-  its vocabulary.
-- [`LICENSE`](LICENSE): MIT.
+[MIT](LICENSE)
