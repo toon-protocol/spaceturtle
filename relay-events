@@ -1,14 +1,14 @@
 #!/bin/bash
 # Print what can be observed of this agent node as one JSON document:
 # {"online", "name", "self", "node", "subscribers", "profiles", "follows",
-# "activity", "last_active", "events"}. "activity" is what the agent identity
-# signed, newest first, each entry with the id of the event it refers to
-# ("refers_to", or null); "last_active" is its newest created_at, or null;
-# "events" is the rest of the feed, without the agent's. "attention" is "none",
-# "news" (an Activity entry, or an event tagging the agent, is newer than the
-# last time the Observer looked) or "urgent" (the node is not running);
-# "looked_at" is when the Observer last looked, or null. Read-only: nothing
-# here opens the keystore or publishes.
+# "activity", "last_active", "events", "attention", "looked_at"}. "activity" is
+# what the agent identity signed, newest first, each entry with the id of the
+# event it refers to ("refers_to", or null); "last_active" is its newest
+# created_at, or null; "events" is the rest of the feed, without the agent's.
+# "attention" is "none", "news" (an Activity entry, or an event tagging the
+# agent, is newer than the last time the Observer looked) or "urgent" (the node
+# is not running); "looked_at" is when the Observer last looked, or null.
+# Read-only: nothing here opens the keystore or publishes.
 #
 # The relay's read port changes on every `toon up`, so it is looked up from
 # `toon status` each time. Environment, so that tests can run against a stub:
@@ -23,14 +23,20 @@ PATH="$HOME/.local/bin:$PATH"
 
 toon_cmd=${SPACETURTLE_TOON:-toon}
 config_dir=${SPACETURTLE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/spaceturtle}
-
 state_dir=${SPACETURTLE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/spaceturtle}
 
 limit=${1:-40}
 [[ $limit =~ ^[0-9]+$ ]] || limit=40
 
+# When the Observer last looked, from the file `mark-seen` writes.
+looked_at=
+if [[ -r $state_dir/last-looked ]]; then
+  read -r looked_at < "$state_dir/last-looked" || true
+  [[ $looked_at =~ ^[0-9]+$ ]] || looked_at=
+fi
+
 offline() {
-  printf '{"online":false,"name":"","self":"","node":{"ilp_address":"","connector":""},"subscribers":null,"profiles":[],"follows":[],"activity":[],"last_active":null,"events":[],"attention":"urgent","looked_at":null}\n'
+  printf '{"online":false,"name":"","self":"","node":{"ilp_address":"","connector":""},"subscribers":null,"profiles":[],"follows":[],"activity":[],"last_active":null,"events":[],"attention":"urgent","looked_at":%s}\n' "${looked_at:-null}"
   exit 0
 }
 
@@ -45,13 +51,6 @@ read_address=$(toon status --json 2>/dev/null |
   jq -r '.agent_node.toon_apps[]?.apps[]? | select(.name == "relay" and .running) | .read_address // empty' 2>/dev/null |
   head -n1)
 [[ -n $read_address ]] || offline
-
-# When the Observer last looked, from the file `mark-seen` writes.
-looked_at=
-if [[ -r $state_dir/last-looked ]]; then
-  read -r looked_at < "$state_dir/last-looked" || true
-  [[ $looked_at =~ ^[0-9]+$ ]] || looked_at=
-fi
 
 # Notes, reposts, reactions, comments and long-form posts; then the profiles
 # that name their authors and the follow lists that count their followers.
@@ -73,6 +72,10 @@ fi
 agent_events='[]'
 [[ -n $self ]] && agent_events=$(relay_query "{\"authors\":[\"$self\"],\"kinds\":$kinds,\"limit\":$limit}")
 
+# Events tagging the agent identity, asked for by tag for the same reason.
+mention_events='[]'
+[[ -n $self ]] && mention_events=$(relay_query "{\"#p\":[\"$self\"],\"kinds\":$kinds,\"limit\":$limit}")
+
 # The node's ILP address and connector address, from the relay's NIP-11 document.
 node=
 if command -v curl >/dev/null; then
@@ -89,6 +92,7 @@ jq -cn --arg name "${name:-}" --arg self "$self" \
   --argjson subscribers "${subscribers:-null}" --argjson events "${events:-[]}" \
   --argjson profiles "${profiles:-[]}" --argjson follows "${follows:-[]}" \
   --argjson agent "${agent_events:-[]}" --argjson looked "${looked_at:-null}" \
+  --argjson mentioned "${mention_events:-[]}" \
   '(if $self == "" then []
     else ([$agent[], $events[]] | map(select(.pubkey == $self)) | unique_by(.id)
       | sort_by(-.created_at)
@@ -96,7 +100,7 @@ jq -cn --arg name "${name:-}" --arg self "$self" \
       | map(. + {refers_to: ([.tags[]? | select(.[0] == "e" and (.[1] | strings))]
           | ((map(select(.[3]? == "reply")) | first) // last) | .[1]? // null)}))
     end) as $activity
-  | ([$events[] | select(.pubkey != $self and $self != ""
+  | ([$mentioned[], $events[] | select(.pubkey != $self and $self != ""
       and any(.tags[]?; .[0] == "p" and .[1] == $self))]) as $mentions
   | {online: true, name: $name, self: $self,
     activity: $activity, last_active: ($activity[0].created_at? // null),

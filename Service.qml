@@ -63,6 +63,9 @@ Item {
   property string attention: "none"
   readonly property bool hasUnseen: loaded && attention === "news"
   readonly property bool urgent: loaded && attention === "urgent"
+  // Set when the Observer looks while a refresh is running: that refresh read
+  // the time of the look before, so its "news" is already seen.
+  property bool lookedDuringFetch: false
 
   // Where the panel was, kept here because the panel is unloaded when it closes.
   // Sections are numbered as their keys are, from 1; Activity is 1 and Network 2.
@@ -81,11 +84,14 @@ Item {
 
   function markSeen() {
     if (attention === "news") attention = "none"
+    if (fetchProc.running) lookedDuringFetch = true
     if (!markProc.running) markProc.running = true
   }
 
   function refresh() {
-    if (!fetchProc.running) fetchProc.running = true
+    if (fetchProc.running) return
+    lookedDuringFetch = false
+    fetchProc.running = true
   }
 
   function applyReport(report) {
@@ -135,7 +141,8 @@ Item {
     root.online = report.online === true
     root.relayName = report.name || ""
     root.loaded = true
-    root.attention = report.attention === "news" || report.attention === "urgent" ? report.attention : "none"
+    root.attention = report.attention === "urgent" || (report.attention === "news" && !root.lookedDuringFetch)
+      ? report.attention : "none"
     // Nothing is "new" before the Observer has ever looked, nor while the panel is showing it.
     if (report.looked_at === null || root.looking) root.markSeen()
   }

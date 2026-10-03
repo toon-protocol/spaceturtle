@@ -87,7 +87,7 @@ A profile is untrusted input: everything from it is rendered as plain text, a pi
 
 ## Tests
 
-`tests/run` runs `relay-events` against a stub `toon` and `curl` in a temporary home. It needs only bash and `jq`, and is what the `gate` job of `.github/workflows/ci.yml` runs.
+`tests/run` runs `relay-events` and `mark-seen` against a stub `toon` and `curl` in a temporary home. It needs only bash and `jq`, and is what the `gate` job of `.github/workflows/ci.yml` runs.
 
 ## Files
 
@@ -101,7 +101,7 @@ A profile is untrusted input: everything from it is rendered as plain text, a pi
 | `Avatar.qml`, `TurtleIcon.qml` | Profile picture and the icon |
 | `mark-seen` | Records that you looked (opening the panel runs it), in `~/.local/state/spaceturtle/last-looked` |
 | `relay-events` | Prints the agent's activity, the relay's other events, profiles, follow lists and node addresses as one JSON document, with its `attention` state (`none`, `news`, `urgent`) |
-| `tests/run` | The tests of `relay-events` |
+| `tests/run` | The tests of `relay-events` and `mark-seen` |
 
 Saving a file in an installed copy reloads the plugin. If a change does not show, run `omarchy restart shell`.
 

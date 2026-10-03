@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs relay-events against a stub `toon` and `curl` in a temporary home.
+# Runs relay-events and mark-seen against a stub `toon` and `curl` in a temporary home.
 # Needs only bash and jq. Usage: tests/run
 set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -33,6 +33,7 @@ case "$1 $2" in
   "relay subscriptions") echo '{"error":"not sold"}' ;;
   "event query")
     case "$*" in
+      *'"#p"'*) if [[ -r $STUB_DIR/mentions ]]; then cat "$STUB_DIR/mentions"; else echo '{"events":[]}'; fi ;;
       *'"authors"'*) if [[ -r $STUB_DIR/agent-events ]]; then cat "$STUB_DIR/agent-events"; else echo '{"events":[]}'; fi ;;
       *'"kinds":[0]'*) cat "$STUB_DIR/profiles" ;;
       *'"kinds":[3]'*) cat "$STUB_DIR/follows" ;;
@@ -138,16 +139,20 @@ check "attention: a new event tagging the agent is news" '.attention == "news"'
 echo "{\"events\":[$(note m1 "$other" 90 "[[\"p\",\"$pk\"]]")]}" > "$STUB_DIR/events"
 out=$("$root/relay-events")
 check "attention: an event tagging the agent from before looking is none" '.attention == "none"'
+echo "{\"events\":[$(note m2 "$other" 150 "[[\"p\",\"$pk\"]]")]}" > "$STUB_DIR/mentions"
+out=$("$root/relay-events")
+check "attention: a new event tagging the agent outside the feed's limit is news" '.attention == "news"'
+rm "$STUB_DIR/mentions"
 echo "{\"events\":[$(note a1 "$pk" 150 '[]')]}" > "$STUB_DIR/events"
 out=$("$root/relay-events")
 check "attention: a new Activity entry is news" '.attention == "news"'
-SPACETURTLE_STATE_DIR=$SPACETURTLE_STATE_DIR "$root/mark-seen"
+"$root/mark-seen"
 out=$("$root/relay-events")
 check "attention: mark-seen returns news to none" '.attention == "none" and (.looked_at | . > 150)'
 echo "{\"events\":[$(note a1 "$pk" 150 '[]')]}" > "$STUB_DIR/events"
 echo '{"agent_node":{"toon_apps":[{"apps":[{"name":"relay","running":false}]}]}}' > "$STUB_DIR/status"
 out=$("$root/relay-events")
-check "attention: node down is urgent" '.attention == "urgent"'
+check "attention: node down is urgent, and keeps when the Observer looked" '.attention == "urgent" and .looked_at > 150'
 [[ $(ls "$SPACETURTLE_STATE_DIR") == last-looked ]] || { echo "FAIL mark-seen: left stray files"; fails=$((fails + 1)); }
 
 # --- hostile profile fields stay data
