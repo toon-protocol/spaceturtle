@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs relay-events and mark-seen against a stub `toon` and `curl` in a temporary home.
+# Runs relay-events, mark-seen, request and the being-observed skill's answers against a stub `toon` and `curl` in a temporary home.
 # Needs only bash and jq. Usage: tests/run
 set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -466,6 +466,40 @@ echo '{"agent_node":{"toon_apps":[{"apps":[{"name":"relay","running":false}]}]}}
 out=$("$root/relay-events")
 check "requests: still listed while the relay is not running" '.online == false and (.requests | length) == 3'
 check "requests: without the relay, the answers are the Activity and the last activity" '[.activity[].id] == ["request:2-bb","request:3-cc"] and .last_active == 150'
+
+# --- the being-observed skill: a Request answered the way it says appears as done or declined
+skill=$root/skills/being-observed/SKILL.md
+block() { awk -v tag="$1" '$0 ~ "^```sh " tag "$" {on=1; next} on && /^```$/ {exit} on' "$skill"; }
+new_env; install_toon; running_relay
+queue=$SPACETURTLE_STATE_DIR/requests; mkdir -p "$queue"
+echo '{"events":[]}' > "$STUB_DIR/events"; echo '{"events":[]}' > "$STUB_DIR/profiles"; echo '{"events":[]}' > "$STUB_DIR/follows"
+echo "$pk" > "$SPACETURTLE_CONFIG_DIR/agent-pubkey"
+ev=$(printf 'd%.0s' {1..64})
+a=$("$root/request" add "answer me"); b=$("$root/request" add --kind follow --pubkey "$pk" "answer me too")
+cp "$queue/$a.json" "$tmp/a.before"; cp "$queue/$b.json" "$tmp/b.before"
+[[ -n $(block answer-done) && -n $(block answer-declined) ]] || { echo "FAIL skill: the answer commands are missing"; fails=$((fails + 1)); }
+FILE=$queue/$a.json EVENT=$ev NOW=500 bash -c "$(block answer-done)"
+FILE=$queue/$b.json REASON="Not in character" NOW=600 bash -c "$(block answer-declined)"
+out=$("$root/relay-events")
+check "skill: a done answer shows as done with its event" ".requests[] | select(.id == \"$a\") | .state == \"done\" and .result.event == \"$ev\" and .answered_at == 500"
+check "skill: a declined answer shows as declined with its reason" ".requests[] | select(.id == \"$b\") | .state == \"declined\" and .reason == \"Not in character\" and .answered_at == 600"
+check "skill: both answers are Activity entries" "[.activity[].id] == [\"request:$b\", \"request:$a\"] and .activity[1].refers_to == \"$ev\""
+# Nothing but state, answered_at, result and reason changed.
+count=$((count + 1))
+unanswered() { jq -S 'del(.state, .answered_at, .result, .reason)' "$1"; }
+if [[ $(unanswered "$queue/$a.json") == $(unanswered "$tmp/a.before") \
+   && $(unanswered "$queue/$b.json") == $(unanswered "$tmp/b.before") \
+   && $(ls -A "$queue" | wc -l) -eq 2 ]]; then echo "ok   skill: only state, answered_at, result and reason changed, and no file was left or added"
+else echo "FAIL skill: an answer changed more than it may"; fails=$((fails + 1)); fi
+# An answered Request is left alone, and a withdrawn one is not brought back.
+c=$("$root/request" add "withdraw me"); "$root/request" withdraw "$c" >/dev/null
+FILE=$queue/$a.json REASON="Changed my mind" NOW=700 bash -c "$(block answer-declined)" 2>/dev/null
+FILE=$queue/$c.json EVENT=$ev NOW=700 bash -c "$(block answer-done)" 2>/dev/null
+out=$("$root/relay-events")
+check "skill: an answer leaves a done Request and a withdrawn one alone" ".requests[] | select(.id == \"$a\") | .state == \"done\" and .answered_at == 500"
+count=$((count + 1))
+if [[ ! -e $queue/$c.json && $(ls -A "$queue" | wc -l) -eq 2 ]]; then echo "ok   skill: a withdrawn Request stays withdrawn"
+else echo "FAIL skill: a withdrawn Request came back"; fails=$((fails + 1)); fi
 
 echo; echo "$count checks, $fails failed"
 [[ $fails -eq 0 ]]
