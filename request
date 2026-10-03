@@ -9,6 +9,11 @@
 #       follow and unfollow need --pubkey (the author); reply, react and repost
 #       need --event (the note; --pubkey is its author, when known). TEXT is
 #       the Observer's own words and is optional for all of them but free.
+#   request persona [--name NAME] [--character TEXT] [--picture URL]
+#       Writes a `persona` Request: the Observer describes the agent's Persona,
+#       or, given none of the three, leaves it to the agent. The text says which,
+#       as "Name: …", "Character: …" and "Picture: …" lines, or "Leave it to
+#       the agent." The agent does not decline it.
 #   request withdraw ID
 #       Removes a Request that is still waiting. One the agent has answered is
 #       refused: it is a record of what the agent did.
@@ -68,6 +73,30 @@ add() {
   echo "$id"
 }
 
+persona() {
+  local name= character= picture= text=
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --name) [[ $# -ge 2 ]] || die "--name needs a value"; name=$2; shift 2 ;;
+      --character) [[ $# -ge 2 ]] || die "--character needs a value"; character=$2; shift 2 ;;
+      --picture) [[ $# -ge 2 ]] || die "--picture needs a value"; picture=$2; shift 2 ;;
+      *) die "unknown argument: $1" ;;
+    esac
+  done
+  # A line break would let one field pose as another.
+  name=${name//$'\n'/ }; character=${character//$'\n'/ }; picture=${picture//$'\n'/ }
+  [[ -z ${name//[[:space:]]/} ]] && name=; [[ -z ${character//[[:space:]]/} ]] && character=; [[ -z ${picture//[[:space:]]/} ]] && picture=
+  if [[ -z $name && -z $character && -z $picture ]]; then
+    text="Leave it to the agent."
+  else
+    [[ -z $name ]] || text+="Name: $name"$'\n'
+    [[ -z $character ]] || text+="Character: $character"$'\n'
+    [[ -z $picture ]] || text+="Picture: $picture"$'\n'
+    text=${text%$'\n'}
+  fi
+  add --kind persona -- "$text"
+}
+
 withdraw() {
   [[ $# -eq 1 ]] || die "expected one id"
   # The id becomes part of a path: nothing but what add makes.
@@ -80,6 +109,7 @@ withdraw() {
 
 case ${1-} in
   add) shift; add "$@" ;;
+  persona) shift; persona "$@" ;;
   withdraw) shift; withdraw "$@" ;;
-  *) die "usage: request add [--kind KIND] [--pubkey KEY] [--event ID] TEXT | request withdraw ID" ;;
+  *) die "usage: request add [--kind KIND] [--pubkey KEY] [--event ID] TEXT | request persona [--name NAME] [--character TEXT] [--picture URL] | request withdraw ID" ;;
 esac

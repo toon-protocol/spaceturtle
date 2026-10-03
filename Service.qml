@@ -44,6 +44,9 @@ Item {
   property var profiles: ({})
   // The agent identity's own key, and pubkey -> the keys its newest follow list names.
   property string selfPubkey: ""
+  // The agent identity's profile as {name, character, picture}; null while the Install has none.
+  // Kept while the relay is unreachable.
+  property var persona: null
   property var followMap: ({})
   // This node's ILP and connector addresses, from the relay's NIP-11 document.
   property string nodeIlp: ""
@@ -87,6 +90,7 @@ Item {
   readonly property int networkSection: 2
   readonly property int requestsSection: 4
   readonly property int nodeSection: 5
+  readonly property int personaSection: 6
   property int section: activitySection
   property int cursor: 0
   // The Activity's cursor.
@@ -164,6 +168,13 @@ Item {
     root.profiles = map
     root.followMap = followed
     root.selfPubkey = report.self || ""
+    // Offline, the profile is unknown, not absent: keep the last known Persona.
+    var persona = report.persona
+    if (report.online === true) root.persona = persona && typeof persona === "object" && typeof persona.name === "string" && persona.name !== ""
+      ? { name: persona.name,
+          character: typeof persona.character === "string" ? persona.character : "",
+          picture: typeof persona.picture === "string" ? persona.picture : "" }
+      : null
     var node = report.node || ({})
     root.nodeIlp = typeof node.ilp_address === "string" ? node.ilp_address.trim() : ""
     root.nodeConnector = typeof node.connector === "string" ? node.connector.trim() : ""
@@ -345,6 +356,18 @@ Item {
   function submitRequest(text) {
     if (String(text).trim() === "") return
     runRequest([requestScript, "add", "--", String(text)])
+  }
+  // A `persona` Request: the Observer's description, or the choice to leave it
+  // to the agent. Each part goes to the script as an argument.
+  function describePersona(name, character, picture) {
+    var command = [requestScript, "persona"]
+    if (String(name).trim() !== "") command = command.concat(["--name", String(name)])
+    if (String(character).trim() !== "") command = command.concat(["--character", String(character)])
+    if (String(picture).trim() !== "") command = command.concat(["--picture", String(picture)])
+    runRequest(command)
+  }
+  function leavePersonaToAgent() {
+    runRequest([requestScript, "persona"])
   }
   // A Request about a thing on screen: kind is follow, unfollow, reply, react
   // or repost; the text is optional. The subject goes as arguments too.

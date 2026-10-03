@@ -27,12 +27,16 @@ Item {
   readonly property int messagesSection: 3
   readonly property int requestsSection: 4
   readonly property int nodeSection: 5
+  readonly property int personaSection: 6
   readonly property int section: service ? service.section : activitySection
+  // Who this Install is, or null: the header shows an unnamed turtle.
+  readonly property var personaProfile: service && service.persona ? service.persona : null
   // The section that has a cursor to move, if the one showing does.
   readonly property var cursorSection: section === activitySection ? activity.item
     : (section === networkSection ? network.item
     : (section === requestsSection ? requests.item
-    : (section === nodeSection ? node.item : null)))
+    : (section === nodeSection ? node.item
+    : (section === personaSection ? persona.item : null))))
 
   function open(payloadJson) {
     closingFromHost = false
@@ -121,6 +125,40 @@ Item {
           anchors.margins: Style.spacing.panelPadding
           spacing: Style.spacing.panelGap
 
+          // Each Install is called by its Persona; until it has one, an unnamed turtle.
+          Row {
+            spacing: Style.space(10)
+
+            Item {
+              width: Style.space(32)
+              height: Style.space(32)
+
+              Avatar {
+                visible: root.personaProfile !== null
+                size: Style.space(32)
+                source: root.personaProfile ? root.personaProfile.picture : ""
+                label: root.personaProfile ? root.personaProfile.name : ""
+              }
+              TurtleIcon {
+                visible: root.personaProfile === null
+                anchors.centerIn: parent
+                iconSize: Style.space(28)
+                variant: root.service ? root.service.iconVariant : 1
+              }
+            }
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.PlainText
+              text: root.personaProfile ? root.personaProfile.name : "Who is this?"
+              color: root.personaProfile ? Color.foreground : root.dim
+              font.family: Style.font.family
+              font.pixelSize: Style.font.title
+              font.bold: root.personaProfile !== null
+              font.italic: root.personaProfile === null
+            }
+          }
+
           SectionTabs {
             width: parent.width
             names: root.sections
@@ -174,6 +212,19 @@ Item {
           }
 
           Loader {
+            id: persona
+            anchors.fill: parent
+            active: root.service !== null
+            visible: root.section === root.personaSection
+            sourceComponent: PersonaSection { service: root.service }
+          }
+
+          Connections {
+            target: persona.item
+            function onLeaveInput() { keyCatcher.forceActiveFocus() }
+          }
+
+          Loader {
             id: node
             anchors.fill: parent
             active: root.service !== null
@@ -183,13 +234,13 @@ Item {
 
           // The sections that are still to be built; and a panel with no service.
           Text {
-            visible: (root.section !== root.activitySection && root.section !== root.networkSection && root.section !== root.requestsSection && root.section !== root.nodeSection) || !root.service
+            visible: (root.section !== root.activitySection && root.section !== root.networkSection && root.section !== root.requestsSection && root.section !== root.nodeSection && root.section !== root.personaSection) || !root.service
             anchors.centerIn: parent
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.Wrap
             textFormat: Text.PlainText
-            text: !root.service ? "The spaceturtle service is not running. Run: omarchy restart shell"
+            text: !root.service ? "The service is not running. Run: omarchy restart shell"
               : (root.section === root.messagesSection ? "Private messages are locked." : "Nothing here yet.")
             color: root.dim
             font.family: Style.font.family

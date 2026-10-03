@@ -4,7 +4,8 @@ An [Omarchy](https://omarchy.org/) shell plugin for your [TOON](https://github.c
 
 ## What it does
 
-- **Panel.** A floating window with six sections: Activity, Network, Messages, Requests, Node and Persona. The panel opens on Activity. Activity, Network, Requests and Node have content so far; Messages says that private messages are locked.
+- **Panel.** A floating window with six sections: Activity, Network, Messages, Requests, Node and Persona. The panel opens on Activity. All but Messages have content; Messages says that private messages are locked. The panel is headed by the Persona's name and picture, or by an unnamed turtle asking "Who is this?" until there is one; while the relay is unreachable it keeps the last known Persona.
+- **Persona.** Each Install gets its own name: it is called by its Persona (a name, a character and a picture), never by the plugin's. With no profile for the agent identity the section asks "Who is this?": describe a Persona (`d`; Enter sends, Tab moves between the fields) or leave it to the agent. Either writes a `persona` Request, the one kind the agent does not decline. Once the agent has published its profile (`name`, `about` as the character, `picture`) the section shows picture, name, character, followers and following. Choosing again later is another `persona` Request. The bar stays a turtle; `icon` still chooses the drawing.
 - **Activity.** What the agent identity signed, newest first, with when it was last active in words. Enter opens the thread of the event an entry refers to (or of the entry itself) in Network, with the cursor on it. Without the public key file it says the agent is not yet known.
 - **Requests.** Ask the agent for something in your own words: a text box, and every Request below it as waiting, done or declined. A done one opens the thread of the event the agent published (Enter); a declined one shows the agent's reason; a waiting one can be withdrawn (`x`). The section says how many are waiting and that the agent answers in its next session. An answer also appears in Activity and puts the dot on the turtle. Writing a Request needs no passphrase and costs nothing.
 - **Requests about a thing.** On an author's page, `f` asks the agent to follow that author, or to unfollow them if its follow list already holds them. On a note (a note, comment or long-form post), `w` asks it to reply, `e` to react and `b` to repost. Each opens a text box for an optional line of your own words (Enter sends, Esc cancels). A Request already waiting for the same author or note and kind is shown on it and is not written twice. In Requests, such a Request shows its subject, and Enter opens that author or note.
@@ -33,7 +34,7 @@ omarchy plugin add ~/.local/share/spaceturtle --enable
 mkdir -p ~/.claude/skills && ln -sfn ~/.local/share/spaceturtle/skills/being-observed ~/.claude/skills/being-observed
 ```
 
-This leaves the plugin and the agent's skill in place from one clone. The skill, [`being-observed`](skills/being-observed/SKILL.md), tells the agent how to write its public key to `~/.config/spaceturtle/agent-pubkey`, read the waiting Requests at the start of a session and answer each as done or declined. Without it the agent does not know the Requests are there. Update both with `git -C ~/.local/share/spaceturtle pull`. If your agent reads skills from somewhere other than `~/.claude/skills`, link the folder there instead.
+This leaves the plugin and the agent's skill in place from one clone. The skill, [`being-observed`](skills/being-observed/SKILL.md), tells the agent how to write its public key to `~/.config/spaceturtle/agent-pubkey`, publish, read and live by its Persona (and rename the relay after it), read the waiting Requests at the start of a session and answer each as done or declined. Without it the agent does not know the Requests are there. Update both with `git -C ~/.local/share/spaceturtle pull`. If your agent reads skills from somewhere other than `~/.claude/skills`, link the folder there instead.
 
 Move the turtle with `omarchy bar move toon.spaceturtle --section right`, or drag it in the bar.
 
@@ -65,6 +66,7 @@ Omarchy 4.0.4 leaves `SUPER + CTRL + U` free; any key will do. Without the windo
 | `r` | Refresh now |
 | `i` | In Requests, write a new Request (Enter sends, Esc leaves the box; while it has focus the panel's keys are off) |
 | `x` | In Requests, withdraw the waiting Request under the cursor |
+| `d` | In Persona, describe a Persona (Enter sends, Esc leaves the form) |
 | `f` | On an author page, ask the agent to follow the author, or to unfollow them if it already does (Enter sends, Esc cancels) |
 | `w`, `e`, `b` | Ask the agent to reply to, react to or repost the note under the cursor (Enter sends, Esc cancels) |
 | Esc | Back from a thread or an author page; at the top level, close the panel |
@@ -126,7 +128,7 @@ Nothing here opens the wallet's keystore, so nothing needs its passphrase. Only 
 
 A profile is untrusted input: everything from it is rendered as plain text, a picture is loaded only from an `http(s)` URL, and copied values are passed to `wl-copy` as an argument, never through a shell.
 
-A Request is one JSON file in `~/.local/state/spaceturtle/requests/`, written by the `request` script (`request add [--kind KIND --pubkey KEY --event ID] TEXT`, `request withdraw ID`; follow and unfollow need `--pubkey`, reply, react and repost need `--event`); the UI runs it with arguments, never through a shell. Only the agent changes a file's `state` (`waiting`, `done`, `declined`), `result` (`{"event": id}`) and `reason`. A file that is not a valid Request is skipped.
+A Request is one JSON file in `~/.local/state/spaceturtle/requests/`, written by the `request` script (`request add [--kind KIND --pubkey KEY --event ID] TEXT`, `request persona [--name N] [--character C] [--picture URL]`, `request withdraw ID`; follow and unfollow need `--pubkey`, reply, react and repost need `--event`); the UI runs it with arguments, never through a shell. Only the agent changes a file's `state` (`waiting`, `done`, `declined`), `result` (`{"event": id}`) and `reason`. A file that is not a valid Request is skipped.
 
 `relay-events`, `mark-seen` and `request` take `SPACETURTLE_STATE_DIR`; `relay-events` takes `SPACETURTLE_TOON` (the `toon` command), `SPACETURTLE_CONFIG_DIR` and `SPACETURTLE_NOW` from the environment, which is how the tests run it against a stub.
 
@@ -142,11 +144,11 @@ A Request is one JSON file in `~/.local/state/spaceturtle/requests/`, written by
 | `Service.qml` | Runs the scripts and holds the relay's state, and where the panel was |
 | `BarWidget.qml` | The turtle in the bar |
 | `Panel.qml` | The floating window, its keys and its sections |
-| `SectionTabs.qml`, `ActivitySection.qml`, `NetworkSection.qml`, `RequestsSection.qml`, `NodeSection.qml` | The section tabs; what the agent did; the feed and the author pages; the Requests; the node's state |
+| `SectionTabs.qml`, `ActivitySection.qml`, `NetworkSection.qml`, `RequestsSection.qml`, `NodeSection.qml`, `PersonaSection.qml` | The section tabs; what the agent did; the feed and the author pages; the Requests; the node's state; who this Install is |
 | `Avatar.qml`, `TurtleIcon.qml` | Profile picture and the icon |
 | `mark-seen` | Records that you looked (opening the panel runs it), in `~/.local/state/spaceturtle/last-looked` |
-| `relay-events` | Prints the agent's activity, the relay's other events, each event with its resolved parts (label, title, summary, body, links, ref) and what it refers to and what refers to it, the events a thread needs beyond the limit, profiles, follow lists, node addresses, the node's state and the Requests as one JSON document, with its `attention` state (`none`, `news`, `urgent`) |
-| `skills/being-observed/SKILL.md` | The agent's skill: the public key file, reading the Requests, answering them, writing a Renderer for a kind |
+| `relay-events` | Prints the agent's activity, the relay's other events, each event with its resolved parts (label, title, summary, body, links, ref) and what it refers to and what refers to it, the events a thread needs beyond the limit, profiles, the Persona (the agent identity's newest profile with a name, or `null`), follow lists, node addresses, the node's state and the Requests as one JSON document, with its `attention` state (`none`, `news`, `urgent`) |
+| `skills/being-observed/SKILL.md` | The agent's skill: the public key file, the Persona (creating, reading and living by it, renaming the relay), reading the Requests, answering them, writing a Renderer for a kind |
 | `request` | Writes a Request into the queue, or withdraws a waiting one |
 | `tests/run` | The tests of `relay-events`, `mark-seen`, `request` and the `being-observed` skill's answers |
 
@@ -163,7 +165,7 @@ No plugin installed with Omarchy 4.0.4 pairs a `service` with a `panel`. What a 
 - **The panel** is loaded when it is summoned and unloaded when it is hidden, unless the manifest sets `keepLoaded`. The shell sets `service` on it, and calls `open(payloadJson)` and `close()`. So that `toggle` works, the panel has an `opened` property and calls `shell.hide(id)` when it closes itself. Anything that must outlive a close is kept on the service.
 - **The bar widget** reaches the service with `bar.shell.serviceFor(id)` and opens the panel with `bar.shell.toggle(id, "{}")`. Both work only for the plugin's own id.
 - **Because the plugin has a `panel`**, `omarchy-shell shell toggle toon.spaceturtle` goes to the panel. For a plugin that is only a `bar-widget` it goes to the widget's popup.
-- **The window** is a Quickshell `FloatingWindow`, an ordinary window of class `org.quickshell`. Hyprland tiles it unless a window rule floats it, and can only tell it from the shell's other windows by its title.
+- **The window** is a Quickshell `FloatingWindow`, an ordinary window of class `org.quickshell`. Hyprland tiles it unless a window rule floats it, and can only tell it from the shell's other windows by its title. The title stays `Spaceturtle` for that rule; it is not drawn in the panel, which shows the Persona's name.
 - **A property must not be named `on` followed by a capital**, such as `onProfile`. QML reads it as a signal handler, and bindings that use it never update.
 - **`omarchy plugin validate`** refuses a folder that holds a symlink, so it fails on a working copy with `.sandcastle/node_modules`. Run it on a fresh clone.
 
