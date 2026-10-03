@@ -106,7 +106,7 @@ check "events: without NIP-11 the feed still works" '.online == true and (.event
 
 # --- the node's state
 new_env; install_toon
-echo '{"agent_node":{"supervisor":{"running":true},"connector":{"running":false},"toon_apps":[{"apps":[{"name":"relay","running":true,"read_address":"127.0.0.1:7100","restarts":2},{"name":"chat","running":false}]}]}}' > "$STUB_DIR/status"
+echo '{"agent_node":{"supervisor":{"running":true,"restarts":1},"connector":{"running":false},"toon_apps":[{"apps":[{"name":"relay","running":true,"read_address":"127.0.0.1:7100","restarts":2},{"name":"chat","running":false}]}]}}' > "$STUB_DIR/status"
 echo '{"relay":{"name":"Shelly","prices":{"write":"10"},"blocklist":["badkey"]}}' > "$STUB_DIR/config"
 echo '{"events":[]}' | tee "$STUB_DIR/events" "$STUB_DIR/profiles" > "$STUB_DIR/follows"
 echo '{"peers":[{"id":"alice","direction":"outbound","status":"connected"}]}' > "$STUB_DIR/peerlist"
@@ -116,7 +116,7 @@ echo '{"per_command":"100","per_day":"1000","remaining_today":"640"}' > "$STUB_D
 echo '{"subscriptions":["wss://other"]}' > "$STUB_DIR/held"
 printf '{"lines":[%s]}\n' "$(jq -cn '[range(30) | "line \(.)"] | map(tojson) | join(",")' -r)" > "$STUB_DIR/logs--json"
 out=$("$root/relay-events")
-check "state: supervisor, connector and each app with restarts" '.state.status == {supervisor: true, connector: false, apps: [{name:"relay",running:true,restarts:2},{name:"chat",running:false,restarts:0}]}'
+check "state: supervisor, connector and each app with restarts" '.state.status == {supervisor: {running: true, restarts: 1}, connector: {running: false, restarts: 0}, apps: [{name:"relay",running:true,restarts:2},{name:"chat",running:false,restarts:0}]}'
 check "state: relay name, prices and blocklist" '.state.relay == {name:"Shelly", prices:[{name:"write",price:"10"}], blocklist:["badkey"]}'
 check "state: peers" '.state.peers == [{id:"alice",direction:"outbound",status:"connected"}]'
 check "state: channels with collateral" '.state.channels == [{peer:"alice",direction:"outbound",status:"open",collateral:"500"}]'
@@ -124,12 +124,22 @@ check "state: routes with price" '.state.routes == [{prefix:"g.alice",peer:"alic
 check "state: spending limits and what remains" '.state.limits == {per_command:"100",per_day:"1000",remaining_today:"640"}'
 check "state: subscriptions held, and incoming unavailable while not sold" '.state.subscriptions == {held:["wss://other"], incoming:null}'
 check "state: the last 20 log lines" '(.state.logs | length) == 20 and .state.logs[19] == "line 29"'
+grep -c "subscriptions --incoming" "$STUB_DIR/calls" | grep -qx 1 || { echo "FAIL state: asked for incoming subscriptions more than once"; fails=$((fails + 1)); }
 rm "$STUB_DIR/channellist"; echo '{"error":"no channels"}' > "$STUB_DIR/routelist"
 out=$("$root/relay-events")
-check "state: a failing command and an error document are unavailable, the rest shows" '.state.channels == null and .state.routes == null and (.state.peers | length) == 1 and .state.limits.per_day == "1000" and .state.status.supervisor == true'
+check "state: a failing command and an error document are unavailable, the rest shows" '.state.channels == null and .state.routes == null and (.state.peers | length) == 1 and .state.limits.per_day == "1000" and .state.status.supervisor.running == true'
+echo '{"lines":"not a list"}' > "$STUB_DIR/logs--json"; echo '{"peers":["alice"]}' > "$STUB_DIR/peerlist"
+out=$("$root/relay-events")
+check "state: an answer of a shape not understood is unavailable, the rest shows" '.state.logs == null and .state.peers == null and .state.limits.per_day == "1000" and .state.relay.name == "Shelly"'
+printf '%s\n' '"line a"' '"line b"' > "$STUB_DIR/logs--json"
+out=$("$root/relay-events")
+check "state: logs printed one JSON value per line" '.state.logs == ["line a","line b"]'
 for bad in wallet "wallet balance" "up" "channel open" "limit set" "route add"; do
   ! grep -q "^$bad" "$STUB_DIR/calls" || { echo "FAIL state: ran toon $bad"; fails=$((fails + 1)); }
 done
+rm "$STUB_DIR/status"
+out=$("$root/relay-events")
+check "state: a failing status is unavailable, the rest shows" '.state.status == null and .state.relay.name == "Shelly" and .state.limits.per_day == "1000" and .online == false'
 echo '{}' > "$STUB_DIR/status"
 out=$("$root/relay-events")
 check "state: no agent node, no state" '.state == null and .online == false'

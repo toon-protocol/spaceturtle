@@ -9,8 +9,8 @@
 #
 # "state" is the node as `toon` reports it, or null when there is no agent node.
 # Each group in it (status, relay, peers, channels, routes, limits,
-# subscriptions, logs) is null when its command failed or returned an error
-# document, so the rest still shows.
+# subscriptions, logs) is null when its command failed, returned an error
+# document or answered in a shape not understood, so the rest still shows.
 #
 # The relay's read port changes on every `toon up`, so it is looked up from
 # `toon status` each time. Environment, so that tests can run against a stub:
@@ -39,7 +39,8 @@ toon() { command "$toon_cmd" "$@"; }
 toon_json() {
   local out
   out=$(if command -v timeout >/dev/null; then timeout 10 "$toon_cmd" "$@"; else "$toon_cmd" "$@"; fi 2>/dev/null) || { echo null; return; }
-  out=$(jq -c 'if type == "object" and has("error") then null else . end' <<<"$out" 2>/dev/null)
+  # Several JSON values, one per line, are read as one array of them.
+  out=$(jq -cs 'if length == 0 then null elif length == 1 then .[0] else . end | if type == "object" and has("error") then null else . end' <<<"$out" 2>/dev/null)
   echo "${out:-null}"
 }
 
@@ -52,51 +53,59 @@ command -v "$toon_cmd" >/dev/null && command -v jq >/dev/null || offline
 status=$(toon_json status --json)
 relay_config=$(toon_json relay config --json)
 
-# The node's state, from free commands only. A group whose command failed is null.
-if jq -e '.agent_node | type == "object"' <<<"$status" >/dev/null 2>&1; then
+# The node's state, from free commands only. Each group is mapped on its own, so
+# a group whose command failed, or whose answer has a shape not understood, is
+# null and the rest still shows. A failing `toon status` leaves its group null;
+# a status with no agent node leaves the whole state null.
+incoming=$(toon_json relay subscriptions --incoming --json)
+if [[ $status == null ]] || jq -e '.agent_node | type == "object"' <<<"$status" >/dev/null 2>&1; then
   state=$(jq -cn --argjson status "$status" --argjson relay "$relay_config" \
     --argjson peers "$(toon_json peer list --json)" \
     --argjson channels "$(toon_json channel list --json)" \
     --argjson routes "$(toon_json route list --json)" \
     --argjson limits "$(toon_json limit show --json)" \
     --argjson held "$(toon_json relay subscriptions --json)" \
-    --argjson incoming "$(toon_json relay subscriptions --incoming --json)" \
+    --argjson incoming "$incoming" \
     --argjson logs "$(toon_json logs --json)" '
     def str: if . == null then "" elif type == "string" then . else tojson end;
+    def count: if type == "number" then . else (tonumber? // 0) end;
     def items(key): if . == null then null
       elif type == "array" then . else (.[key] // ([.. | arrays] | first) // []) end;
-    def running: if . == null then null else ([.running, .up] | map(select(. != null)) | if length > 0 then .[0] else null end) end;
-    ($status.agent_node) as $n
-    | {
-      status: {
-        supervisor: ($n.supervisor | running),
-        connector: ($n.connector | running),
+    def process: if . == null then {running: null, restarts: 0}
+      elif type == "boolean" then {running: ., restarts: 0}
+      else {running: ([.running, .up] | map(select(. != null)) | if length > 0 then .[0] == true else null end),
+        restarts: (.restarts // .restart_count // 0 | count)} end;
+    def group(f): if . == null then null else (try f catch null) end;
+    {
+      status: ($status | group(.agent_node as $n | {
+        supervisor: ($n.supervisor | process),
+        connector: ($n.connector | process),
         apps: [$n.toon_apps[]?.apps[]? | {name: (.name | str), running: (.running == true),
-          restarts: (.restarts // .restart_count // 0)}]
-      },
-      relay: (if $relay == null then null else {
-        name: ($relay.relay.name // $relay.name | str),
-        prices: [($relay.relay.prices // $relay.relay.pricing // $relay.prices // {}) | to_entries[]? | {name: .key, price: (.value | str)}],
-        blocklist: [($relay.relay.blocklist // $relay.blocklist // [])[]? | str]
-      } end),
-      peers: ($peers | items("peers") | if . == null then null else [.[] | {
+          restarts: (.restarts // .restart_count // 0 | count)}]
+      })),
+      relay: ($relay | group({
+        name: (.relay.name // .name | str),
+        prices: [(.relay.prices // .relay.pricing // .prices // {}) | to_entries[]? | {name: (.key | str), price: (.value | str)}],
+        blocklist: [(.relay.blocklist // .blocklist // [])[]? | str]
+      })),
+      peers: ($peers | group(items("peers") | [.[] | {
         id: (.id // .peer_id // .peer // .address // .name | str),
-        direction: (.direction | str), status: (.status // .state | str)}] end),
-      channels: ($channels | items("channels") | if . == null then null else [.[] | {
+        direction: (.direction | str), status: (.status // .state | str)}])),
+      channels: ($channels | group(items("channels") | [.[] | {
         peer: (.peer // .peer_id // .counterparty // .id | str),
         direction: (.direction | str), status: (.status // .state | str),
-        collateral: (.collateral // .capacity // .deposit | str)}] end),
-      routes: ($routes | items("routes") | if . == null then null else [.[] | {
+        collateral: (.collateral // .capacity // .deposit | str)}])),
+      routes: ($routes | group(items("routes") | [.[] | {
         prefix: (.prefix // .destination // .route | str),
-        peer: (.peer // .next_hop // .via | str), price: (.price // .rate | str)}] end),
-      limits: (if $limits == null then null else {
-        per_command: ($limits.per_command // $limits.limits.per_command // $limits.command | str),
-        per_day: ($limits.per_day // $limits.limits.per_day // $limits.daily // $limits.day | str),
-        remaining_today: ($limits.remaining_today // $limits.remaining | str)} end),
+        peer: (.peer // .next_hop // .via | str), price: (.price // .rate | str)}])),
+      limits: ($limits | group({
+        per_command: (.per_command // .limits.per_command // .command | str),
+        per_day: (.per_day // .limits.per_day // .daily // .day | str),
+        remaining_today: (.remaining_today // .remaining | str)})),
       subscriptions: (if $held == null and $incoming == null then null else {
-        held: ($held | items("subscriptions") | if . == null then null else [.[] | str] end),
-        incoming: ($incoming | items("subscriptions") | if . == null then null else length end)} end),
-      logs: ($logs | items("lines") | if . == null then null else [.[-20:][] | (if type == "object" then (.message // .line // .) else . end) | str] end)
+        held: ($held | group(items("subscriptions") | [.[] | str])),
+        incoming: ($incoming | group(items("subscriptions") | length))} end),
+      logs: ($logs | group(items("lines") | [.[-20:][] | (if type == "object" then (.message // .line // .) else . end) | str]))
     }' 2>/dev/null) || state=null
 fi
 
@@ -126,8 +135,7 @@ if command -v curl >/dev/null; then
 fi
 
 # Who holds a subscription to this relay's live feed; null while it is not sold.
-subscribers=$(toon relay subscriptions --incoming --json 2>/dev/null |
-  jq -c 'if .error then null else ([.. | arrays] | first // [] | length) end' 2>/dev/null)
+subscribers=$(jq -c 'if . == null then null else ([.. | arrays] | first // [] | length) end' <<<"$incoming" 2>/dev/null)
 
 jq -cn --arg name "${name:-}" --arg self "$self" \
   --argjson node "${node:-null}" \

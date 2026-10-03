@@ -17,6 +17,9 @@ Item {
 
   function yesNo(value) { return value === null || value === undefined ? "unknown" : (value ? "running" : "stopped") }
   function plural(n, one, many) { return n + " " + (n === 1 ? one : many) }
+  function process(p) { return yesNo(p.running) + ", " + plural(p.restarts, "restart", "restarts") }
+  // The parts that are not empty, joined.
+  function joined(parts) { return parts.filter(function(x) { return x !== "" }).join(", ") }
 
   // Rows: { group } starts a group; { label, value, note } is a row the cursor
   // can stand on. `note` marks a group that could not be read.
@@ -32,12 +35,9 @@ Item {
     group("Processes")
     if (!st.status) unavailable()
     else {
-      row("Supervisor", yesNo(st.status.supervisor))
-      row("Connector", yesNo(st.status.connector))
-      for (var a = 0; a < st.status.apps.length; a++) {
-        var app = st.status.apps[a]
-        row(app.name, yesNo(app.running) + ", " + plural(app.restarts, "restart", "restarts"))
-      }
+      row("Supervisor", process(st.status.supervisor))
+      row("Connector", process(st.status.connector))
+      for (var a = 0; a < st.status.apps.length; a++) row(st.status.apps[a].name, process(st.status.apps[a]))
     }
 
     group("Relay")
@@ -53,23 +53,21 @@ Item {
     if (!st.peers) unavailable()
     else if (st.peers.length === 0) none()
     else for (var i = 0; i < st.peers.length; i++)
-      row(st.peers[i].id, [st.peers[i].direction, st.peers[i].status].filter(function(x) { return x !== "" }).join(", "))
+      row(st.peers[i].id, joined([st.peers[i].direction, st.peers[i].status]))
 
     group("Channels")
     if (!st.channels) unavailable()
     else if (st.channels.length === 0) none()
     else for (var c = 0; c < st.channels.length; c++) {
       var ch = st.channels[c]
-      row(ch.peer, [ch.direction, ch.status, ch.collateral !== "" ? "collateral " + ch.collateral : ""]
-        .filter(function(x) { return x !== "" }).join(", "))
+      row(ch.peer, joined([ch.direction, ch.status, ch.collateral !== "" ? "collateral " + ch.collateral : ""]))
     }
 
     group("Routes")
     if (!st.routes) unavailable()
     else if (st.routes.length === 0) none()
     else for (var r = 0; r < st.routes.length; r++)
-      row(st.routes[r].prefix, [st.routes[r].peer, st.routes[r].price !== "" ? "price " + st.routes[r].price : ""]
-        .filter(function(x) { return x !== "" }).join(", "))
+      row(st.routes[r].prefix, joined([st.routes[r].peer, st.routes[r].price !== "" ? "price " + st.routes[r].price : ""]))
 
     group("Spending limit")
     if (!st.limits) unavailable()
@@ -110,7 +108,8 @@ Item {
   }
   readonly property int cursor: Math.max(0, Math.min(service.nodeCursor, targets.length - 1))
   property bool scrollOnCursor: true
-  property string copiedValue: ""
+  // The row whose value was just copied, for its "copied" flash; -1 for none.
+  property int copiedIndex: -1
 
   function move(dy) {
     pointerGate.reset()
@@ -130,7 +129,7 @@ Item {
     var row = root.rows[root.targets[root.cursor]]
     if (row.note || row.value === "" || row.value === "–") return
     service.copy(row.value)
-    root.copiedValue = String(root.targets[root.cursor])
+    root.copiedIndex = root.targets[root.cursor]
     copiedTimer.restart()
   }
 
@@ -157,7 +156,7 @@ Item {
   Timer {
     id: copiedTimer
     interval: 1500
-    onTriggered: root.copiedValue = ""
+    onTriggered: root.copiedIndex = -1
   }
 
   // No agent node: say so, and how to start one.
@@ -248,8 +247,8 @@ Item {
               anchors.rightMargin: Style.spacing.lg
               anchors.verticalCenter: parent.verticalCenter
               wrapMode: Text.Wrap
-              text: entry.heading ? "" : (root.copiedValue === String(entry.index) ? "copied" : entry.modelData.value)
-              color: root.copiedValue === String(entry.index) ? Color.accent : (!entry.heading && entry.modelData.note ? root.dim : Color.foreground)
+              text: entry.heading ? "" : (root.copiedIndex === entry.index ? "copied" : entry.modelData.value)
+              color: root.copiedIndex === entry.index ? Color.accent : (!entry.heading && entry.modelData.note ? root.dim : Color.foreground)
               font.family: Style.font.family
               font.pixelSize: Style.font.bodySmall
               font.italic: !entry.heading && entry.modelData.note === true
