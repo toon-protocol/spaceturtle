@@ -206,6 +206,11 @@ Item {
             function onLeaveInput() { keyCatcher.forceActiveFocus() }
           }
 
+          Connections {
+            target: network.item
+            function onLeaveInput() { keyCatcher.forceActiveFocus() }
+          }
+
           Loader {
             id: persona
             anchors.fill: parent

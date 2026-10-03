@@ -44,13 +44,27 @@ Item {
     if (service.requestCursor === 0) scroll.contentY = 0
   }
 
-  // Enter: a done Request opens what the agent published.
+  // What a Request about a thing is about, in words.
+  function subjectText(request) {
+    var subject = request.subject || {}
+    var verbs = service.requestVerbs
+    if (!verbs[request.kind]) return ""
+    if (subject.event) return verbs[request.kind] + " note " + String(subject.event).slice(0, 8)
+      + (subject.pubkey ? " by " + service.nameOf(subject.pubkey) : "")
+    if (subject.pubkey) return verbs[request.kind] + " " + service.nameOf(subject.pubkey)
+    return ""
+  }
+
+  // Enter: a done Request opens what the agent published; otherwise a Request
+  // about a note or an author opens that.
   function activate() {
     root.missing = false
     if (requests.length === 0) return
     var request = requests[root.cursor]
     var id = request.result && typeof request.result.event === "string" ? request.result.event : ""
-    if (request.state === "done" && id !== "" && !service.openEvent(id)) root.missing = true
+    if (request.state === "done" && id !== "") {
+      if (!service.openEvent(id)) root.missing = true
+    } else if (subjectText(request) !== "" && !service.openSubject(request)) root.missing = true
   }
 
   function back() { return false }
@@ -170,7 +184,7 @@ Item {
       visible: root.missing
       width: parent.width
       textFormat: Text.PlainText
-      text: "The relay does not hold that event."
+      text: "The relay does not hold that."
       color: root.dim
       font.family: Style.font.family
       font.pixelSize: Style.font.bodySmall
@@ -239,6 +253,18 @@ Item {
             }
 
             Text {
+              visible: text !== ""
+              textFormat: Text.PlainText
+              width: parent.width
+              text: root.subjectText(row.modelData)
+              color: Color.accent
+              font.family: Style.font.family
+              font.pixelSize: Style.font.bodySmall
+              elide: Text.ElideRight
+            }
+
+            Text {
+              visible: text !== ""
               textFormat: Text.PlainText
               width: parent.width
               text: String(row.modelData.text)
@@ -263,10 +289,10 @@ Item {
             }
 
             Text {
-              visible: row.modelData.state === "done"
+              visible: row.modelData.state === "done" || root.subjectText(row.modelData) !== ""
               textFormat: Text.PlainText
               width: parent.width
-              text: "Enter opens what the agent published"
+              text: row.modelData.state === "done" ? "Enter opens what the agent published" : "Enter opens it"
               color: root.dim
               font.family: Style.font.family
               font.pixelSize: Style.font.caption

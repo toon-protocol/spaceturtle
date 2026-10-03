@@ -25,6 +25,8 @@ Item {
     var event = cursor >= firstEvent ? shownEvents[cursor - firstEvent] : null
     return event && event.missing !== true ? event : null
   }
+  // Notes, comments and long-form posts: what can be replied to, reacted to or reposted.
+  function isNote(event) { return !!event && [1, 1111, 30023].indexOf(event.kind) !== -1 }
   readonly property bool viewingSelf: authorPage && profilePubkey === service.selfPubkey
 
   // The "LABEL value" lines of an author page that have a value.
@@ -53,6 +55,49 @@ Item {
   // an author page closes. Rows are rebuilt on every refresh, and must not
   // pull the page back each time.
   property bool cursorToRestore: true
+
+  // A Request being written about the thing under the cursor: its kind, and
+  // the author or note it names. Empty while none is.
+  property string composeKind: ""
+  property string composePubkey: ""
+  property string composeEvent: ""
+  // Why a Request was not started, shown briefly.
+  property string notice: ""
+
+  // The text box has the keys while it has focus; the panel is asked to take them back.
+  readonly property bool typing: composeInput.activeFocus
+  signal leaveInput()
+
+  readonly property string composeText: composeKind === "" ? "" : (service.requestVerbs[composeKind] + " "
+    + (composeEvent !== "" ? "this note" : service.nameOf(composePubkey)) + " — add a line of your own, or none")
+
+  // Starts a Request, unless the same kind is already waiting on the same subject.
+  function compose(kind, pubkey, event) {
+    root.notice = ""
+    if (service.waitingAbout(kind, pubkey, event).length > 0) {
+      root.notice = "A " + kind + " Request for this is already waiting."
+      noticeTimer.restart()
+      return
+    }
+    root.composeKind = kind
+    root.composePubkey = pubkey
+    root.composeEvent = event
+    composeInput.text = ""
+    composeInput.forceActiveFocus()
+  }
+
+  function sendCompose() {
+    service.submitAbout(root.composeKind, root.composePubkey, root.composeEvent, composeInput.text)
+    cancelCompose()
+  }
+
+  function cancelCompose() {
+    if (root.composeKind === "") return
+    root.composeKind = ""
+    root.leaveInput()
+  }
+  // Leaving the view or the section leaves the Request unwritten.
+  onVisibleChanged: if (!visible) cancelCompose()
 
   // The label of the detail row whose value was just copied, for its "copied" flash.
   property string copiedLabel: ""
@@ -125,18 +170,27 @@ Item {
   }
 
   // `y` or `c` copies the detail under the cursor, `o` opens a web address,
-  // `a` opens the author of the event under the cursor.
+  // `a` opens the author of the event under the cursor. `f` asks the agent to
+  // follow or unfollow the author of the page; `w`, `e` and `b` to reply to,
+  // react to or repost the note under the cursor.
   function key(text) {
     var detail = root.cursor < root.details.length ? root.details[root.cursor] : null
     if (text === "o" && detail && detail.openable) service.openUrl(detail.value)
     else if ((text === "y" || text === "c") && detail) root.copy(detail)
     else if (text === "a" && root.cursorEvent && !root.authorPage) service.openAuthor(root.cursorEvent.pubkey)
+    else if (text === "f" && root.authorPage && !root.viewingSelf)
+      root.compose(service.followsAuthor(root.profilePubkey) ? "unfollow" : "follow", root.profilePubkey, "")
+    else if (root.isNote(root.cursorEvent)) {
+      var kind = ({ w: "reply", e: "react", b: "repost" })[text]
+      if (kind) root.compose(kind, root.cursorEvent.pubkey, root.cursorEvent.id)
+    }
   }
 
   // A thread or an author page was opened, here or from Activity.
   Connections {
     target: root.service
     function onViewOpened() {
+      root.cancelCompose()
       pointerGate.reset()
       root.scrollOnCursor = true
       root.copiedLabel = ""
@@ -223,6 +277,12 @@ Item {
   }
 
   Timer {
+    id: noticeTimer
+    interval: 3000
+    onTriggered: root.notice = ""
+  }
+
+  Timer {
     id: copiedTimer
     interval: 1500
     onTriggered: root.copiedLabel = ""
@@ -239,9 +299,74 @@ Item {
     onTriggered: now = Date.now()
   }
 
+  // ---------- A Request about the author or note under the cursor ----------
+  Column {
+    id: composeBar
+    visible: root.composeKind !== "" || root.notice !== ""
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    spacing: Style.spacing.sm
+
+    Text {
+      width: parent.width
+      textFormat: Text.PlainText
+      wrapMode: Text.Wrap
+      text: root.composeKind !== "" ? root.composeText : root.notice
+      color: root.dim
+      font.family: Style.font.family
+      font.pixelSize: Style.font.bodySmall
+      font.italic: true
+    }
+
+    Rectangle {
+      visible: root.composeKind !== ""
+      width: parent.width
+      height: composeInput.implicitHeight + Style.spacing.lg * 2
+      color: "transparent"
+      radius: Math.min(4, Style.cornerRadius)
+      border.width: 1
+      border.color: composeInput.activeFocus ? Color.accent : root.dim
+      // Whatever the text box does not use stops here, so the panel never sees it.
+      Keys.onPressed: function(event) { event.accepted = true }
+
+      TextInput {
+        id: composeInput
+        anchors.fill: parent
+        anchors.margins: Style.spacing.lg
+        color: Color.foreground
+        selectionColor: Color.accent
+        font.family: Style.font.family
+        font.pixelSize: Style.font.body
+        clip: true
+        // Enter sends; Esc cancels. Every other key is typed.
+        Keys.onPressed: function(event) {
+          if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            root.sendCompose()
+            event.accepted = true
+          } else if (event.key === Qt.Key_Escape) {
+            root.cancelCompose()
+            event.accepted = true
+          }
+        }
+
+        Text {
+          visible: composeInput.text === ""
+          text: "Enter sends, Esc cancels"
+          color: root.dim
+          font: composeInput.font
+        }
+      }
+    }
+  }
+
   Flickable {
     id: scroll
-    anchors.fill: parent
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: composeBar.visible ? composeBar.top : parent.bottom
+    anchors.bottomMargin: composeBar.visible ? Style.spacing.sm : 0
     contentWidth: width
     contentHeight: column.implicitHeight
     clip: true
@@ -462,6 +587,23 @@ Item {
         }
       }
 
+      // ---------- Follow or unfollow, by the agent's follow list ----------
+      Text {
+        visible: root.authorPage && !root.viewingSelf
+        width: parent.width
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        text: {
+          var waiting = root.service.waitingKinds(root.profilePubkey, "")
+          var verb = root.service.followsAuthor(root.profilePubkey) ? "unfollow" : "follow"
+          if (waiting.length > 0) return "A " + waiting.join(" and an ") + " Request is waiting."
+          return "Your agent " + (verb === "unfollow" ? "follows" : "does not follow") + " this author. f asks it to " + verb + "."
+        }
+        color: root.dim
+        font.family: Style.font.family
+        font.pixelSize: Style.font.bodySmall
+      }
+
       // =================== Shared: separator, empty state, events ===================
 
       PanelSeparator {}
@@ -510,6 +652,9 @@ Item {
     readonly property int depth: Math.min(modelData.depth || 0, 6)
     readonly property bool missing: modelData.missing === true
     readonly property real indent: depth * Style.space(14)
+    // Requests already waiting on this note, so it is not asked twice.
+    readonly property string waitingText: missing ? "" : root.service.waitingKinds("", modelData.id)
+      .map(function(k) { return k + " waiting" }).join(" · ")
 
     hasCursor: root.cursor === target
     width: parent ? parent.width : 0
@@ -653,6 +798,26 @@ Item {
         // In a thread the event under the cursor is read in full; the page scrolls within it.
         maximumLineCount: root.threadView && row.hasCursor ? 100000 : (root.authorPage ? 12 : 4)
         elide: Text.ElideRight
+      }
+
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        visible: text !== ""
+        text: row.waitingText
+        color: Color.accent
+        font.family: Style.font.family
+        font.pixelSize: Style.font.caption
+      }
+
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        visible: row.hasCursor && root.isNote(row.modelData)
+        text: "w replies · e reacts · b reposts"
+        color: root.dim
+        font.family: Style.font.family
+        font.pixelSize: Style.font.caption
       }
     }
   }
