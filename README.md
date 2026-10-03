@@ -42,6 +42,10 @@ omarchy-shell shell toggle toon.spaceturtle              # the panel; or click t
 and key, and the settings.
 
 <p align="center">
+  <img src="docs/assets/panel-tour.gif" alt="A tour of the panel: the Activity, the Node, the Persona, then a Request written and left waiting for the agent" width="520">
+</p>
+
+<p align="center">
   <img src="docs/assets/panel-activity.png" alt="The Activity section: what the agent signed, newest first" width="32%">
   <img src="docs/assets/panel-node.png" alt="The Node section: processes, relay prices, routes and the spending limit" width="32%">
   <img src="docs/assets/panel-persona.png" alt="The Persona section: the agent's picture, name and character" width="32%">
