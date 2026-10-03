@@ -34,6 +34,7 @@ Item {
 
   readonly property string script: Qt.resolvedUrl("relay-events").toString().replace(/^file:\/\//, "")
 
+  readonly property string requestScript: Qt.resolvedUrl("request").toString().replace(/^file:\/\//, "")
   readonly property string markScript: Qt.resolvedUrl("mark-seen").toString().replace(/^file:\/\//, "")
 
   property bool loaded: false
@@ -54,6 +55,9 @@ Item {
   property real lastActive: 0
   // The rest of the relay's feed: the Network.
   property var events: []
+  // Every Request, newest first; the agent answers them in its next session.
+  property var requests: []
+  readonly property int waitingCount: requests.filter(function(r) { return r.state === "waiting" }).length
   // The node's state as `relay-events` reports it; null when there is no agent
   // node. Each group in it is null when its command failed.
   property var nodeState: null
@@ -73,13 +77,16 @@ Item {
   property bool lookedDuringFetch: false
 
   // Where the panel was, kept here because the panel is unloaded when it closes.
-  // Sections are numbered as their keys are, from 1; Activity is 1 and Network 2.
+  // Sections are numbered as their keys are, from 1; Activity is 1, Network 2 and Requests 4.
   readonly property int activitySection: 1
   readonly property int networkSection: 2
+  readonly property int requestsSection: 4
   property int section: activitySection
   property int cursor: 0
   // The Activity's cursor.
   property int activityCursor: 0
+  // The Requests section's cursor.
+  property int requestCursor: 0
   // The author page being shown in Network; empty while the feed is.
   property string profilePubkey: ""
   // The feed's cursor, to come back to from an author page.
@@ -93,8 +100,10 @@ Item {
     if (!markProc.running) markProc.running = true
   }
 
+  // Asked for while a fetch runs, another follows it, so it sees what changed since.
+  property bool refreshAgain: false
   function refresh() {
-    if (fetchProc.running) return
+    if (fetchProc.running) { refreshAgain = true; return }
     lookedDuringFetch = false
     fetchProc.running = true
   }
@@ -143,6 +152,10 @@ Item {
     root.activity = acts
     root.lastActive = typeof report.last_active === "number" ? report.last_active : 0
     root.events = list
+    var reqs = report.requests || []
+    reqs.sort(function(a, b) { return b.created_at - a.created_at })
+    root.requestCursor = indexAfter(root.requests, reqs, root.requestCursor)
+    root.requests = reqs
     root.nodeState = report.state && typeof report.state === "object" ? report.state : null
     root.online = report.online === true
     root.relayName = report.name || ""
@@ -193,12 +206,51 @@ Item {
   // it, else the entry's own, on its author's page in the Network. The feed's
   // place is kept for Esc.
   function openActivity(entry) {
+    // A Request's outcome: what the agent published, or the Request and its reason.
+    if (entry.request) {
+      if (entry.refers_to && eventById(entry.refers_to)) openEvent(entry.refers_to)
+      else { requestCursor = Math.max(0, requests.map(function(r) { return r.id }).indexOf(entry.request.id)); section = requestsSection }
+      return
+    }
     var target = (entry.refers_to ? eventById(entry.refers_to) : null) || entry
     if (profilePubkey === "") feedCursor = cursor
     profilePubkey = target.pubkey
     cursor = 0
     section = networkSection
     eventOpened(target.id)
+  }
+
+  // Opens an event on its author's page in the Network; false if the relay does not hold it.
+  function openEvent(id) {
+    var target = eventById(id)
+    if (!target) return false
+    if (profilePubkey === "") feedCursor = cursor
+    profilePubkey = target.pubkey
+    cursor = 0
+    section = networkSection
+    eventOpened(target.id)
+    return true
+  }
+
+  // Writes a Request, or withdraws a waiting one. The text goes to the script
+  // as an argument, never through a shell.
+  property var pendingCommands: []
+  function submitRequest(text) {
+    if (String(text).trim() === "") return
+    runRequest([requestScript, "add", "--", String(text)])
+  }
+  function withdrawRequest(id) {
+    runRequest([requestScript, "withdraw", String(id)])
+  }
+  function runRequest(command) {
+    pendingCommands = pendingCommands.concat([command])
+    if (!requestProc.running) nextRequestCommand()
+  }
+  function nextRequestCommand() {
+    if (pendingCommands.length === 0) return
+    requestProc.command = pendingCommands[0]
+    pendingCommands = pendingCommands.slice(1)
+    requestProc.running = true
   }
 
   function followingCount(pubkey) {
@@ -226,6 +278,7 @@ Item {
   Process {
     id: fetchProc
     command: [root.script, String(root.eventLimit)]
+    onExited: if (root.refreshAgain) { root.refreshAgain = false; Qt.callLater(root.refresh) }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -237,6 +290,14 @@ Item {
           root.loaded = true
         }
       }
+    }
+  }
+
+  Process {
+    id: requestProc
+    onExited: {
+      root.refresh()
+      root.nextRequestCommand()
     }
   }
 
