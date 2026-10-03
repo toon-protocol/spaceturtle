@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
-import { gateFromCi } from './run-gate.ts';
+import { gateFromCi, inBash } from './run-gate.ts';
 
 const CI = `
 name: CI
@@ -99,4 +100,18 @@ test('a GitHub expression in env or working-directory skips the step too', () =>
 test('the expression note names the expression syntax literally', () => {
   const { notes } = gateFromCi('jobs:\n  gate:\n    steps:\n      - run: echo ${{ x }}\n');
   assert.match(notes.join('\n'), /a \$\{\{ \}\} expression/);
+});
+
+// The sandbox runs a command with `sh`, so that is how these run it.
+const sh = (command: string) => spawnSync('sh', ['-c', command], { encoding: 'utf8' });
+
+test('a step runs under sh, which has no pipefail of its own', () => {
+  const ran = sh(inBash("echo 'it''s' fine"));
+  assert.equal(ran.status, 0, ran.stderr);
+  assert.equal(ran.stdout, 'its fine\n');
+});
+
+test('a step fails when any command in a pipe fails, or any line of it does', () => {
+  assert.notEqual(sh(inBash('false | true')).status, 0);
+  assert.equal(sh(inBash('false\necho reached')).stdout, '');
 });

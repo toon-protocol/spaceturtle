@@ -128,6 +128,13 @@ export async function loadGate(sandbox: Sandbox, base: string): Promise<Gate> {
 }
 
 /**
+ * A step's command as the sandbox must be given it. `sandbox.exec` runs its argument with
+ * `sh`, which is dash in the sandbox image and has no `pipefail`; a `run:` step in CI is
+ * bash. So the step is handed to bash, with the flags Actions gives a bash step.
+ */
+export const inBash = (command: string): string => `bash -eo pipefail -c ${shellQuote(command)}`;
+
+/**
  * Run `steps` in order, stopping at the first failure.
  *
  * Failure is returned, not thrown, so the caller can decide between a fix
@@ -139,8 +146,7 @@ export async function runGate(sandbox: Sandbox, steps: readonly GateStep[]): Pro
   for (const step of steps) {
     console.log(`  [gate] ${step.name}: ${step.command}`);
     const lines: string[] = [];
-    // The sandbox shell may be dash, which has no pipefail: run the step under bash, as Actions does.
-    const result = await sandbox.exec(`bash -eo pipefail -c ${shellQuote(step.command)}`, {
+    const result = await sandbox.exec(inBash(step.command), {
       onLine: (line) => {
         lines.push(line);
         // Stream sparingly: full build output would bury the runner log.
