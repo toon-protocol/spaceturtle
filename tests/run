@@ -273,9 +273,17 @@ check "node changes: still kept when nothing changed" '(.activity | length) == 1
 rm "$STUB_DIR/channellist"
 out=$(at 1050)
 check "node changes: an unreadable group is not compared, so it invents nothing" '(.activity | length) == 10'
+mv "$SPACETURTLE_TOON" "$tmp/toon.away"
+out=$(at 1055)
+check "node changes: still kept when toon is missing" '.online == false and (.activity | length) == 10'
+mv "$tmp/toon.away" "$SPACETURTLE_TOON"
 echo '{"channels":[{"peer":"bob","direction":"inbound","status":"closing"}]}' > "$STUB_DIR/channellist"
 out=$(at 1060)
 check "node changes: the group back as it was is no change" '(.activity | length) == 10'
+echo '{"relay":{"name":"Shelly","prices":{"read":"2"}}}' > "$STUB_DIR/config"
+echo '{"peers":[{"id":"bob","direction":"inbound","status":"disconnected"}]}' > "$STUB_DIR/peerlist"
+out=$(at 1062)
+check "node changes: a price set and removed, a peering changing in place" '[.activity[0:3][].text] | sort == ["Peering with bob is now disconnected","Price read set to 2","Price write removed"]'
 echo '{"per_command":"100","per_day":"1000","remaining_today":"0"}' > "$STUB_DIR/limitshow"
 out=$(at 1070)
 check "urgent: nothing left of today's limit" '.urgent == true and .activity[0].text == "Spending limit used up for today"'

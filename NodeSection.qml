@@ -120,7 +120,8 @@ Item {
   }
 
   // Stand on the item an Activity entry concerns: its row in its group, or the
-  // group's first row when the item is gone (a channel that closed).
+  // group's first row when the item is gone (a channel that closed). Before the
+  // rows are in, the focus waits for them.
   function focusOn(focus) {
     if (!focus || root.targets.length === 0) return
     var first = -1
@@ -140,6 +141,7 @@ Item {
     target: root.service
     function onNodeFocusChanged() { root.focusOn(root.service.nodeFocus) }
   }
+  onTargetsChanged: focusOn(service.nodeFocus)
   Component.onCompleted: focusOn(service.nodeFocus)
 
   function hover(target) {

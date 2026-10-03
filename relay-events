@@ -41,6 +41,7 @@ toon_cmd=${SPACETURTLE_TOON:-toon}
 config_dir=${SPACETURTLE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/spaceturtle}
 
 state_dir=${SPACETURTLE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/spaceturtle}
+snapshot=$state_dir/node-snapshot.json
 
 limit=${1:-40}
 [[ $limit =~ ^[0-9]+$ ]] || limit=40
@@ -49,7 +50,9 @@ interval=${2:-30}
 now=${SPACETURTLE_NOW:-$(date +%s)}
 [[ $now =~ ^[0-9]+$ ]] || now=$(date +%s)
 
-changes='[]'
+# The entries the last snapshot kept, until this run finds a state to compare.
+changes=$(jq -c '.changes // [] | if type == "array" then . else [] end' "$snapshot" 2>/dev/null)
+[[ -n $changes ]] || changes='[]'
 urgent=false
 
 offline() {
@@ -173,19 +176,18 @@ fi
 # Compare the state with the last snapshot: one entry per difference, kept with
 # the earlier ones. Groups that could not be read are not compared, and keep
 # what the snapshot held of them. Without a state nothing is read or written.
-snapshot=$state_dir/node-snapshot.json
 if [[ $state != null ]]; then
   old=$(jq -c 'if type == "object" then . else null end' "$snapshot" 2>/dev/null)
   result=$(jq -cn --argjson old "${old:-null}" --argjson state "$state" --argjson now "$now" --argjson gap "$((interval * 4))" '
     def keyed(f): map({(f): .}) | add // {};
     def entry($group; $name; $text): {group: $group, name: $name, text: $text};
     # Entries for what was added, removed and changed between two lists.
-    def delta($o; $n; kf; add; rem; chg):
+    def delta($o; $n; kf; added; removed; changed):
       if $o == null or $n == null then []
       else ($o | keyed(kf)) as $a | ($n | keyed(kf)) as $b
-        | [$b | to_entries[] | select($a[.key] == null) | .value | add]
-        + [$a | to_entries[] | select($b[.key] == null) | .value | rem]
-        + [$b | to_entries[] | select($a[.key] != null and $a[.key] != .value) | .value | chg] end;
+        | [$b | to_entries[] | select($a[.key] == null) | .value | added]
+        + [$a | to_entries[] | select($b[.key] == null) | .value | removed]
+        + [$b | to_entries[] | select($a[.key] != null and $a[.key] != .value) | .value | changed] end;
     def blank: if . == "" then null else . end;
     ($state.limits.remaining_today | blank) as $left
     | {peers: $state.peers, channels: $state.channels, routes: $state.routes,
@@ -234,8 +236,6 @@ if [[ $state != null ]]; then
   fi
   urgent=$(jq -c '.limits.remaining_today | strings | (tonumber? // null) | . != null and . <= 0' <<<"$state" 2>/dev/null)
   [[ $urgent == true ]] || urgent=false
-else
-  changes=$(jq -c '.changes // [] | if type == "array" then . else [] end' "$snapshot" 2>/dev/null || echo '[]')
 fi
 
 read_address=$(jq -r '.agent_node.toon_apps[]?.apps[]? | select(.name == "relay" and .running) | .read_address // empty' <<<"$status" 2>/dev/null |

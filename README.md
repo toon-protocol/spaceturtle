@@ -11,7 +11,7 @@ An [Omarchy](https://omarchy.org/) shell plugin for your [TOON](https://github.c
 - **Node.** What `toon` reports of the node, in groups you move through with the cursor: processes with restart counts, the relay's name, prices and blocklist, peerings, channels, routes, the spending limit and what is left today, subscriptions held and held to your relay, the ILP and connector addresses, and the last log lines. Enter copies a value. A group whose command failed says `unavailable`; the rest still shows. Wallet balances say `not shown: needs the passphrase`. With no agent node it says how to start one.
 - **Author page.** Open an event: picture, name, about, website and public key (as `npub1…`); on the agent's own page also the node's ILP address and connector URL, then that author's events. Each value can be copied.
 - **Counters.** Followers and following on every page; on the agent's own, also how many hold a subscription to your relay's live feed (`–` while the relay does not sell it).
-- **Bar turtle.** Dimmed while the relay is not running; an accent dot when events arrived since you last looked; a larger red dot when nothing is left of today's spending limit. Every monitor's bar shows the same state.
+- **Bar turtle.** Dimmed while the relay is not running; an accent dot when events arrived since you last looked; a larger dot when nothing is left of today's spending limit. Every monitor's bar shows the same state.
 
 It follows the Omarchy theme: every colour, font, border and radius comes from the shell.
 

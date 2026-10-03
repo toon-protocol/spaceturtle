@@ -180,9 +180,9 @@ Item {
   // Asks the Network to show an event on its author's page, with the cursor on it.
   signal eventOpened(string id)
 
-  // Opens an Activity entry: a node change in the Node section; else the event it refers to if the feed holds
-  // it, else the entry's own, on its author's page in the Network. The feed's
-  // place is kept for Esc.
+  // Opens an Activity entry: a node change in the Node section; else the event
+  // it refers to if the feed holds it, else the entry's own, on its author's
+  // page in the Network. The feed's place is kept for Esc.
   function openActivity(entry) {
     // A change noticed in the node: the Node section, at the item it concerns.
     if (entry.node_change === true) {

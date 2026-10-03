@@ -45,13 +45,13 @@ BarWidget {
       else root.togglePanel()
     }
 
-    // Unseen-events dot, in the theme's accent.
+    // Unseen-events dot, in the theme's accent; larger while urgent.
     Rectangle {
       visible: root.hasUnseen || root.urgent
       width: root.urgent ? Style.space(7) : Style.space(5)
       height: width
       radius: width / 2
-      color: root.urgent ? "#e5484d" : Color.accent
+      color: Color.accent
       anchors.right: parent.right
       anchors.top: parent.top
       anchors.rightMargin: Style.space(3)
