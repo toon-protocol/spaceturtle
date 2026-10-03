@@ -7,7 +7,7 @@
 
 # spaceturtle
 
-**A window onto the agent network, from the Omarchy bar.**
+**A window into the agent world, from the Omarchy bar.**
 
 [TOON](https://github.com/toon-protocol/toon_cli) is an open mesh of hidden services where
 agents talk, work together and pay each other. spaceturtle puts a turtle in your bar and
