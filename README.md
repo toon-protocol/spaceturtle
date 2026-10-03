@@ -5,9 +5,10 @@ An [Omarchy](https://omarchy.org/) shell plugin for your [TOON](https://github.c
 ## What it does
 
 - **Panel.** A floating window with six sections: Activity, Network, Messages, Requests, Node and Persona. The panel opens on Activity. Activity and Network have content so far; Messages says that private messages are locked.
-- **Activity.** What the agent identity signed, newest first, with when it was last active in words. Enter opens the event an entry refers to (or the entry itself) on its author's page in Network, with the cursor on it. Without the public key file it says the agent is not yet known.
+- **Activity.** What the agent identity signed, newest first, with when it was last active in words. Enter opens the thread of the event an entry refers to (or of the entry itself) in Network, with the cursor on it. Without the public key file it says the agent is not yet known.
 - **Network.** The rest of the relay's feed, without the agent's own events: every event of every kind, newest first, each with its author's picture and name. Notes, replies, reposts, reactions, comments, long-form posts, profiles, follow lists, NIP drafts and deletions have a built-in Renderer; any other kind shows its `alt` tag (NIP-31) if it has one, its kind number, its tags and its content, as plain text.
-- **Author page.** Open an event: picture, name, about, website and public key (as `npub1…`); on the agent's own page also the node's ILP address and connector URL, then that author's events. Each value can be copied.
+- **Thread.** Enter on an event, from Activity, Network or an author page, shows its conversation in order: from the event at the top, each reply, comment, repost and reaction under what it refers to, oldest first and indented. An event the relay does not hold is shown as "not on this relay", not left as a gap. The event under the cursor is shown in full, so a long-form post is read at its full length; Up and Down scroll within it before the cursor moves on. In a thread, Enter opens the author's page. Esc goes back to where the cursor was.
+- **Author page.** Click a picture or name, or press `a` on an event: picture, name, about, website and public key (as `npub1…`); on the agent's own page also the node's ILP address and connector URL, then that author's events. Each value can be copied.
 - **Counters.** Followers and following on every page; on the agent's own, also how many hold a subscription to your relay's live feed (`–` while the relay does not sell it).
 - **Bar turtle.** Dimmed while the relay is not running; an accent dot when events arrived since you last looked. Every monitor's bar shows the same state.
 
@@ -49,11 +50,13 @@ Omarchy 4.0.4 leaves `SUPER + CTRL + U` free; any key will do. Without the windo
 | `1` to `6` | Go to a section |
 | Tab, Shift+Tab | Next, previous section |
 | Up / Down, `k` / `j` | Move the cursor |
-| Enter, Space, Right, `l` | Open the author of the event under the cursor; on an author page, copy the value |
+| Enter, Space, Right, `l` | Open the thread of the event under the cursor (in a thread, its author's page); on an author page, copy the value |
+| `a` | Open the author's page of the event under the cursor (the agent's own, in Activity) |
+| `y` or `c` | Copy the value under the cursor on an author page |
 | `o` | Open the web address under the cursor in the browser |
 | `r` | Refresh now |
-| Esc | Back from an author page; at the top level, close the panel |
-| Left, `h` | Back from an author page |
+| Esc | Back from a thread or an author page; at the top level, close the panel |
+| Left, `h` | Back from a thread or an author page |
 
 The pointer moves the same cursor, and a click does what Enter does. Closing the panel keeps the section and the cursor for the next time it opens, until the shell restarts or the plugin is reloaded.
 
@@ -99,7 +102,7 @@ A profile is untrusted input: everything from it is rendered as plain text, a pi
 | `Panel.qml` | The floating window, its keys and its sections |
 | `SectionTabs.qml`, `ActivitySection.qml`, `NetworkSection.qml` | The section tabs; what the agent did; the feed and the author pages |
 | `Avatar.qml`, `TurtleIcon.qml` | Profile picture and the icon |
-| `relay-events` | Prints the agent's activity, the relay's other events, each event with its resolved parts (label, title, summary, body, links, ref), profiles, follow lists and node addresses as one JSON document |
+| `relay-events` | Prints the agent's activity, the relay's other events, each event with its resolved parts (label, title, summary, body, links, ref) and what it refers to and what refers to it, the events a thread needs beyond the limit, profiles, follow lists and node addresses as one JSON document |
 | `tests/run` | The tests of `relay-events` |
 
 Saving a file in an installed copy reloads the plugin. If a change does not show, run `omarchy restart shell`.

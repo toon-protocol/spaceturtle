@@ -1,11 +1,15 @@
 #!/bin/bash
 # Print what can be observed of this agent node as one JSON document:
 # {"online", "name", "self", "node", "subscribers", "profiles", "follows",
-# "activity", "last_active", "events"}. "activity" is what the agent identity
-# signed, newest first, each entry with the id of the event it refers to
-# ("refers_to", or null); "last_active" is its newest created_at, or null;
-# "events" is the rest of the feed, without the agent's. Read-only: nothing
-# here opens the keystore or publishes.
+# "activity", "last_active", "events", "context"}. "activity" is what the agent
+# identity signed, newest first; "last_active" is its newest created_at, or null;
+# "events" is the rest of the feed, without the agent's. Every event, in either
+# and in "context", says what it refers to ("refers_to", an id or null), whether
+# the relay lacks that event ("refers_missing"), and which events refer to it
+# ("referenced_by", ids, oldest first). "context" holds the events a thread
+# needs that the feed's limit left out: those that shown events refer to, and
+# those that refer to them. Read-only: nothing here opens the keystore or
+# publishes.
 #
 # The relay's read port changes on every `toon up`, so it is looked up from
 # `toon status` each time. Environment, so that tests can run against a stub:
@@ -23,7 +27,7 @@ limit=${1:-40}
 [[ $limit =~ ^[0-9]+$ ]] || limit=40
 
 offline() {
-  printf '{"online":false,"name":"","self":"","node":{"ilp_address":"","connector":""},"subscribers":null,"profiles":[],"follows":[],"activity":[],"last_active":null,"events":[]}\n'
+  printf '{"online":false,"name":"","self":"","node":{"ilp_address":"","connector":""},"subscribers":null,"profiles":[],"follows":[],"activity":[],"last_active":null,"events":[],"context":[]}\n'
   exit 0
 }
 
@@ -95,6 +99,26 @@ fi
 agent_events='[]'
 [[ -n $self ]] && agent_events=$(relay_query "{\"authors\":[\"$self\"],\"limit\":$limit}" | with_parts)
 
+# The events a thread needs beyond the limit: what shown events refer to, up
+# the chain a few levels, and what refers to them. Asked for by id and by "e"
+# tag; anything the relay does not return stays missing.
+ref_of='[.tags[]? | select(type == "array" and .[0] == "e" and (.[1] | strings))]
+  | ((map(select(.[3]? == "reply")) | first) // last) | .[1]? // null'
+context='[]'
+for _ in 1 2 3; do
+  want=$(jq -cn --argjson a "$events" --argjson b "${agent_events:-[]}" --argjson c "$context" \
+    "[\$a[], \$b[], \$c[]] | (map(.id) | unique) as \$held
+     | [.[] | $ref_of | select(. != null)] | unique - \$held | .[0:100]" 2>/dev/null || echo '[]')
+  [[ $want == '[]' ]] && break
+  found=$(relay_query "{\"ids\":$want}")
+  context=$(jq -cn --argjson a "$context" --argjson b "$found" '$a + $b | unique_by(.id)' 2>/dev/null || echo "$context")
+  [[ $found == '[]' ]] && break
+done
+ids=$(jq -cn --argjson a "$events" --argjson b "${agent_events:-[]}" '[$a[], $b[] | .id | strings] | unique | .[0:100]' 2>/dev/null || echo '[]')
+replies=$(relay_query "{\"#e\":$ids,\"limit\":200}")
+context=$(jq -cn --argjson a "$context" --argjson b "$replies" '$a + $b | unique_by(.id)' 2>/dev/null || echo "$context")
+context=$(printf '%s' "$context" | with_parts)
+
 # The node's ILP address and connector address, from the relay's NIP-11 document.
 node=
 if command -v curl >/dev/null; then
@@ -110,16 +134,23 @@ jq -cn --arg name "${name:-}" --arg self "$self" \
   --argjson node "${node:-null}" \
   --argjson subscribers "${subscribers:-null}" --argjson events "${events:-[]}" \
   --argjson profiles "${profiles:-[]}" --argjson follows "${follows:-[]}" \
-  --argjson agent "${agent_events:-[]}" \
-  '(if $self == "" then []
+  --argjson agent "${agent_events:-[]}" --argjson context "${context:-[]}" \
+  '# The "e" tag marked "reply" (NIP-10), else the last one.
+  def ref: '"$ref_of"';
+  ([$agent[], $events[], $context[]] | unique_by(.id)) as $all
+  | ($all | map(.id)) as $held
+  | ($all | map(select(ref != null)) | sort_by(.created_at)
+      | reduce .[] as $e ({}; .[$e | ref] += [$e.id])) as $referrers
+  | def mark: map((ref) as $r | . + {refers_to: $r,
+      refers_missing: ($r != null and ($held | index($r) == null)),
+      referenced_by: ($referrers[.id] // [])});
+  (if $self == "" then []
     else ([$agent[], $events[]] | map(select(.pubkey == $self)) | unique_by(.id)
-      | sort_by(-.created_at)
-      # The "e" tag marked "reply" (NIP-10), else the last one.
-      | map(. + {refers_to: ([.tags[]? | select(.[0] == "e" and (.[1] | strings))]
-          | ((map(select(.[3]? == "reply")) | first) // last) | .[1]? // null)}))
+      | sort_by(-.created_at) | mark)
     end) as $activity
   | {online: true, name: $name, self: $self,
     activity: $activity, last_active: ($activity[0].created_at? // null),
     node: ($node // {ilp_address: "", connector: ""}),
     subscribers: $subscribers, profiles: $profiles, follows: $follows,
-    events: ($events | map(select(.pubkey != $self)))}'
+    events: ($events | map(select(.pubkey != $self)) | mark),
+    context: ($context | map(select(.id as $i | ($events | map(.id) | index($i)) == null and ($agent | map(.id) | index($i)) == null)) | mark)}'

@@ -52,6 +52,8 @@ Item {
   property real lastActive: 0
   // The rest of the relay's feed: the Network.
   property var events: []
+  // Events a thread needs that the feed's limit left out.
+  property var context: []
 
   // True while the panel is open. Newest created_at seen in the panel; anything
   // newer puts the dot on the turtle.
@@ -68,10 +70,13 @@ Item {
   property int cursor: 0
   // The Activity's cursor.
   property int activityCursor: 0
-  // The author page being shown in Network; empty while the feed is.
+  // What Network shows: a thread (the id of the event it was opened on), an
+  // author page (a pubkey), or, while both are empty, the feed.
+  property string threadId: ""
   property string profilePubkey: ""
-  // The feed's cursor, to come back to from an author page.
-  property int feedCursor: 0
+  // The views Esc comes back to, oldest first, each { profile, thread, cursor };
+  // empty while the feed shows, else the first is the feed.
+  property var trail: []
 
   onLookingChanged: if (looking) seenAt = newestAt
 
@@ -106,8 +111,13 @@ Item {
     list.sort(function(a, b) { return b.created_at - a.created_at })
 
     // The cursor stays on its event when newer ones arrive above it.
-    if (root.profilePubkey === "") root.cursor = indexAfter(root.events, list, root.cursor)
-    else root.feedCursor = indexAfter(root.events, list, root.feedCursor)
+    if (root.trail.length === 0) {
+      if (root.profilePubkey === "" && root.threadId === "") root.cursor = indexAfter(root.events, list, root.cursor)
+    } else if (root.trail[0].profile === "" && root.trail[0].thread === "") {
+      var views = root.trail.slice()
+      views[0] = { profile: "", thread: "", cursor: indexAfter(root.events, list, views[0].cursor) }
+      root.trail = views
+    }
 
     var acts = report.activity || []
     acts.sort(function(a, b) { return b.created_at - a.created_at })
@@ -124,6 +134,7 @@ Item {
     root.activity = acts
     root.lastActive = typeof report.last_active === "number" ? report.last_active : 0
     root.events = list
+    root.context = report.context || []
     root.online = report.online === true
     root.relayName = report.name || ""
     root.loaded = true
@@ -156,27 +167,103 @@ Item {
     return all.filter(function(e) { return e.pubkey === pubkey })
   }
 
-  // The event an Activity entry refers to, if the feed holds it.
+  // An event the relay held at the last refresh, wherever it was found.
   function eventById(id) {
-    var all = activity.concat(events)
-    for (var i = 0; i < all.length; i++)
-      if (all[i].id === id) return all[i]
+    var all = [activity, events, context]
+    for (var l = 0; l < all.length; l++)
+      for (var i = 0; i < all[l].length; i++)
+        if (all[l][i].id === id) return all[l][i]
     return null
   }
 
-  // Asks the Network to show an event on its author's page, with the cursor on it.
-  signal eventOpened(string id)
+  // Asks the Network to start a view at the top of its page, with the cursor
+  // restored and nothing copied.
+  signal viewOpened()
 
-  // Opens an Activity entry's event: the event it refers to if the feed holds
-  // it, else the entry's own, on its author's page in the Network. The feed's
-  // place is kept for Esc.
-  function openActivity(entry) {
-    var target = (entry.refers_to ? eventById(entry.refers_to) : null) || entry
-    if (profilePubkey === "") feedCursor = cursor
-    profilePubkey = target.pubkey
+  // The conversation an event is part of, in reading order: from the event at
+  // its top (a placeholder, if the relay lacks that one) down through what
+  // refers to each, oldest first. Each row is the event with its `depth`, or
+  // { missing: true, id } for an event the relay does not hold.
+  function threadRows(id) {
+    var focus = eventById(id)
+    if (!focus) return []
+    var top = focus
+    var seen = {}
+    seen[top.id] = true
+    while (top.refers_to) {
+      var parent = eventById(top.refers_to)
+      if (!parent || seen[parent.id]) break
+      seen[parent.id] = true
+      top = parent
+    }
+    var rows = []
+    if (top.refers_missing === true)
+      rows.push({ missing: true, id: top.refers_to, depth: 0, pubkey: "", created_at: 0, parts: ({}) })
+    var visited = {}
+    function walk(event, depth) {
+      if (visited[event.id]) return
+      visited[event.id] = true
+      var row = {}
+      for (var key in event) row[key] = event[key]
+      row.depth = depth
+      rows.push(row)
+      var kids = (event.referenced_by || []).map(eventById).filter(function(e) { return e !== null })
+      kids.sort(function(a, b) { return a.created_at - b.created_at })
+      for (var k = 0; k < kids.length; k++) walk(kids[k], depth + 1)
+    }
+    walk(top, rows.length)
+    return rows
+  }
+
+  // Remembers the view showing, to come back to with Esc.
+  function pushView() {
+    var views = trail.slice()
+    views.push({ profile: profilePubkey, thread: threadId, cursor: cursor })
+    trail = views
+  }
+
+  // Shows the thread an event is in, with the cursor on the event.
+  function openThread(id) {
+    if (!eventById(id)) return
+    pushView()
+    threadId = id
+    profilePubkey = ""
+    var rows = threadRows(id)
+    cursor = 0
+    for (var i = 0; i < rows.length; i++)
+      if (rows[i].id === id) { cursor = i; break }
+    section = networkSection
+    viewOpened()
+  }
+
+  // Shows an author's page.
+  function openAuthor(pubkey) {
+    if (!pubkey) return
+    pushView()
+    threadId = ""
+    profilePubkey = pubkey
     cursor = 0
     section = networkSection
-    eventOpened(target.id)
+    viewOpened()
+  }
+
+  // Esc in Network: back to the view before. False when the feed is showing.
+  function goBack() {
+    if (trail.length === 0) return false
+    var views = trail.slice()
+    var view = views.pop()
+    trail = views
+    profilePubkey = view.profile
+    threadId = view.thread
+    cursor = view.cursor
+    return true
+  }
+
+  // Opens an Activity entry: the thread of the event it refers to if the feed
+  // holds it, else of the entry itself.
+  function openActivity(entry) {
+    var target = (entry.refers_to ? eventById(entry.refers_to) : null) || entry
+    openThread(target.id)
   }
 
   function followingCount(pubkey) {
