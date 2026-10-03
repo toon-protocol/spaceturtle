@@ -9,7 +9,7 @@ An [Omarchy](https://omarchy.org/) shell plugin for your [TOON](https://github.c
 - **Network.** The rest of the relay's feed, without the agent's own events. Notes, replies, reposts, reactions, comments and long-form posts from the relay, newest first, each with its author's picture and name.
 - **Author page.** Open an event: picture, name, about, website and public key (as `npub1…`); on the agent's own page also the node's ILP address and connector URL, then that author's events. Each value can be copied.
 - **Counters.** Followers and following on every page; on the agent's own, also how many hold a subscription to your relay's live feed (`–` while the relay does not sell it).
-- **Bar turtle.** Dimmed while the relay is not running; an accent dot when events arrived since you last looked. Every monitor's bar shows the same state.
+- **Bar turtle.** Dimmed while the relay is not running; an accent dot when an Activity entry, or an event tagging the agent, is newer than the last time you opened the panel (other Network traffic never lights it); a larger ringed dot while the node is not running. Every monitor's bar shows the same state.
 
 It follows the Omarchy theme: every colour, font, border and radius comes from the shell.
 
@@ -83,7 +83,7 @@ Nothing here opens the wallet's keystore, so nothing needs its passphrase. Only 
 
 A profile is untrusted input: everything from it is rendered as plain text, a picture is loaded only from an `http(s)` URL, and copied values are passed to `wl-copy` as an argument, never through a shell.
 
-`relay-events` takes `SPACETURTLE_TOON` (the `toon` command) and `SPACETURTLE_CONFIG_DIR` from the environment, which is how the tests run it against a stub.
+`relay-events` and `mark-seen` take `SPACETURTLE_STATE_DIR`; `relay-events` takes `SPACETURTLE_TOON` (the `toon` command) and `SPACETURTLE_CONFIG_DIR` from the environment, which is how the tests run it against a stub.
 
 ## Tests
 
@@ -99,7 +99,8 @@ A profile is untrusted input: everything from it is rendered as plain text, a pi
 | `Panel.qml` | The floating window, its keys and its sections |
 | `SectionTabs.qml`, `ActivitySection.qml`, `NetworkSection.qml` | The section tabs; what the agent did; the feed and the author pages |
 | `Avatar.qml`, `TurtleIcon.qml` | Profile picture and the icon |
-| `relay-events` | Prints the agent's activity, the relay's other events, profiles, follow lists and node addresses as one JSON document |
+| `mark-seen` | Records that you looked (opening the panel runs it), in `~/.local/state/spaceturtle/last-looked` |
+| `relay-events` | Prints the agent's activity, the relay's other events, profiles, follow lists and node addresses as one JSON document, with its `attention` state (`none`, `news`, `urgent`) |
 | `tests/run` | The tests of `relay-events` |
 
 Saving a file in an installed copy reloads the plugin. If a change does not show, run `omarchy restart shell`.

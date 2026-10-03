@@ -11,6 +11,7 @@ BarWidget {
   readonly property var service: bar && bar.shell ? bar.shell.serviceFor(moduleName) : null
   readonly property bool online: service ? service.online : false
   readonly property bool hasUnseen: service ? service.hasUnseen : false
+  readonly property bool urgent: service ? service.urgent : false
 
   // Inline shell.json setting: { "id": "toon.spaceturtle", "icon": 2 }
   readonly property int iconVariant: Number(setting("icon", 1)) || 1
@@ -43,13 +44,15 @@ BarWidget {
       else root.togglePanel()
     }
 
-    // Unseen-events dot, in the theme's accent.
+    // Attention dot: a plain accent dot for news, a larger ringed one when the node is down.
     Rectangle {
-      visible: root.hasUnseen
-      width: Style.space(5)
+      visible: root.hasUnseen || root.urgent
+      width: Style.space(root.urgent ? 7 : 5)
       height: width
       radius: width / 2
-      color: Color.accent
+      color: root.urgent ? Color.foreground : Color.accent
+      border.width: root.urgent ? Style.space(1) : 0
+      border.color: Color.accent
       anchors.right: parent.right
       anchors.top: parent.top
       anchors.rightMargin: Style.space(3)

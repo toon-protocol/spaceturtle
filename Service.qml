@@ -34,6 +34,8 @@ Item {
 
   readonly property string script: Qt.resolvedUrl("relay-events").toString().replace(/^file:\/\//, "")
 
+  readonly property string markScript: Qt.resolvedUrl("mark-seen").toString().replace(/^file:\/\//, "")
+
   property bool loaded: false
   property bool online: false
   property string relayName: ""
@@ -53,12 +55,14 @@ Item {
   // The rest of the relay's feed: the Network.
   property var events: []
 
-  // True while the panel is open. Newest created_at seen in the panel; anything
-  // newer puts the dot on the turtle.
+  // True while the panel is open. Opening it records that the Observer looked
+  // (the `mark-seen` script, which keeps the time on disk, so it holds across
+  // restarts and is the same on every monitor).
   property bool looking: false
-  property real seenAt: 0
-  readonly property real newestAt: Math.max(events.length > 0 ? events[0].created_at : 0, lastActive)
-  readonly property bool hasUnseen: loaded && newestAt > seenAt
+  // "none", "news" or "urgent", as relay-events reports it.
+  property string attention: "none"
+  readonly property bool hasUnseen: loaded && attention === "news"
+  readonly property bool urgent: loaded && attention === "urgent"
 
   // Where the panel was, kept here because the panel is unloaded when it closes.
   // Sections are numbered as their keys are, from 1; Activity is 1 and Network 2.
@@ -73,7 +77,12 @@ Item {
   // The feed's cursor, to come back to from an author page.
   property int feedCursor: 0
 
-  onLookingChanged: if (looking) seenAt = newestAt
+  onLookingChanged: if (looking) markSeen()
+
+  function markSeen() {
+    if (attention === "news") attention = "none"
+    if (!markProc.running) markProc.running = true
+  }
 
   function refresh() {
     if (!fetchProc.running) fetchProc.running = true
@@ -113,7 +122,6 @@ Item {
     acts.sort(function(a, b) { return b.created_at - a.created_at })
     root.activityCursor = indexAfter(root.activity, acts, root.activityCursor)
 
-    var first = !root.loaded
     root.profiles = map
     root.followMap = followed
     root.selfPubkey = report.self || ""
@@ -127,8 +135,9 @@ Item {
     root.online = report.online === true
     root.relayName = report.name || ""
     root.loaded = true
-    // Nothing is "new" on the first load, nor while the panel is showing it.
-    if (first || root.looking) root.seenAt = root.newestAt
+    root.attention = report.attention === "news" || report.attention === "urgent" ? report.attention : "none"
+    // Nothing is "new" before the Observer has ever looked, nor while the panel is showing it.
+    if (report.looked_at === null || root.looking) root.markSeen()
   }
 
   // Where the event at `index` of `before` is in `after`; `index` if it is gone.
@@ -216,6 +225,11 @@ Item {
         }
       }
     }
+  }
+
+  Process {
+    id: markProc
+    command: [root.markScript]
   }
 
   Timer {
