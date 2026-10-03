@@ -1,0 +1,201 @@
+import QtQuick
+import qs.Commons
+import qs.Ui
+
+// The Activity section, where the panel opens: when the agent was last active,
+// and what it did, newest first. Enter or a click opens the event an entry
+// refers to, in the Network. Where the cursor is lives on the service.
+Item {
+  id: root
+
+  required property var service
+
+  readonly property color dim: Qt.darker(Color.foreground, 1.5)
+
+  readonly property bool known: service.selfPubkey !== ""
+  readonly property int cursor: Math.max(0, Math.min(service.activityCursor, service.activity.length - 1))
+  property bool scrollOnCursor: true
+
+  readonly property string lastActiveText: {
+    if (!service.loaded) return "Loading…"
+    if (!service.online) return "The relay is not running."
+    if (!known) return "The agent is not yet known."
+    if (service.lastActive <= 0) return "The agent has not been active yet."
+    return "Last active " + ago(service.lastActive)
+  }
+
+  function move(dy) {
+    root.scrollOnCursor = true
+    service.activityCursor = Math.max(0, Math.min(root.cursor + dy, service.activity.length - 1))
+    if (service.activityCursor === 0) scroll.contentY = 0
+  }
+
+  function activate() {
+    if (service.activity.length > 0) service.openActivity(service.activity[root.cursor])
+  }
+
+  // Nothing to go back to: the panel closes.
+  function back() { return false }
+  function key(text) {}
+
+  function ensureVisible(item) {
+    var top = item.mapToItem(column, 0, 0).y
+    var bottom = top + item.height
+    if (top < scroll.contentY) scroll.contentY = top
+    else if (bottom > scroll.contentY + scroll.height) scroll.contentY = bottom - scroll.height
+  }
+
+  function tagValue(event, name) {
+    var tags = event.tags || []
+    for (var i = 0; i < tags.length; i++)
+      if (tags[i][0] === name && tags[i].length > 1) return String(tags[i][1])
+    return ""
+  }
+
+  function verbOf(event) {
+    switch (event.kind) {
+    case 6:
+    case 16: return "Reposted"
+    case 7: return "Reacted"
+    case 1111: return "Commented"
+    case 30023: return "Published"
+    default: return event.refers_to ? "Replied" : "Posted"
+    }
+  }
+
+  function bodyOf(event) {
+    switch (event.kind) {
+    case 6:
+    case 16: return ""
+    case 7: return event.content === "+" || event.content === "" ? "󰋑" : (event.content === "-" ? "󰋕" : String(event.content))
+    case 30023: return tagValue(event, "title") || tagValue(event, "summary") || String(event.content || "")
+    default: return String(event.content || "").trim()
+    }
+  }
+
+  function ago(seconds) {
+    var delta = Math.max(0, Math.floor(clock.now / 1000) - seconds)
+    if (delta < 60) return "just now"
+    var unit = delta < 3600 ? [60, "minute"] : (delta < 86400 ? [3600, "hour"] : [86400, "day"])
+    var n = Math.floor(delta / unit[0])
+    return n + " " + unit[1] + (n === 1 ? "" : "s") + " ago"
+  }
+
+  Timer {
+    id: clock
+    property real now: Date.now()
+    interval: 30000
+    running: true
+    repeat: true
+    onTriggered: now = Date.now()
+  }
+
+  Flickable {
+    id: scroll
+    anchors.fill: parent
+    contentWidth: width
+    contentHeight: column.height
+    clip: true
+    boundsBehavior: Flickable.StopAtBounds
+
+    Column {
+      id: column
+      width: parent.width
+      spacing: Style.spacing.sm
+
+      Text {
+        width: parent.width
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        text: root.lastActiveText
+        color: root.service.lastActive > 0 ? Color.foreground : root.dim
+        font.family: Style.font.family
+        font.pixelSize: Style.font.body
+        font.italic: root.service.lastActive <= 0
+      }
+
+      Text {
+        visible: root.known && root.service.loaded && root.service.online && root.service.activity.length === 0
+        textFormat: Text.PlainText
+        text: "No activity yet."
+        color: root.dim
+        font.family: Style.font.family
+        font.pixelSize: Style.font.bodySmall
+        font.italic: true
+      }
+
+      PanelSeparator {}
+
+      Repeater {
+        model: root.service.activity
+
+        CursorSurface {
+          id: row
+          required property var modelData
+          required property int index
+
+          hasCursor: root.cursor === index
+          width: parent ? parent.width : 0
+          height: entry.implicitHeight + Style.spacing.lg * 2
+
+          onHasCursorChanged: if (hasCursor && root.scrollOnCursor) root.ensureVisible(row)
+
+          Column {
+            id: entry
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.margins: Style.spacing.lg
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Style.space(3)
+
+            Row {
+              spacing: Style.space(8)
+              Text {
+                textFormat: Text.PlainText
+                text: root.verbOf(row.modelData)
+                color: Color.accent
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+                font.bold: true
+              }
+              Text {
+                textFormat: Text.PlainText
+                text: root.ago(row.modelData.created_at)
+                color: root.dim
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+              }
+            }
+
+            Text {
+              visible: text !== ""
+              textFormat: Text.PlainText
+              width: parent.width
+              text: root.bodyOf(row.modelData)
+              color: Color.foreground
+              font.family: Style.font.family
+              font.pixelSize: Style.font.body
+              wrapMode: Text.Wrap
+              maximumLineCount: 4
+              elide: Text.ElideRight
+            }
+          }
+
+          MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onPositionChanged: {
+              root.scrollOnCursor = false
+              root.service.activityCursor = row.index
+            }
+            onClicked: {
+              root.service.activityCursor = row.index
+              root.activate()
+            }
+          }
+        }
+      }
+    }
+  }
+}
