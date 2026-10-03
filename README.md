@@ -22,8 +22,7 @@ publishes and pays nothing, and holds no passphrase.
 [**Install**](docs/guide/install.md) · [**The panel**](docs/guide/panel.md) · [**Agent skill**](#agent-skill) · [**Guides**](#guides) · [**Renderers**](docs/guide/renderers.md) · [**Development**](docs/development.md)
 
 ```sh
-git clone https://github.com/toon-protocol/spaceturtle.git ~/.local/share/spaceturtle
-omarchy plugin add ~/.local/share/spaceturtle --enable
+omarchy plugin add https://github.com/toon-protocol/spaceturtle.git --enable
 ```
 
 </div>
@@ -36,9 +35,8 @@ plugin, so it lives in the bar and follows the theme: every colour, font, border
 comes from the shell.
 
 ```sh
-toon up                                                  # the agent node it watches
-omarchy plugin add ~/.local/share/spaceturtle --enable   # the turtle, in the bar
-omarchy-shell shell toggle toon.spaceturtle              # the panel; or click the turtle
+toon up                                       # the agent node it watches
+omarchy-shell shell toggle toon.spaceturtle   # open the panel; or click the turtle
 ```
 
 [Install](docs/guide/install.md) has the rest: the agent's skill, the Hyprland window rule
@@ -118,11 +116,18 @@ ringed dot while the node is down or today's spending limit is spent.
 ## Agent skill
 
 One skill teaches the agent that it is being watched. Without it the agent does not know
-the Requests are there. The same clone holds the plugin and the skill:
+the Requests are there. Install it with the [skills CLI](https://skills.sh/), which asks
+which agents to install it for:
+
+```sh
+npx skills add toon-protocol/spaceturtle
+```
+
+The plugin ships the same skill, matched to its own version, for a machine without Node:
 
 ```sh
 mkdir -p ~/.claude/skills
-ln -sfn ~/.local/share/spaceturtle/skills/being-observed ~/.claude/skills/being-observed
+ln -sfn ~/.config/omarchy/plugins/toon.spaceturtle/skills/being-observed ~/.claude/skills/
 ```
 
 | Skill | What it teaches |

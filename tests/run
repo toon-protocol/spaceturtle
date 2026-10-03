@@ -623,5 +623,11 @@ check "persona Request: a line break in a field cannot pose as another field" ".
 count=$((count + 1))
 "$root/request" persona --bogus x 2>/dev/null && { echo "FAIL persona Request: an unknown argument was accepted"; fails=$((fails + 1)); }
 
+# --- the skill's front matter: `npx skills add` skips a skill whose description is not YAML
+desc=$(sed -n '2,/^---$/p' "$root/skills/being-observed/SKILL.md" | grep '^description:')
+count=$((count + 1))
+if [[ $desc == 'description: "'*'"' || ( -n $desc && $(grep -o ': ' <<<"$desc" | wc -l) -eq 1 ) ]]; then echo "ok   skill: the description is one YAML value"
+else echo "FAIL skill: the description holds an unquoted \": \", so the skills CLI skips the skill"; fails=$((fails + 1)); fi
+
 echo; echo "$count checks, $fails failed"
 [[ $fails -eq 0 ]]

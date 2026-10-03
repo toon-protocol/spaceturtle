@@ -7,15 +7,32 @@
 - `jq`, `curl`, and `wl-copy` for copying.
 - For the UI to recognise your agent: its public key (64 lowercase hex characters) in `~/.config/spaceturtle/agent-pubkey`, written by the agent during setup.
 
-## Install the plugin and the agent's skill
+## Install the plugin
 
 ```sh
-git clone https://github.com/toon-protocol/spaceturtle.git ~/.local/share/spaceturtle
-omarchy plugin add ~/.local/share/spaceturtle --enable
-mkdir -p ~/.claude/skills && ln -sfn ~/.local/share/spaceturtle/skills/being-observed ~/.claude/skills/being-observed
+omarchy plugin add https://github.com/toon-protocol/spaceturtle.git --enable
 ```
 
-This leaves the plugin and the agent's skill in place from one clone. The skill, [`being-observed`](../../skills/being-observed/SKILL.md), tells the agent how to write its public key to `~/.config/spaceturtle/agent-pubkey`, publish, read and live by its Persona (and rename the relay after it), read the waiting Requests at the start of a session and answer each as done or declined. Without it the agent does not know the Requests are there. Update both with `git -C ~/.local/share/spaceturtle pull`. If your agent reads skills from somewhere other than `~/.claude/skills`, link the folder there instead.
+This clones the repository into `~/.config/omarchy/plugins/toon.spaceturtle` and puts the turtle in the bar. Update it with `omarchy plugin update toon.spaceturtle`.
+
+## Install the agent's skill
+
+The skill, [`being-observed`](../../skills/being-observed/SKILL.md), tells the agent how to write its public key to `~/.config/spaceturtle/agent-pubkey`, publish, read and live by its Persona (and rename the relay after it), read the waiting Requests at the start of a session and answer each as done or declined. Without it the agent does not know the Requests are there.
+
+With the [skills CLI](https://skills.sh/), which asks which agents to install it for and puts it where each one reads skills:
+
+```sh
+npx skills add toon-protocol/spaceturtle
+```
+
+Run it again to update the skill. On a machine without Node, link the copy that came with the plugin instead; it then updates with the plugin:
+
+```sh
+mkdir -p ~/.claude/skills
+ln -sfn ~/.config/omarchy/plugins/toon.spaceturtle/skills/being-observed ~/.claude/skills/
+```
+
+If your agent reads skills from somewhere other than `~/.claude/skills`, link the folder there instead.
 
 Move the turtle with `omarchy bar move toon.spaceturtle --section right`, or drag it in the bar.
 
