@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs relay-events against a stub `toon` and `curl` in a temporary home.
+# Runs relay-events and mark-seen against a stub `toon` and `curl` in a temporary home.
 # Needs only bash and jq. Usage: tests/run
 set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -9,7 +9,7 @@ trap 'rm -rf "${tmps[@]}"' EXIT
 
 new_env() {
   tmp=$(mktemp -d); tmps+=("$tmp")
-  export HOME=$tmp/home SPACETURTLE_CONFIG_DIR=$tmp/config
+  export HOME=$tmp/home SPACETURTLE_CONFIG_DIR=$tmp/config SPACETURTLE_STATE_DIR=$tmp/state
   mkdir -p "$HOME/.local/bin" "$SPACETURTLE_CONFIG_DIR" "$tmp/bin"
   export SPACETURTLE_TOON=$tmp/bin/toon
   export STUB_DIR=$tmp/stub; mkdir -p "$STUB_DIR"
@@ -39,6 +39,7 @@ case "$1 $2" in
     f="$STUB_DIR/$1$2"; [[ -r $f ]] && cat "$f" || exit 1 ;;
   "event query")
     case "$*" in
+      *'"#p"'*) if [[ -r $STUB_DIR/mentions ]]; then cat "$STUB_DIR/mentions"; else echo '{"events":[]}'; fi ;;
       *'"authors"'*) if [[ -r $STUB_DIR/agent-events ]]; then cat "$STUB_DIR/agent-events"; else echo '{"events":[]}'; fi ;;
       *'"kinds":[0]'*) cat "$STUB_DIR/profiles" ;;
       *'"kinds":[3]'*) cat "$STUB_DIR/follows" ;;
@@ -61,7 +62,7 @@ check() { # name, jq expression that must be true of $out
   else echo "FAIL $1"; echo "     expression: $2"; echo "     document:   $out"; fails=$((fails + 1)); fi
 }
 
-OFFLINE='.online == false and .name == "" and .self == "" and .subscribers == null and .profiles == [] and .follows == [] and .activity == [] and .last_active == null and .events == [] and .node == {ilp_address: "", connector: ""}'
+OFFLINE='.online == false and .attention == "urgent" and .name == "" and .self == "" and .subscribers == null and .profiles == [] and .follows == [] and .activity == [] and .last_active == null and .events == [] and .node == {ilp_address: "", connector: ""}'
 pk=$(printf 'a%.0s' {1..64}); other=$(printf 'b%.0s' {1..64})
 
 # --- no toon
@@ -120,6 +121,45 @@ rm "$STUB_DIR/nip11"
 out=$("$root/relay-events")
 check "events: without NIP-11 the feed still works" '.online == true and (.events | length) == 2 and .node.ilp_address == ""'
 ! grep -q "wallet" "$STUB_DIR/calls" || { echo "FAIL ran a wallet command"; fails=$((fails + 1)); }
+
+# --- attention
+new_env; install_toon; running_relay
+echo "$pk" > "$SPACETURTLE_CONFIG_DIR/agent-pubkey"
+echo '{"events":[]}' > "$STUB_DIR/profiles"; echo '{"events":[]}' > "$STUB_DIR/follows"
+note() { echo "{\"id\":\"$1\",\"pubkey\":\"$2\",\"kind\":1,\"created_at\":$3,\"tags\":$4,\"content\":\"x\"}"; }
+echo "{\"events\":[$(note s1 "$other" 50 '[]')]}" > "$STUB_DIR/events"
+out=$("$root/relay-events")
+check "attention: never looked, nothing to compare with" '.attention == "none" and .looked_at == null'
+mkdir -p "$SPACETURTLE_STATE_DIR"; echo 100 > "$SPACETURTLE_STATE_DIR/last-looked"
+out=$("$root/relay-events")
+check "attention: nothing new" '.attention == "none" and .looked_at == 100'
+echo "{\"events\":[$(note s1 "$other" 150 '[]')]}" > "$STUB_DIR/events"
+out=$("$root/relay-events")
+check "attention: a stranger's note stays none" '.attention == "none"'
+echo "{\"events\":[$(note s1 "$other" 150 "[[\"p\",\"$other\"]]")]}" > "$STUB_DIR/events"
+out=$("$root/relay-events")
+check "attention: a note tagging someone else stays none" '.attention == "none"'
+echo "{\"events\":[$(note m1 "$other" 150 "[[\"p\",\"$pk\"]]")]}" > "$STUB_DIR/events"
+out=$("$root/relay-events")
+check "attention: a new event tagging the agent is news" '.attention == "news"'
+echo "{\"events\":[$(note m1 "$other" 90 "[[\"p\",\"$pk\"]]")]}" > "$STUB_DIR/events"
+out=$("$root/relay-events")
+check "attention: an event tagging the agent from before looking is none" '.attention == "none"'
+echo "{\"events\":[$(note m2 "$other" 150 "[[\"p\",\"$pk\"]]")]}" > "$STUB_DIR/mentions"
+out=$("$root/relay-events")
+check "attention: a new event tagging the agent outside the feed's limit is news" '.attention == "news"'
+rm "$STUB_DIR/mentions"
+echo "{\"events\":[$(note a1 "$pk" 150 '[]')]}" > "$STUB_DIR/events"
+out=$("$root/relay-events")
+check "attention: a new Activity entry is news" '.attention == "news"'
+"$root/mark-seen"
+out=$("$root/relay-events")
+check "attention: mark-seen returns news to none" '.attention == "none" and (.looked_at | . > 150)'
+echo "{\"events\":[$(note a1 "$pk" 150 '[]')]}" > "$STUB_DIR/events"
+echo '{"agent_node":{"toon_apps":[{"apps":[{"name":"relay","running":false}]}]}}' > "$STUB_DIR/status"
+out=$("$root/relay-events")
+check "attention: node down is urgent, and keeps when the Observer looked" '.attention == "urgent" and .looked_at > 150'
+[[ $(ls "$SPACETURTLE_STATE_DIR") == last-looked ]] || { echo "FAIL mark-seen: left stray files"; fails=$((fails + 1)); }
 
 # --- the node's state
 new_env; install_toon

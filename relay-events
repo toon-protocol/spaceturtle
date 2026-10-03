@@ -1,14 +1,17 @@
 #!/bin/bash
 # Print what can be observed of this agent node as one JSON document:
 # {"online", "name", "self", "node", "subscribers", "state", "profiles",
-# "follows", "activity", "last_active", "events"}. "activity" is what the agent
-# identity signed, newest first, each entry with the id of the event it refers
-# to ("refers_to", or null); "last_active" is its newest created_at, or null;
-# "events" is the rest of the feed, without the agent's. Read-only: nothing
-# here opens the keystore, spends, changes state or publishes. Only free `toon`
-# commands are run: status, relay config, peer list, channel list, route list,
-# limit show, relay subscriptions and logs. Wallet balances are never read
-# (they need the passphrase, ADR 0001).
+# "follows", "activity", "last_active", "events", "attention", "looked_at"}.
+# "activity" is what the agent identity signed, newest first, each entry with
+# the id of the event it refers to ("refers_to", or null); "last_active" is its
+# newest created_at, or null; "events" is the rest of the feed, without the
+# agent's. "attention" is "none", "news" (an Activity entry, or an event tagging
+# the agent, is newer than the last time the Observer looked) or "urgent" (the
+# node is not running); "looked_at" is when the Observer last looked, or null.
+# Read-only: nothing here opens the keystore, spends, changes state or
+# publishes. Only free `toon` commands are run: status, relay config, peer list,
+# channel list, route list, limit show, relay subscriptions and logs. Wallet
+# balances are never read (they need the passphrase, ADR 0001).
 #
 # "state" is the node as `toon` reports it, or null when there is no agent node.
 # Each group in it (status, relay, peers, channels, routes, limits,
@@ -20,18 +23,28 @@
 #   SPACETURTLE_TOON        the toon command (default: toon)
 #   SPACETURTLE_CONFIG_DIR  where the agent writes its public key, in the file
 #                           `agent-pubkey` (default: ~/.config/spaceturtle)
+#   SPACETURTLE_STATE_DIR   where `mark-seen` records that the Observer looked
+#                           (default: ~/.local/state/spaceturtle)
 #   HOME                    ~/.local/bin is put on PATH
 set -uo pipefail
 PATH="$HOME/.local/bin:$PATH"
 
 toon_cmd=${SPACETURTLE_TOON:-toon}
 config_dir=${SPACETURTLE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/spaceturtle}
+state_dir=${SPACETURTLE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/spaceturtle}
 
 limit=${1:-40}
 [[ $limit =~ ^[0-9]+$ ]] || limit=40
 
+# When the Observer last looked, from the file `mark-seen` writes.
+looked_at=
+if [[ -r $state_dir/last-looked ]]; then
+  read -r looked_at < "$state_dir/last-looked" || true
+  [[ $looked_at =~ ^[0-9]+$ ]] || looked_at=
+fi
+
 offline() {
-  printf '{"online":false,"name":"","self":"","node":{"ilp_address":"","connector":""},"subscribers":null,"state":%s,"profiles":[],"follows":[],"activity":[],"last_active":null,"events":[]}\n' "${state:-null}"
+  printf '{"online":false,"name":"","self":"","node":{"ilp_address":"","connector":""},"subscribers":null,"state":%s,"profiles":[],"follows":[],"activity":[],"last_active":null,"events":[],"attention":"urgent","looked_at":%s}\n' "${state:-null}" "${looked_at:-null}"
   exit 0
 }
 
@@ -173,6 +186,10 @@ fi
 agent_events='[]'
 [[ -n $self ]] && agent_events=$(relay_query "{\"authors\":[\"$self\"],\"limit\":$limit}" | with_parts)
 
+# Events tagging the agent identity, asked for by tag for the same reason.
+mention_events='[]'
+[[ -n $self ]] && mention_events=$(relay_query "{\"#p\":[\"$self\"],\"limit\":$limit}")
+
 # The node's ILP address and connector address, from the relay's NIP-11 document.
 node=
 if command -v curl >/dev/null; then
@@ -187,7 +204,8 @@ jq -cn --arg name "${name:-}" --arg self "$self" \
   --argjson node "${node:-null}" \
   --argjson subscribers "${subscribers:-null}" --argjson state "$state" --argjson events "${events:-[]}" \
   --argjson profiles "${profiles:-[]}" --argjson follows "${follows:-[]}" \
-  --argjson agent "${agent_events:-[]}" \
+  --argjson agent "${agent_events:-[]}" --argjson looked "${looked_at:-null}" \
+  --argjson mentioned "${mention_events:-[]}" \
   '(if $self == "" then []
     else ([$agent[], $events[]] | map(select(.pubkey == $self)) | unique_by(.id)
       | sort_by(-.created_at)
@@ -195,8 +213,15 @@ jq -cn --arg name "${name:-}" --arg self "$self" \
       | map(. + {refers_to: ([.tags[]? | select(.[0] == "e" and (.[1] | strings))]
           | ((map(select(.[3]? == "reply")) | first) // last) | .[1]? // null)}))
     end) as $activity
+  | ([$mentioned[], $events[] | select(.pubkey != $self and $self != ""
+      and any(.tags[]?; .[0] == "p" and .[1] == $self))]) as $mentions
   | {online: true, name: $name, self: $self,
     activity: $activity, last_active: ($activity[0].created_at? // null),
     node: ($node // {ilp_address: "", connector: ""}),
     subscribers: $subscribers, state: $state, profiles: $profiles, follows: $follows,
-    events: ($events | map(select(.pubkey != $self)))}'
+    events: ($events | map(select(.pubkey != $self))),
+    looked_at: $looked,
+    # Without a record of looking there is nothing to compare with.
+    attention: (if $looked == null then "none"
+      elif any(($activity + $mentions)[]; .created_at > $looked) then "news"
+      else "none" end)}'
