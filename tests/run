@@ -50,6 +50,7 @@ case "$1 $2" in
         elif [[ -r $STUB_DIR/by-id ]]; then cat "$STUB_DIR/by-id"; else echo '{"events":[]}'; fi ;;
       *'"#e"'*) if [[ -r $STUB_DIR/replies ]]; then cat "$STUB_DIR/replies"; else echo '{"events":[]}'; fi ;;
       *'"#p"'*) if [[ -r $STUB_DIR/mentions ]]; then cat "$STUB_DIR/mentions"; else echo '{"events":[]}'; fi ;;
+      *'"kinds":[31517]'*) if [[ -r $STUB_DIR/renderers ]]; then cat "$STUB_DIR/renderers"; else echo '{"events":[]}'; fi ;;
       *'"kinds":[3],"authors"'*) if [[ -r $STUB_DIR/own-follows ]]; then cat "$STUB_DIR/own-follows"; else echo '{"events":[]}'; fi ;;
       *'"authors"'*) if [[ -r $STUB_DIR/agent-events ]]; then cat "$STUB_DIR/agent-events"; else echo '{"events":[]}'; fi ;;
       *'"kinds":[0]'*) cat "$STUB_DIR/profiles" ;;
@@ -325,7 +326,7 @@ check "parts 30817: NIP draft" "$(P 30817 '.label == "drafted" and .title == "Dr
 check "parts unknown with alt: alt, kind, tags, content" "$(P 31337 '.label == "kind 31337" and .title == "A thing" and .summary == "alt A thing, x y z" and .body == "raw"')"
 check "parts unknown without alt: kind, content" "$(P 31338 '.label == "kind 31338" and .title == "" and .summary == "" and .body == "raw2"')"
 check "parts unknown without alt, with tags: kind, tags, content" "$(P 31339 '.label == "kind 31339" and .title == "" and .summary == "k v, e '"$other"'" and .body == "raw3"')"
-check "parts: every event has all the parts" '[.events[].parts | keys == ["body","label","links","media","ref","summary","title"]] | all'
+check "parts: every event has all the parts" '[.events[].parts | keys == ["actions","badge","body","fields","items","label","links","media","progress","ref","summary","title"]] | all'
 
 # --- media: what an event shows or plays
 new_env; install_toon; running_relay
@@ -346,7 +347,7 @@ check "media: the addresses in the text that end as a picture, a video or a soun
   {url:"https://a.example/clip.mp4",type:"video",moving:false},{url:"https://a.example/song.ogg",type:"audio",moving:false}]')"
 check "media: what an imeta tag says it is, http(s) only, once" "$(P 20 '[.media[] | .url + " " + .type] == ["https://a.example/blob image","https://a.example/clip video","https://a.example/three.webp image"]')"
 check "media: at most four, a malformed imeta tag costs nothing" "$(P 21 '[.media[].url] == ["https://a.example/1.png","https://a.example/2.png","https://a.example/3.png","https://a.example/4.png"]')"
-check "media: a stored picture is shown from its own bytes" '.events[] | select(.id == "k5094") | .parts | . == {label:"stored a file", title:"", summary:"image/png, 5 bytes", body:"", links:[], media:[{url:"data:image/png;base64,aGVsbG8=",type:"image",moving:false}], ref:""}'
+check "media: a stored picture is shown from its own bytes" '.events[] | select(.id == "k5094") | .parts | . == {label:"stored a file", title:"", summary:"image/png, 5 bytes", body:"", links:[], media:[{url:"data:image/png;base64,aGVsbG8=",type:"image",moving:false}], ref:"", badge:"", fields:[], items:[], progress:null, actions:[]}'
 check "media: a stored file that is not base64, or not a picture, shows none" '[.events[] | select(.id == "k5094x" or .id == "k5094y") | .parts.media] == [[],[]]'
 
 # --- malformed tags and content cost only the odd part, never the feed
@@ -418,14 +419,14 @@ echo '{"kind":31990,"label":"second"}' > "$rd/zz-duplicate.json"                
 } > "$STUB_DIR/events"
 out=$("$root/relay-events")
 P() { echo ".events[] | select(.kind == $1) | .parts | $2"; }
-check "renderer: a valid description resolves label, title, summary, body, links and the event referred to" "$(P 31990 '. == {label:"NIP draft", title:"My NIP", summary:"Sum", body:"the draft", links:["https://a.example/x"], media:[], ref:"'"$other"'"}')"
+check "renderer: a valid description resolves label, title, summary, body, links and the event referred to" "$(P 31990 '. == {label:"NIP draft", title:"My NIP", summary:"Sum", body:"the draft", links:["https://a.example/x"], media:[], ref:"'"$other"'", badge:"", fields:[], items:[], progress:null, actions:[]}')"
 for k in 31991 31992 31993 31994 31997 31998 31999; do
   check "renderer: an unusable description for $k falls back" "$(P $k '.label == "kind '$k'" and .body == "c'$((k - 31990))'"')"
 done
 check "renderer: a description for a built-in kind is ignored" "$(P 1 '.label == "" and .body == "plain note"')"
 check "renderer: a description for a built-in long-form post is ignored" "$(P 30023 '.label == "published" and .title == "Real title"')"
-check "renderer: an event lacking every tag its description names falls back" "$(P 31995 '. == {label:"kind 31995", title:"", summary:"x y", body:"c5", links:[], media:[], ref:""}')"
-check "renderer: a tag the event lacks leaves that part empty, the rest stays" "$(P 31996 '. == {label:"Partial", title:"T6", summary:"", body:"", links:[], media:[], ref:""}')"
+check "renderer: an event lacking every tag its description names falls back" "$(P 31995 '. == {label:"kind 31995", title:"", summary:"x y", body:"c5", links:[], media:[], ref:"", badge:"", fields:[], items:[], progress:null, actions:[]}')"
+check "renderer: a tag the event lacks leaves that part empty, the rest stays" "$(P 31996 '. == {label:"Partial", title:"T6", summary:"", body:"", links:[], media:[], ref:"", badge:"", fields:[], items:[], progress:null, actions:[]}')"
 check "renderer: the document is whole" '.online == true and (.events | length) == 12'
 [[ ! -e pwned && ! -e $tmp/pwned ]] || { echo "FAIL renderer: a description was evaluated"; fails=$((fails + 1)); }
 # A new description takes effect on the next run, with nothing restarted; removing it takes it away.
@@ -762,6 +763,63 @@ out=$("$root/relay-events")
 check "persona Request: a line break in a field cannot pose as another field" ".requests[] | select(.id == \"$d\") | (.text | split(\"\\n\") | length) == 1"
 count=$((count + 1))
 "$root/request" persona --bogus x 2>/dev/null && { echo "FAIL persona Request: an unknown argument was accepted"; fails=$((fails + 1)); }
+
+# --- Renderers that travel with a kind: kind 31517 events of the agent and of whom it follows
+new_env; install_toon; running_relay
+echo '{"events":[]}' | tee "$STUB_DIR/profiles" > "$STUB_DIR/follows"
+echo "$pk" > "$SPACETURTLE_CONFIG_DIR/agent-pubkey"
+stranger=$(printf 'c%.0s' {1..64})
+echo "{\"events\":[{\"id\":\"f0\",\"pubkey\":\"$pk\",\"kind\":3,\"created_at\":3,\"tags\":[[\"p\",\"$other\"]],\"content\":\"\"}]}" > "$STUB_DIR/own-follows"
+rev() { jq -cn --arg id "$1" --arg pk "$2" --argjson at "$3" --arg d "$4" --arg c "$5" '{id:$id,pubkey:$pk,kind:31517,created_at:$at,tags:[["d",$d]],content:$c}'; }
+rich='{"kind":32001,"label":"offered a task","title":{"tag":"title"},"badge":{"tag":"status"},
+  "fields":[{"label":"Reward","tag":"reward"},{"label":"Due","tag":"due"}],"items":{"tag":"step"},
+  "progress":{"value":{"tag":"done"},"max":{"tag":"steps"}},"media":[{"tag":"cover","type":"image"},{"tag":"clip"}],
+  "actions":[{"label":"Take it","request":"Take this task if it suits you"}]}'
+{
+  echo '{"events":['
+  rev r1 "$other" 5 32001 "$rich"; echo ,
+  rev r2 "$other" 9 32002 '{"kind":32002,"label":"followed, newer"}'; echo ,
+  rev r3 "$pk" 1 32002 '{"kind":32002,"label":"the agent, older","title":{"content":true}}'; echo ,
+  rev r4 "$stranger" 99 32003 '{"kind":32003,"label":"a stranger","title":{"content":true}}'; echo ,
+  rev r5 "$other" 5 32004 '{"kind":32005,"label":"names another kind","title":{"content":true}}'; echo ,
+  rev r6 "$other" 5 32006 'not json'; echo ,
+  rev r7 "$other" 5 32007 '{"kind":32007,"label":"in a file too","title":{"content":true}}'; echo ,
+  rev r8 "$other" 5 32008 '{"kind":32008,"title":{"content":true},"actions":[{"label":"Run","request":"x","exec":"touch pwned"}]}'
+  echo ']}'
+} > "$STUB_DIR/renderers"
+mkdir -p "$SPACETURTLE_CONFIG_DIR/renderers"
+echo '{"kind":32007,"label":"the file","title":{"content":true}}' > "$SPACETURTLE_CONFIG_DIR/renderers/32007.json"
+{
+  echo '{"events":['
+  ev 32001 '' '[["title","Chart the reef"],["status","open"],["reward","500"],["step","Swim out"],["step","Draw it"],["done","1"],["steps","2"],["cover","https://a.example/cover"],["cover","file:///etc/passwd"],["clip","https://a.example/c.mp4"],["clip","https://a.example/page"]]'; echo ,
+  ev 32002 'c2' '[]'; echo ,
+  ev 32003 'c3' '[]'; echo ,
+  ev 32004 'c4' '[]'; echo ,
+  ev 32005 'c5' '[]'; echo ,
+  ev 32006 'c6' '[]'; echo ,
+  ev 32007 'c7' '[]'; echo ,
+  ev 32008 'c8' '[]'
+  echo ']}'
+} > "$STUB_DIR/events"
+out=$("$root/relay-events")
+P() { echo "(.activity + .events)[] | select(.kind == $1) | .parts | $2"; }
+check "published: a followed author's Renderer lays out its kind, with badge, fields, items, progress, media and actions" "$(P 32001 '. == {label:"offered a task", title:"Chart the reef", summary:"", body:"", links:[], ref:"", badge:"open",
+  fields:[{label:"Reward",value:"500"}], items:["Swim out","Draw it"], progress:{value:1,max:2},
+  media:[{url:"https://a.example/cover",type:"image",moving:false},{url:"https://a.example/c.mp4",type:"video",moving:false}],
+  actions:[{label:"Take it",request:"Take this task if it suits you"}]}')"
+check "published: the agent's own Renderer wins a followed author's, even an older one" "$(P 32002 '.label == "the agent, older" and .title == "c2"')"
+check "published: a stranger's Renderer is not read" "$(P 32003 '.label == "kind 32003"')"
+check "published: a Renderer whose content names another kind than its d tag is ignored" '[(.activity + .events)[] | select(.kind == 32004 or .kind == 32005) | .parts.label] | sort == ["kind 32004","kind 32005"]'
+check "published: content that is not JSON is ignored" "$(P 32006 '.label == "kind 32006"')"
+check "published: a file wins a published Renderer" "$(P 32007 '.label == "the file"')"
+check "published: an action with anything but a label and a request is ignored, with its description" "$(P 32008 '.label == "kind 32008" and .actions == []')"
+grep -q '"kinds":\[31517\],"authors":\["'"$pk"'","'"$other"'"\]' "$STUB_DIR/calls" && echo "ok   published: asked of the agent and of whom it follows only" || { echo "FAIL published: the Renderer query names other authors"; fails=$((fails + 1)); }
+count=$((count + 1))
+rm "$SPACETURTLE_CONFIG_DIR/agent-pubkey"; : > "$STUB_DIR/calls"
+out=$("$root/relay-events")
+! grep -q '31517' "$STUB_DIR/calls" && echo "ok   published: with no agent identity, none is asked for" || { echo "FAIL published: Renderers asked for with no agent identity"; fails=$((fails + 1)); }
+count=$((count + 1))
+[[ ! -e pwned ]] || { echo "FAIL published: a command ran"; fails=$((fails + 1)); }
 
 # --- the skill's front matter: `npx skills add` skips a skill whose description is not YAML
 desc=$(sed -n '2,/^---$/p' "$root/skills/being-observed/SKILL.md" | grep '^description:')

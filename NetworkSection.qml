@@ -68,8 +68,10 @@ Item {
   readonly property bool typing: composeInput.activeFocus
   signal leaveInput()
 
-  readonly property string composeText: composeKind === "" ? "" : (service.requestVerbs[composeKind] + " "
-    + (composeEvent !== "" ? "this note" : service.nameOf(composePubkey)) + " — add a line of your own, or none")
+  readonly property string composeText: composeKind === "" ? ""
+    : (composeKind === "free" ? "Ask the agent about this event — change the words, or send them as they are"
+    : (service.requestVerbs[composeKind] + " "
+      + (composeEvent !== "" ? "this note" : service.nameOf(composePubkey)) + " — add a line of your own, or none"))
 
   // Starts a Request, unless the same kind is already waiting on the same subject.
   function compose(kind, pubkey, event) {
@@ -86,7 +88,20 @@ Item {
     composeInput.forceActiveFocus()
   }
 
+  // An action a Renderer offers: a Request in free words about the event, its
+  // words the action's own until the Observer changes them. Nothing is written
+  // before Enter.
+  function composeAction(event, action) {
+    root.notice = ""
+    root.composeKind = "free"
+    root.composePubkey = event.pubkey
+    root.composeEvent = event.id
+    composeInput.text = String(action.request)
+    composeInput.forceActiveFocus()
+  }
+
   function sendCompose() {
+    if (root.composeKind === "free" && composeInput.text.trim() === "") { cancelCompose(); return }
     service.submitAbout(root.composeKind, root.composePubkey, root.composeEvent, composeInput.text)
     cancelCompose()
   }
@@ -181,6 +196,8 @@ Item {
     else if ((text === "y" || text === "c") && detail) root.copy(detail)
     else if ((text === "y" || text === "c") && root.cursorEvent) root.copyEvent(root.cursorEvent)
     else if (text === "u" && root.cursorEvent) root.copyFromEvent(root.cursorEvent, service.firstMedia(root.cursorEvent))
+    else if (text === "g" && root.cursorEvent && (partsOf(root.cursorEvent).actions || []).length > 0)
+      root.composeAction(root.cursorEvent, partsOf(root.cursorEvent).actions[0])
     else if (text === "p" && root.cursorEvent && root.cursorItem && root.cursorItem.media) root.cursorItem.media.toggle()
     else if (text === "a" && root.cursorEvent && !root.authorPage) service.openAuthor(root.cursorEvent.pubkey)
     else if (text === "f" && root.authorPage && !root.viewingSelf)
@@ -821,6 +838,17 @@ Item {
         // In a thread the event under the cursor is read in full; the page scrolls within it.
         maximumLineCount: root.threadView && row.hasCursor ? 100000 : (root.authorPage ? 12 : 4)
         elide: Text.ElideRight
+      }
+
+      EventExtras {
+        width: parent.width
+        parts: root.partsOf(row.modelData)
+        offersActions: true
+        dim: root.dim
+        onActed: function(action) {
+          root.hover(row.target)
+          root.composeAction(row.modelData, action)
+        }
       }
 
       MediaStrip {

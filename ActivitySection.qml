@@ -242,6 +242,12 @@ Item {
               elide: Text.ElideRight
             }
 
+            EventExtras {
+              width: parent.width
+              parts: root.partsOf(row.modelData)
+              dim: root.dim
+            }
+
             MediaStrip {
               id: media
               width: parent.width

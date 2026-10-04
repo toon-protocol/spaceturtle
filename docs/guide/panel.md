@@ -221,6 +221,7 @@ Other Network traffic never lights the dot. Every monitor's bar shows the same s
 | `y` or `c`, right click | Copy the text of the event under the cursor, or the value under it on an author page |
 | `u`, or a click on a picture | Copy the address of the picture, video or sound |
 | `p`, or a click on a video or a sound | Play or pause it |
+| `g`, or a click on an action | Ask the agent what a Renderer's action offers, about the event under the cursor |
 | `o` | Open the web address under the cursor in the browser |
 
 ### Ask the agent

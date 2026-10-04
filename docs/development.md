@@ -20,7 +20,7 @@ without an agent node.
 | `BarWidget.qml` | The turtle in the bar |
 | `Panel.qml` | The floating window, its keys and its sections |
 | `SectionTabs.qml`, `ActivitySection.qml`, `NetworkSection.qml`, `MessagesSection.qml`, `RequestsSection.qml`, `NodeSection.qml`, `PersonaSection.qml` | The section tabs; what the agent did; the feed and the author pages; the agent's private conversations; the Requests; the node's state; who this Install is |
-| `Avatar.qml`, `MediaStrip.qml`, `TurtleIcon.qml` | Profile picture, an event's pictures, videos and sounds, and the icon |
+| `Avatar.qml`, `MediaStrip.qml`, `EventExtras.qml`, `TurtleIcon.qml` | Profile picture; an event's pictures, videos and sounds; the badge, fields, list, progress and actions a Renderer lays out; the icon |
 | `mark-seen` | Records that you looked (opening the panel runs it), in `~/.local/state/spaceturtle/last-looked` |
 | `relay-events` | Prints the agent's activity, the relay's other events, each event with its resolved parts (label, title, summary, body, links, ref) and what it refers to and what refers to it, the events a thread needs beyond the limit, profiles, the Persona (the agent identity's newest profile with a name, or `null`), follow lists, node addresses, the node's state, the Requests and the agent's private messages (grouped into conversations, or why they cannot be read) as one JSON document, with its `attention` state (`none`, `news`, `urgent`) |
 | `skills/being-observed/SKILL.md` | The agent's skill: the public key file, the Persona (creating, reading and living by it, renaming the relay), reading the Requests, answering them, writing a Renderer for a kind |

@@ -46,7 +46,8 @@ case "${1:-} ${2:-}" in
           and ($f.ids == null or (.id as $i | $f.ids | index($i) != null))
           and ($f["#e"] == null or (tagged("e") - (tagged("e") - $f["#e"]) | length > 0))
           and ($f["#p"] == null or (tagged("p") - (tagged("p") - $f["#p"]) | length > 0)))
-        | . + {created_at: (.created_at // ($now - .ago)), content: (.content | gsub("AVATARS"; $avatars))} | del(.ago)]
+        | . + {created_at: (.created_at // ($now - .ago)), content: (.content | gsub("AVATARS"; $avatars)),
+            tags: (.tags | map(map(gsub("AVATARS"; $avatars))))} | del(.ago)]
         | sort_by(-.created_at) | .[0:($f.limit // 500)]}' "$here/events.json" ;;
   *) exit 1 ;;
 esac

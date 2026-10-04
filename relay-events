@@ -232,34 +232,86 @@ state=null
 #            at most 262144 base64 characters: its own bytes, as a `data:`
 #            address that relay-events builds and an event cannot supply.
 #   ref      the id of the event this one refers to, or ""
+# and, from a description only (empty for a built-in kind and the fallback):
+#   badge    one short word beside the label, or ""
+#   fields   labelled values, [{label, value}]
+#   items    a list of lines
+#   progress {value, max}, or null
+#   actions  what the Observer can ask the agent about the event, [{label,
+#            request}]: the panel writes `request` as a Request, and does
+#            nothing else with it
 # Renderers the agent wrote (ADR 0002): one JSON file per kind in
 # $config_dir/renderers/, read afresh each run so a new one shows on the next
 # refresh. Each is data, never evaluated: a description names where a part comes
-# from, {"tag": NAME} or {"content": true}, and nothing else. One that is
+# from, {"tag": NAME} or {"content": true}, and nothing else; the layout parts
+# (badge, fields, items, progress, media, actions) are described the same way. One that is
 # malformed is ignored and its events fall back; one for a kind with a built-in
 # Renderer is never reached, since `parts` tries the built-in ones first. The
 # result maps a kind to its normalised description; the first by file name (in
 # byte order) wins a kind.
+# What makes a description usable, and its normalised form, as {key: KIND,
+# value: DESCRIPTION}: shared by the files and the published Renderers.
+description=$(cat <<'JQ'
+def source: type == "object" and (
+  (keys == ["tag"] and (.tag | type == "string" and length > 0)) or (keys == ["content"] and .content == true));
+def norm: if . == null then null elif has("tag") then {tag} else {content: true} end;
+def tagref: type == "object" and keys == ["tag"] and (.tag | type == "string" and length > 0);
+def short($n): type == "string" and length > 0 and length <= $n;
+def description:
+  select(type == "object"
+    and (.kind | type == "number" and . >= 0 and . == floor)
+    and (.label == null or (.label | type == "string"))
+    and ([.title, .summary, .body, .refers_to, .badge] | all(. == null or source))
+    and (.links == null or (.links | type == "array" and all(tagref)))
+    and (.items == null or (.items | tagref))
+    and (.fields == null or (.fields | type == "array" and length <= 8
+      and all(type == "object" and keys == ["label", "tag"] and (.label | short(24)) and (.tag | type == "string" and length > 0))))
+    and (.progress == null or (.progress | type == "object" and keys == ["max", "value"] and (.value | tagref) and (.max | tagref)))
+    and (.media == null or (.media | type == "array" and length <= 4
+      and all(type == "object" and (.tag | type == "string" and length > 0)
+        and (keys == ["tag"] or (keys == ["tag", "type"] and (.type == "image" or .type == "video" or .type == "audio"))))))
+    and (.actions == null or (.actions | type == "array" and length <= 3
+      and all(type == "object" and keys == ["label", "request"] and (.label | short(24)) and (.request | short(280))))))
+  | {key: (.kind | tostring), value: {
+      label: (.label // ("kind " + (.kind | tostring))),
+      title: (.title | norm), summary: (.summary | norm), body: (.body | norm), refers_to: (.refers_to | norm),
+      badge: (.badge | norm),
+      links: [(.links // [])[] | {tag}],
+      items: (if .items == null then null else {tag: .items.tag} end),
+      fields: [(.fields // [])[] | {label, tag}],
+      progress: (if .progress == null then null else {value: {tag: .progress.value.tag}, max: {tag: .progress.max.tag}} end),
+      media: [(.media // [])[] | {tag, type: (.type // null)}],
+      actions: [(.actions // [])[] | {label, request}]}};
+JQ
+)
+
 read_custom_renderers() {
   local file LC_COLLATE=C
   [[ -d $config_dir/renderers ]] || { echo '{}'; return; }
   for file in "$config_dir"/renderers/*.json; do
     [[ -f $file ]] || continue
-    jq -sce '
-      def source: type == "object" and (
-        (keys == ["tag"] and (.tag | type == "string" and length > 0)) or (keys == ["content"] and .content == true));
-      def norm: if . == null then null elif has("tag") then {tag} else {content: true} end;
-      select(length == 1) | .[0]
-      | select(type == "object"
-        and (.kind | type == "number" and . >= 0 and . == floor)
-        and (.label == null or (.label | type == "string"))
-        and ([.title, .summary, .body, .refers_to] | all(. == null or source))
-        and (.links == null or (.links | type == "array" and all(type == "object" and keys == ["tag"] and (.tag | type == "string" and length > 0)))))
-      | {key: (.kind | tostring), value: {
-          label: (.label // ("kind " + (.kind | tostring))),
-          title: (.title | norm), summary: (.summary | norm), body: (.body | norm), refers_to: (.refers_to | norm),
-          links: [(.links // [])[] | {tag}]}}' "$file" 2>/dev/null || true
+    jq -sce "$description"' select(length == 1) | .[0] | description' "$file" 2>/dev/null || true
   done | jq -sc 'reduce .[] as $e ({}; if has($e.key) then . else . + {($e.key): $e.value} end)' 2>/dev/null || echo '{}'
+}
+
+# Renderers that travel with a kind: a kind 31517 event describes the kind its
+# "d" tag names, its content the same description a file holds. Only those of
+# the agent and of whom it follows are read, so a stranger cannot change how a
+# kind looks. A file wins a kind, then the agent's own description, then the
+# newest of a followed author's.
+renderer_kind=31517
+published_renderers() {
+  local authors=$1
+  [[ $authors == '[]' || -z $authors ]] && { echo '{}'; return; }
+  relay_query "{\"kinds\":[$renderer_kind],\"authors\":$authors,\"limit\":500}" |
+    jq -c --arg self "$self" --argjson authors "$authors" "$description"'
+      [.[] | select(.kind == '"$renderer_kind"' and (.pubkey as $p | $authors | index($p) != null)) | . as $e
+        | ([($e.tags | arrays // [])[] | arrays | select(.[0] == "d") | .[1] | strings] | first // "") as $d
+        | ($e.content | strings | try fromjson catch null)
+        | select(type == "object" and (.kind | tostring) == $d) | description
+        | . + {own: ($e.pubkey == $self), at: ($e.created_at | numbers // 0)}]
+      | sort_by(if .own then 0 else 1 end, -.at)
+      | reduce .[] as $e ({}; if has($e.key) then . else . + {($e.key): $e.value} end)' 2>/dev/null || echo '{}'
 }
 custom_renderers=$(read_custom_renderers)
 
@@ -284,7 +336,8 @@ def imeta_media: [tags | select(.[0] == "imeta") | [.[1:][] | strings] as $f
   | medium($m; $u)];
 def media: (imeta_media + [text | scan("https?://\\S+") | medium(""; .)])
   | reduce .[] as $m ([]; if any(.[]; .url == $m.url) then . else . + [$m] end) | .[0:4];
-def base: {label: "", title: "", summary: "", body: text, links: links, media: media, ref: tag("e")};
+def base: {label: "", title: "", summary: "", body: text, links: links, media: media, ref: tag("e"),
+  badge: "", fields: [], items: [], progress: null, actions: []};
 def meta: (.content | strings | try fromjson catch null) | if type == "object" then . else {} end;
 def fallback:
   base + {label: ("kind " + (.kind | tostring)),
@@ -293,10 +346,21 @@ def fallback:
 def from($s): if $s == null then "" elif $s.tag != null then tag($s.tag) else text end;
 def described($d): {label: $d.label, title: from($d.title), summary: from($d.summary), body: from($d.body),
   links: ([$d.links[] as $l | tags | select(.[0] == $l.tag and length > 1) | .[1] | strings | select(test("^https?://"))] | unique),
-  media: media, ref: from($d.refers_to)};
+  media: ((media + [$d.media[] as $m | tags | select(.[0] == $m.tag and length > 1) | .[1] | strings | . as $u
+      | if $m.type == null then medium(""; $u)
+        else select($u | test("^https?://\\S+$")) | {url: $u, type: $m.type, moving: ($m.type == "image" and ($u | test("\\.gif(\\?\\S*)?$"; "i")))} end])
+    | reduce .[] as $m ([]; if any(.[]; .url == $m.url) then . else . + [$m] end) | .[0:4]),
+  ref: from($d.refers_to),
+  badge: from($d.badge),
+  fields: [$d.fields[] as $f | {label: $f.label, value: tag($f.tag)} | select(.value != "")],
+  items: (if $d.items == null then [] else [tags | select(.[0] == $d.items.tag and length > 1) | .[1] | strings] | .[0:12] end),
+  progress: (if $d.progress == null then null
+    else {value: ((tag($d.progress.value.tag) | tonumber?) // null), max: ((tag($d.progress.max.tag) | tonumber?) // null)}
+      | if .value != null and .max != null and .max > 0 and .value >= 0 then . else null end end),
+  actions: $d.actions};
 # A description that leaves the event nothing to show, its tags lacking every
 # part it names, gives way to the fallback, so no event is invisible.
-def described_or_fallback($d): . as $e | described($d) | if .title == "" and .summary == "" and .body == "" then $e | fallback else . end;
+def described_or_fallback($d): . as $e | described($d) | if .title == "" and .summary == "" and .body == "" and .fields == [] and .items == [] and .media == [] then $e | fallback else . end;
 def parts:
   if .kind == 0 then (meta) as $m | base + {label: "updated profile", title: ($m.name | strings // ""), summary: ($m.about | strings // ""), body: "", ref: ""}
   elif .kind == 1 then base + {label: (if tag("e") != "" then "replied" else "" end)}
@@ -312,6 +376,7 @@ def parts:
         summary: ([$type, (if $blob == "" then "" else ($blob | (length * 3 / 4 | floor) - ([scan("=")] | length) | tostring) + " bytes" end)] | map(select(. != "")) | join(", ")),
         media: (if ($type | test("^image/(png|jpeg|gif|webp)$")) and ($blob | length > 0 and length <= 262144 and test("^[A-Za-z0-9+/]+=*$"))
           then [{url: ("data:" + $type + ";base64," + $blob), type: "image", moving: ($type == "image/gif")}] else media end)}
+  elif .kind == 31517 then base + {label: "described a kind", title: ("kind " + tag("d")), body: "", ref: ""}
   elif .kind == 30817 then base + {label: "drafted", title: (tag("title") | if . == "" then tag("d") else . end), summary: tag("summary")}
   elif $custom[0][.kind | tostring] != null then described_or_fallback($custom[0][.kind | tostring])
   else fallback end;
@@ -469,6 +534,17 @@ read_address=$(jq -r '.agent_node.toon_apps[]?.apps[]? | select(.name == "relay"
 # their followers.
 # The descriptions go in as a file, not an argument, so that however many there
 # are they cannot exceed the length of one argument and empty the feed.
+# The agent's own follow list, by author: it says whom the agent follows, and so
+# whose Renderers are read.
+own_follows='[]'
+[[ -n $self ]] && own_follows=$(relay_query "{\"kinds\":[3],\"authors\":[\"$self\"],\"limit\":1}")
+if [[ -n $self ]]; then
+  renderer_authors=$(jq -c --arg self "$self" '[$self] + [(sort_by(-.created_at) | first // {} | .tags | arrays // [])[]
+    | arrays | select(.[0] == "p") | .[1] | strings | select(test("^[0-9a-f]{64}$"))] | unique | .[0:500]' <<<"$own_follows" 2>/dev/null || echo '[]')
+  custom_renderers=$(jq -cn --argjson files "$custom_renderers" --argjson published "$(published_renderers "$renderer_authors")" \
+    '$published + $files' 2>/dev/null || echo "$custom_renderers")
+fi
+
 with_parts() { jq -c --slurpfile custom <(printf '%s' "$custom_renderers") "$renderers"' map(. + {parts: parts})' 2>/dev/null || echo '[]'; }
 events=$(relay_query "{\"limit\":$limit}" | with_parts)
 profiles=$(relay_query '{"kinds":[0],"limit":200}')
@@ -501,9 +577,6 @@ done
 ids=$(jq -cn --argjson a "$events" --argjson b "${agent_events:-[]}" --argjson c "$context" '[$a[], $b[], $c[] | .id | strings] | unique | .[0:100]' 2>/dev/null || echo '[]')
 replies=$(relay_query "{\"#e\":$ids,\"limit\":200}")
 context=$(jq -cn --argjson a "$context" --argjson b "$replies" '$a + $b | unique_by(.id)' 2>/dev/null || echo "$context")
-# The agent's own follow list, by author too: it says whom the agent follows.
-own_follows='[]'
-[[ -n $self ]] && own_follows=$(relay_query "{\"kinds\":[3],\"authors\":[\"$self\"],\"limit\":1}")
 
 context=$(printf '%s' "$context" | with_parts)
 

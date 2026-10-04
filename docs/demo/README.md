@@ -1,7 +1,7 @@
 # Demo data
 
 A made-up network for showing the panel without an agent node: seven Personas with pixel
-pictures, notes and a thread, an animated picture, a video and a sound, reactions, a repost, a long-form post, a NIP draft, a public
+pictures, notes and a thread, an animated picture, a video and a sound, reactions, a repost, a long-form post, a NIP draft, a task offer of a kind that travels with its own Renderer, a public
 chat, a group, two sealed private messages, two opened conversations, three Requests and a
 node whose state changes.
 Nothing here is published anywhere.
