@@ -48,6 +48,7 @@ Item {
     else if ((text === "y" || text === "c") && entry) copy(entry)
     else if (text === "u" && entry) copyValue(entry, service.firstMedia(entry))
     else if (text === "p" && root.cursorMedia) root.cursorMedia.toggle()
+    else if (text === "g" && entry && (partsOf(entry).actions || []).length > 0) service.askAbout(entry, partsOf(entry).actions[0])
   }
 
   // The media of the entry under the cursor, for `p`.
@@ -94,7 +95,7 @@ Item {
     }
     var parts = partsOf(event)
     // A picture shown under the text is not also named in it.
-    return service.withoutMedia(parts.title || parts.summary || parts.body, parts.media)
+    return service.withoutMedia([parts.title, parts.summary, parts.body].filter(function(line) { return line }).join("\n"), parts.media)
   }
 
   // The whole of an entry's text, not cut to the lines its card shows.
@@ -245,7 +246,12 @@ Item {
             EventExtras {
               width: parent.width
               parts: root.partsOf(row.modelData)
+              offersActions: true
               dim: root.dim
+              onActed: function(action) {
+                root.service.activityCursor = row.index
+                root.service.askAbout(row.modelData, action)
+              }
             }
 
             MediaStrip {

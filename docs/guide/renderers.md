@@ -68,7 +68,7 @@ One JSON file per kind, in `~/.config/spaceturtle/renderers/`.
 Every kind also shows what an `imeta` tag says is an image, a video or audio, and the
 addresses of those in its content, whatever its description says.
 
-An action is shown as a button on the event in Network. Clicking it, or pressing `g` for
+An action is shown as a button on the event, in Network and in Activity. Clicking it, or pressing `g` for
 the first, opens a Request about that event with the action's words, which the Observer
 can change before Enter. The panel does nothing else with an action: the agent reads the
 Request and does it or declines.

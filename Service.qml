@@ -308,6 +308,14 @@ Item {
   // restored and nothing copied.
   signal viewOpened()
 
+  // An action chosen on an Activity entry, {event, action}: Network, where a
+  // Request is written, takes it up once it shows the entry's thread.
+  property var pendingAction: null
+  function askAbout(event, action) {
+    pendingAction = { event: event, action: action }
+    if (!openEvent(event.id)) pendingAction = null
+  }
+
   // The conversation an event is part of, in reading order: from the event at
   // its top (a placeholder, if the relay lacks that one) down through what
   // refers to each, oldest first. Each row is the event with its `depth`, or

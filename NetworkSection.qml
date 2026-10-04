@@ -100,6 +100,15 @@ Item {
     composeInput.forceActiveFocus()
   }
 
+  // An action chosen in Activity, now that its event's thread is shown.
+  function takePendingAction() {
+    var pending = service.pendingAction
+    if (!pending) return
+    service.pendingAction = null
+    root.composeAction(pending.event, pending.action)
+  }
+  Component.onCompleted: Qt.callLater(root.takePendingAction)
+
   function sendCompose() {
     if (root.composeKind === "free" && composeInput.text.trim() === "") { cancelCompose(); return }
     service.submitAbout(root.composeKind, root.composePubkey, root.composeEvent, composeInput.text)
@@ -213,6 +222,7 @@ Item {
     target: root.service
     function onViewOpened() {
       root.cancelCompose()
+      Qt.callLater(root.takePendingAction)
       pointerGate.reset()
       root.scrollOnCursor = true
       root.copiedLabel = ""
