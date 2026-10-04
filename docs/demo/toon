@@ -24,6 +24,7 @@ case "${1:-} ${2:-}" in
   "channel list") node channels ;;
   "route list") node routes ;;
   "limit show") node limits ;;
+  "packet count") node packets ;;
   "logs --json") node logs ;;
   # What the supervisor opened: the same private messages that Network shows sealed.
   "message list")
