@@ -18,6 +18,25 @@ Item {
   function yesNo(value) { return value === null || value === undefined ? "unknown" : (value ? "running" : "stopped") }
   function plural(n, one, many) { return n + " " + (n === 1 ? one : many) }
   function process(p) { return yesNo(p.running) + ", " + plural(p.restarts, "restart", "restarts") }
+  function ago(iso) {
+    var ms = Date.parse(iso)
+    if (isNaN(ms)) return iso
+    var delta = Math.max(0, Math.floor((clock.now - ms) / 1000))
+    if (delta < 60) return "just now"
+    var unit = delta < 3600 ? [60, "minute"] : (delta < 86400 ? [3600, "hour"] : [86400, "day"])
+    var n = Math.floor(delta / unit[0])
+    return n + " " + unit[1] + (n === 1 ? "" : "s") + " ago"
+  }
+  // Drives the relative timestamps.
+  Timer {
+    id: clock
+    property real now: Date.now()
+    interval: 30000
+    running: root.visible
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: now = Date.now()
+  }
   // The parts that are not empty, joined.
   function joined(parts) { return parts.filter(function(x) { return x !== "" }).join(", ") }
 
@@ -88,6 +107,14 @@ Item {
         row("Rejected " + st.packets.rejects[k].code, String(st.packets.rejects[k].count))
       row("Fees earned", st.packets.fees_earned + " (base units)")
       note("Counts are since the connector last started")
+    }
+
+    group("Rejected packets")
+    if (!st.rejected_packets) unavailable()
+    else if (st.rejected_packets.length === 0) none()
+    else for (var q = 0; q < st.rejected_packets.length; q++) {
+      var rp = st.rejected_packets[q]
+      row(ago(rp.time), rp.destination + ", " + rp.code + ": " + rp.message)
     }
 
     group("Subscriptions")
