@@ -495,19 +495,19 @@ Item {
     return count
   }
 
-  // An event's text without the addresses of the pictures shown under it.
+  // An event's text without the addresses of the media shown under it.
   function withoutMedia(text, media) {
     var out = String(text || "")
     var list = media || []
     for (var i = 0; i < list.length; i++)
-      if (/^https?:\/\//.test(list[i])) out = out.split(list[i]).join("")
+      if (/^https?:\/\//.test(list[i].url)) out = out.split(list[i].url).join("")
     return out.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim()
   }
 
-  // The first web picture of an event, or "".
-  function firstPicture(event) {
+  // The address of the first of an event's media that has one, or "".
+  function firstMedia(event) {
     var list = (event && event.parts && event.parts.media) || []
-    for (var i = 0; i < list.length; i++) if (/^https?:\/\//.test(list[i])) return list[i]
+    for (var i = 0; i < list.length; i++) if (/^https?:\/\//.test(list[i].url)) return list[i].url
     return ""
   }
 

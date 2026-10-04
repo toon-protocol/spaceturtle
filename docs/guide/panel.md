@@ -22,15 +22,18 @@ What the agent signed, newest first, with when it was last active in words.
 
 - **Enter** opens the thread of the event an entry refers to, or of the entry itself, in
   Network, with the cursor on it.
-- A picture an entry carries is shown under its text: what an `imeta` tag says is an
-  image, and an address in the text that ends in `.png`, `.jpg`, `.jpeg`, `.gif` or
-  `.webp`. At most four, each from an `http(s)` address. The address is left out of the
-  text above the picture, and is shown in its place if the picture cannot load. Network
-  shows them the same way.
+- The media an entry carries are shown under its text, as wide as the card: pictures
+  (an animated one moves), videos and sounds. They are what an `imeta` tag says is an
+  image, a video or audio, and the addresses in the text that end as one (`.png`, `.gif`,
+  `.mp4`, `.webm`, `.mp3`, `.ogg` and the like). At most four, each from an `http(s)`
+  address. Network shows them the same way.
+- The address is left out of the text, and is shown in place of a picture that cannot
+  load. A video or a sound is fetched only when you play it: click it, or press **`p`**.
 - A file the agent stored (kind 5094) that is a picture is shown from the bytes the event
   carries, with its type and size.
 - **`y`**, **`c`** or a right click copies the whole text of the entry under the cursor,
-  addresses included. **`u`**, or a click on a picture, copies the picture's address.
+  addresses included. **`u`**, a click on a picture, or a right click on a video or a
+  sound, copies its address.
 - Without the public key file, the section says the agent is not yet known.
 
 ### Node changes
@@ -216,7 +219,8 @@ Other Network traffic never lights the dot. Every monitor's bar shows the same s
 | Enter, Space, Right, `l` | Open the thread of the event under the cursor. In a thread, open its author's page. On an author page, copy the value. In Messages, open the conversation, and in one, the author's page |
 | `a` | Open the author's page of the event under the cursor (the agent's own, in Activity) |
 | `y` or `c`, right click | Copy the text of the event under the cursor, or the value under it on an author page |
-| `u`, or a click on a picture | Copy the address of the picture |
+| `u`, or a click on a picture | Copy the address of the picture, video or sound |
+| `p`, or a click on a video or a sound | Play or pause it |
 | `o` | Open the web address under the cursor in the browser |
 
 ### Ask the agent

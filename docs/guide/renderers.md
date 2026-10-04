@@ -41,8 +41,9 @@ One JSON file per kind, in `~/.config/spaceturtle/renderers/`.
 | `links` | A list of `{"tag": NAME}`: every value of every tag of that name that is an `http(s)` address, and nothing else |
 | `refers_to` | The id of the event this one refers to, shown in the part `ref` when the event has nothing else to show |
 
-The pictures of an event are not a field: every kind shows what an `imeta` tag says is an
-image, and the picture addresses in its content, whatever its description says.
+The media of an event are not a field: every kind shows what an `imeta` tag says is an
+image, a video or audio, and the addresses of those in its content, whatever its
+description says.
 
 `title`, `summary`, `body` and `refers_to` each take one of two shapes:
 

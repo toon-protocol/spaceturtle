@@ -180,7 +180,8 @@ Item {
     if (text === "o" && detail && detail.openable) service.openUrl(detail.value)
     else if ((text === "y" || text === "c") && detail) root.copy(detail)
     else if ((text === "y" || text === "c") && root.cursorEvent) root.copyEvent(root.cursorEvent)
-    else if (text === "u" && root.cursorEvent) root.copyFromEvent(root.cursorEvent, service.firstPicture(root.cursorEvent))
+    else if (text === "u" && root.cursorEvent) root.copyFromEvent(root.cursorEvent, service.firstMedia(root.cursorEvent))
+    else if (text === "p" && root.cursorEvent && root.cursorItem && root.cursorItem.media) root.cursorItem.media.toggle()
     else if (text === "a" && root.cursorEvent && !root.authorPage) service.openAuthor(root.cursorEvent.pubkey)
     else if (text === "f" && root.authorPage && !root.viewingSelf)
       root.compose(service.followsAuthor(root.profilePubkey) ? "unfollow" : "follow", root.profilePubkey, "")
@@ -671,6 +672,7 @@ Item {
     readonly property bool missing: modelData.missing === true
     readonly property real indent: depth * Style.space(14)
     readonly property bool justCopied: !missing && root.copiedLabel === "event:" + modelData.id
+    readonly property var media: strip
     // Requests already waiting on this note, so it is not asked twice.
     readonly property string waitingText: missing ? "" : root.service.waitingKinds("", modelData.id)
       .map(function(k) { return k + " waiting" }).join(" · ")
@@ -822,6 +824,7 @@ Item {
       }
 
       MediaStrip {
+        id: strip
         width: parent.width
         sources: root.partsOf(row.modelData).media || []
         dim: root.dim

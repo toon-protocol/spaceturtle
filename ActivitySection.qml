@@ -40,13 +40,18 @@ Item {
   // Nothing to go back to: the panel closes.
   function back() { return false }
   // `a` opens the agent's own page; `y` or `c` copies the entry under the
-  // cursor, `u` the address of its first picture.
+  // cursor, `u` the address of its first picture, video or sound; `p` plays or
+  // pauses its video or sound.
   function key(text) {
     var entry = service.activity.length > 0 ? service.activity[root.cursor] : null
     if (text === "a" && known) service.openAuthor(service.selfPubkey)
     else if ((text === "y" || text === "c") && entry) copy(entry)
-    else if (text === "u" && entry) copyValue(entry, service.firstPicture(entry))
+    else if (text === "u" && entry) copyValue(entry, service.firstMedia(entry))
+    else if (text === "p" && root.cursorMedia) root.cursorMedia.toggle()
   }
+
+  // The media of the entry under the cursor, for `p`.
+  property var cursorMedia: null
 
   // The id of the entry whose text was just copied, for its "copied" flash.
   property string copiedId: ""
@@ -170,7 +175,12 @@ Item {
           width: parent ? parent.width : 0
           height: entry.implicitHeight + Style.spacing.lg * 2
 
-          onHasCursorChanged: if (hasCursor && root.scrollOnCursor) root.ensureVisible(row)
+          onHasCursorChanged: {
+            if (hasCursor) root.cursorMedia = media
+            if (hasCursor && root.scrollOnCursor) root.ensureVisible(row)
+          }
+          Component.onCompleted: if (hasCursor) root.cursorMedia = media
+          Component.onDestruction: if (root.cursorMedia === media) root.cursorMedia = null
 
           // First, so that a picture sits above it.
           MouseArea {
@@ -233,6 +243,7 @@ Item {
             }
 
             MediaStrip {
+              id: media
               width: parent.width
               sources: root.partsOf(row.modelData).media || []
               dim: root.dim

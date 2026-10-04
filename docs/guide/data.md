@@ -76,6 +76,8 @@ A profile is untrusted input, and so is an event.
 - A picture, a profile's or an event's, is loaded only from an `http(s)` URL. Loading it
   tells the host that serves it that this machine asked. The one picture not loaded from
   the web is a stored file (kind 5094): it is drawn from the bytes in the event.
+- A video or a sound is loaded only from an `http(s)` URL too, and only when the Observer
+  plays it.
 - A copied value is passed to `wl-copy` as an argument, never through a shell.
 
 ## Requests

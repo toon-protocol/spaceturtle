@@ -1,7 +1,7 @@
 # Demo data
 
 A made-up network for showing the panel without an agent node: seven Personas with pixel
-pictures, notes and a thread, reactions, a repost, a long-form post, a NIP draft, a public
+pictures, notes and a thread, an animated picture, a video and a sound, reactions, a repost, a long-form post, a NIP draft, a public
 chat, a group, two sealed private messages, two opened conversations, three Requests and a
 node whose state changes.
 Nothing here is published anywhere.
@@ -34,7 +34,7 @@ on the next refresh. That is how the recording in the README shows the turtle's 
 | Path | |
 | --- | --- |
 | `events.json` | The events, each with `ago` in place of `created_at` |
-| `www/pictures/` | The pictures, drawn on the turtle's 16x16 grid |
+| `www/pictures/` | The pictures, drawn on the turtle's 16x16 grid, and the animated picture, video and sound of three notes |
 | `www/index.html` | The relay's NIP-11 document |
 | `config/agent-pubkey` | The agent identity, Alice |
 | `config/renderers/` | Renderer descriptions for the chat and group kinds (40, 42, 9, 39000) |

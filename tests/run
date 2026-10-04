@@ -327,13 +327,13 @@ check "parts unknown without alt: kind, content" "$(P 31338 '.label == "kind 313
 check "parts unknown without alt, with tags: kind, tags, content" "$(P 31339 '.label == "kind 31339" and .title == "" and .summary == "k v, e '"$other"'" and .body == "raw3"')"
 check "parts: every event has all the parts" '[.events[].parts | keys == ["body","label","links","media","ref","summary","title"]] | all'
 
-# --- media: the pictures an event shows
+# --- media: what an event shows or plays
 new_env; install_toon; running_relay
 echo '{"events":[]}' > "$STUB_DIR/profiles"; echo '{"events":[]}' > "$STUB_DIR/follows"
 {
   echo '{"events":['
-  ev 1 'in text https://a.example/one.PNG and https://a.example/page then https://a.example/two.jpg?w=2' '[]'; echo ,
-  ev 20 'tagged' '[["imeta","url https://a.example/blob","m image/png"],["imeta","url https://a.example/clip","m video/mp4"],["imeta","url https://a.example/three.webp"],["imeta","url file:///etc/passwd","m image/png"],["imeta","url https://a.example/blob","m image/png"]]'; echo ,
+  ev 1 'in text https://a.example/one.PNG and https://a.example/page then https://a.example/two.gif?w=2 https://a.example/clip.mp4 https://a.example/song.ogg' '[]'; echo ,
+  ev 20 'tagged' '[["imeta","url https://a.example/blob","m image/png"],["imeta","url https://a.example/clip","m video/mp4"],["imeta","url https://a.example/three.webp"],["imeta","url file:///etc/passwd","m image/png"],["imeta","url https://a.example/blob","m image/png"],["imeta","url https://a.example/doc.png","m application/pdf"]]'; echo ,
   ev 5094 '' '[["i","aGVsbG8=","blob"],["bid","1000","usdc"],["output","image/png"]]'; echo ,
   ev 5094 'x' '[["i","file:///etc/passwd","blob"],["output","image/png"]]'; echo ,
   ev 5094 'y' '[["i","aGVsbG8=","blob"],["output","text/html"]]'; echo ,
@@ -341,10 +341,12 @@ echo '{"events":[]}' > "$STUB_DIR/profiles"; echo '{"events":[]}' > "$STUB_DIR/f
   echo ']}'
 } > "$STUB_DIR/events"
 out=$("$root/relay-events")
-check "media: the addresses in the text that end as a picture" "$(P 1 '.media == ["https://a.example/one.PNG","https://a.example/two.jpg?w=2"]')"
-check "media: what an imeta tag says is an image, http(s) only, once" "$(P 20 '.media == ["https://a.example/blob","https://a.example/three.webp"]')"
-check "media: at most four, a malformed imeta tag costs nothing" "$(P 21 '.media == ["https://a.example/1.png","https://a.example/2.png","https://a.example/3.png","https://a.example/4.png"]')"
-check "media: a stored picture is shown from its own bytes" '.events[] | select(.id == "k5094") | .parts | . == {label:"stored a file", title:"", summary:"image/png, 5 bytes", body:"", links:[], media:["data:image/png;base64,aGVsbG8="], ref:""}'
+check "media: the addresses in the text that end as a picture, a video or a sound" "$(P 1 '.media == [
+  {url:"https://a.example/one.PNG",type:"image",moving:false},{url:"https://a.example/two.gif?w=2",type:"image",moving:true},
+  {url:"https://a.example/clip.mp4",type:"video",moving:false},{url:"https://a.example/song.ogg",type:"audio",moving:false}]')"
+check "media: what an imeta tag says it is, http(s) only, once" "$(P 20 '[.media[] | .url + " " + .type] == ["https://a.example/blob image","https://a.example/clip video","https://a.example/three.webp image"]')"
+check "media: at most four, a malformed imeta tag costs nothing" "$(P 21 '[.media[].url] == ["https://a.example/1.png","https://a.example/2.png","https://a.example/3.png","https://a.example/4.png"]')"
+check "media: a stored picture is shown from its own bytes" '.events[] | select(.id == "k5094") | .parts | . == {label:"stored a file", title:"", summary:"image/png, 5 bytes", body:"", links:[], media:[{url:"data:image/png;base64,aGVsbG8=",type:"image",moving:false}], ref:""}'
 check "media: a stored file that is not base64, or not a picture, shows none" '[.events[] | select(.id == "k5094x" or .id == "k5094y") | .parts.media] == [[],[]]'
 
 # --- malformed tags and content cost only the odd part, never the feed
