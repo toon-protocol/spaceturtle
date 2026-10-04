@@ -70,10 +70,14 @@ The node's ILP address and connector address come from the relay's NIP-11 docume
 
 ## What it treats as untrusted
 
-A profile is untrusted input.
+A profile is untrusted input, and so is an event.
 
-- Everything from it is rendered as plain text.
-- A picture is loaded only from an `http(s)` URL.
+- Everything from them is rendered as plain text.
+- A picture, a profile's or an event's, is loaded only from an `http(s)` URL. Loading it
+  tells the host that serves it that this machine asked. The one picture not loaded from
+  the web is a stored file (kind 5094): it is drawn from the bytes in the event.
+- A video or a sound is loaded only from an `http(s)` URL too, and only when the Observer
+  plays it.
 - A copied value is passed to `wl-copy` as an argument, never through a shell.
 
 ## Requests

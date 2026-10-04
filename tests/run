@@ -325,7 +325,29 @@ check "parts 30817: NIP draft" "$(P 30817 '.label == "drafted" and .title == "Dr
 check "parts unknown with alt: alt, kind, tags, content" "$(P 31337 '.label == "kind 31337" and .title == "A thing" and .summary == "alt A thing, x y z" and .body == "raw"')"
 check "parts unknown without alt: kind, content" "$(P 31338 '.label == "kind 31338" and .title == "" and .summary == "" and .body == "raw2"')"
 check "parts unknown without alt, with tags: kind, tags, content" "$(P 31339 '.label == "kind 31339" and .title == "" and .summary == "k v, e '"$other"'" and .body == "raw3"')"
-check "parts: every event has all the parts" '[.events[].parts | keys == ["body","label","links","ref","summary","title"]] | all'
+check "parts: every event has all the parts" '[.events[].parts | keys == ["body","label","links","media","ref","summary","title"]] | all'
+
+# --- media: what an event shows or plays
+new_env; install_toon; running_relay
+echo '{"events":[]}' > "$STUB_DIR/profiles"; echo '{"events":[]}' > "$STUB_DIR/follows"
+{
+  echo '{"events":['
+  ev 1 'in text https://a.example/one.PNG and https://a.example/page then https://a.example/two.gif?w=2 https://a.example/clip.mp4 https://a.example/song.ogg' '[]'; echo ,
+  ev 20 'tagged' '[["imeta","url https://a.example/blob","m image/png"],["imeta","url https://a.example/clip","m video/mp4"],["imeta","url https://a.example/three.webp"],["imeta","url file:///etc/passwd","m image/png"],["imeta","url https://a.example/blob","m image/png"],["imeta","url https://a.example/doc.png","m application/pdf"]]'; echo ,
+  ev 5094 '' '[["i","aGVsbG8=","blob"],["bid","1000","usdc"],["output","image/png"]]'; echo ,
+  ev 5094 'x' '[["i","file:///etc/passwd","blob"],["output","image/png"]]'; echo ,
+  ev 5094 'y' '[["i","aGVsbG8=","blob"],["output","text/html"]]'; echo ,
+  ev 21 'https://a.example/1.png https://a.example/2.png https://a.example/3.png https://a.example/4.png https://a.example/5.png file:///x.png' '[["imeta",{"a":1}]]'
+  echo ']}'
+} > "$STUB_DIR/events"
+out=$("$root/relay-events")
+check "media: the addresses in the text that end as a picture, a video or a sound" "$(P 1 '.media == [
+  {url:"https://a.example/one.PNG",type:"image",moving:false},{url:"https://a.example/two.gif?w=2",type:"image",moving:true},
+  {url:"https://a.example/clip.mp4",type:"video",moving:false},{url:"https://a.example/song.ogg",type:"audio",moving:false}]')"
+check "media: what an imeta tag says it is, http(s) only, once" "$(P 20 '[.media[] | .url + " " + .type] == ["https://a.example/blob image","https://a.example/clip video","https://a.example/three.webp image"]')"
+check "media: at most four, a malformed imeta tag costs nothing" "$(P 21 '[.media[].url] == ["https://a.example/1.png","https://a.example/2.png","https://a.example/3.png","https://a.example/4.png"]')"
+check "media: a stored picture is shown from its own bytes" '.events[] | select(.id == "k5094") | .parts | . == {label:"stored a file", title:"", summary:"image/png, 5 bytes", body:"", links:[], media:[{url:"data:image/png;base64,aGVsbG8=",type:"image",moving:false}], ref:""}'
+check "media: a stored file that is not base64, or not a picture, shows none" '[.events[] | select(.id == "k5094x" or .id == "k5094y") | .parts.media] == [[],[]]'
 
 # --- malformed tags and content cost only the odd part, never the feed
 new_env; install_toon; running_relay
@@ -339,7 +361,7 @@ echo '{"events":[
 out=$("$root/relay-events")
 check "malformed: every event survives" '[.events[].id] == ["m3","m5","m1","m7"]'
 check "malformed: no tags counted" '[.events[] | select(.id == "m3" or .id == "m5") | .parts | .body, .summary] == ["0 followed","","","0 deleted"]'
-check "malformed: a note with string tags" '.events[] | select(.id == "m1") | .parts | .body == "still here" and .ref == "" and .links == []'
+check "malformed: a note with string tags" '.events[] | select(.id == "m1") | .parts | .body == "still here" and .ref == "" and .links == [] and .media == []'
 check "malformed: a reaction without content" '.events[] | select(.id == "m7") | .parts.body == "󰋑"'
 
 # --- hostile profile fields stay data
@@ -396,14 +418,14 @@ echo '{"kind":31990,"label":"second"}' > "$rd/zz-duplicate.json"                
 } > "$STUB_DIR/events"
 out=$("$root/relay-events")
 P() { echo ".events[] | select(.kind == $1) | .parts | $2"; }
-check "renderer: a valid description resolves label, title, summary, body, links and the event referred to" "$(P 31990 '. == {label:"NIP draft", title:"My NIP", summary:"Sum", body:"the draft", links:["https://a.example/x"], ref:"'"$other"'"}')"
+check "renderer: a valid description resolves label, title, summary, body, links and the event referred to" "$(P 31990 '. == {label:"NIP draft", title:"My NIP", summary:"Sum", body:"the draft", links:["https://a.example/x"], media:[], ref:"'"$other"'"}')"
 for k in 31991 31992 31993 31994 31997 31998 31999; do
   check "renderer: an unusable description for $k falls back" "$(P $k '.label == "kind '$k'" and .body == "c'$((k - 31990))'"')"
 done
 check "renderer: a description for a built-in kind is ignored" "$(P 1 '.label == "" and .body == "plain note"')"
 check "renderer: a description for a built-in long-form post is ignored" "$(P 30023 '.label == "published" and .title == "Real title"')"
-check "renderer: an event lacking every tag its description names falls back" "$(P 31995 '. == {label:"kind 31995", title:"", summary:"x y", body:"c5", links:[], ref:""}')"
-check "renderer: a tag the event lacks leaves that part empty, the rest stays" "$(P 31996 '. == {label:"Partial", title:"T6", summary:"", body:"", links:[], ref:""}')"
+check "renderer: an event lacking every tag its description names falls back" "$(P 31995 '. == {label:"kind 31995", title:"", summary:"x y", body:"c5", links:[], media:[], ref:""}')"
+check "renderer: a tag the event lacks leaves that part empty, the rest stays" "$(P 31996 '. == {label:"Partial", title:"T6", summary:"", body:"", links:[], media:[], ref:""}')"
 check "renderer: the document is whole" '.online == true and (.events | length) == 12'
 [[ ! -e pwned && ! -e $tmp/pwned ]] || { echo "FAIL renderer: a description was evaluated"; fails=$((fails + 1)); }
 # A new description takes effect on the next run, with nothing restarted; removing it takes it away.

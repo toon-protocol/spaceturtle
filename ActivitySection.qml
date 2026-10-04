@@ -4,8 +4,9 @@ import qs.Ui
 
 // The Activity section, where the panel opens: when the agent was last active,
 // and what it did, newest first. Enter or a click opens the thread of the event
-// an entry refers to in the Network. Where the cursor is lives on
-// the service.
+// an entry refers to in the Network; `y`, `c` or a right click copies the
+// entry's text, `u` or a click on a picture its address. Where the cursor is
+// lives on the service.
 Item {
   id: root
 
@@ -38,8 +39,31 @@ Item {
 
   // Nothing to go back to: the panel closes.
   function back() { return false }
-  // `a` opens the agent's own page.
-  function key(text) { if (text === "a" && known) service.openAuthor(service.selfPubkey) }
+  // `a` opens the agent's own page; `y` or `c` copies the entry under the
+  // cursor, `u` the address of its first picture, video or sound; `p` plays or
+  // pauses its video or sound.
+  function key(text) {
+    var entry = service.activity.length > 0 ? service.activity[root.cursor] : null
+    if (text === "a" && known) service.openAuthor(service.selfPubkey)
+    else if ((text === "y" || text === "c") && entry) copy(entry)
+    else if (text === "u" && entry) copyValue(entry, service.firstMedia(entry))
+    else if (text === "p" && root.cursorMedia) root.cursorMedia.toggle()
+  }
+
+  // The media of the entry under the cursor, for `p`.
+  property var cursorMedia: null
+
+  // The id of the entry whose text was just copied, for its "copied" flash.
+  property string copiedId: ""
+
+  function copy(event) { copyValue(event, textOf(event)) }
+
+  function copyValue(event, value) {
+    if (value === "") return
+    service.copy(value)
+    root.copiedId = String(event.id)
+    copiedTimer.restart()
+  }
 
   function ensureVisible(item) {
     if (!item) return
@@ -69,7 +93,15 @@ Item {
       return String(event.request.text) + reason
     }
     var parts = partsOf(event)
-    return String(parts.title || parts.summary || parts.body || "").trim()
+    // A picture shown under the text is not also named in it.
+    return service.withoutMedia(parts.title || parts.summary || parts.body, parts.media)
+  }
+
+  // The whole of an entry's text, not cut to the lines its card shows.
+  function textOf(event) {
+    if (event.node_change === true || event.request) return bodyOf(event)
+    var parts = partsOf(event)
+    return [parts.title, parts.summary, parts.body].filter(function(line) { return line }).join("\n")
   }
 
   function ago(seconds) {
@@ -84,6 +116,12 @@ Item {
   PointerMoveGate {
     id: pointerGate
     referenceItem: root
+  }
+
+  Timer {
+    id: copiedTimer
+    interval: 1500
+    onTriggered: root.copiedId = ""
   }
 
   // Drives the relative timestamps.
@@ -131,11 +169,36 @@ Item {
           required property var modelData
           required property int index
 
+          readonly property bool justCopied: root.copiedId !== "" && root.copiedId === String(modelData.id)
+
           hasCursor: root.cursor === index
           width: parent ? parent.width : 0
           height: entry.implicitHeight + Style.spacing.lg * 2
 
-          onHasCursorChanged: if (hasCursor && root.scrollOnCursor) root.ensureVisible(row)
+          onHasCursorChanged: {
+            if (hasCursor) root.cursorMedia = media
+            if (hasCursor && root.scrollOnCursor) root.ensureVisible(row)
+          }
+          Component.onCompleted: if (hasCursor) root.cursorMedia = media
+          Component.onDestruction: if (root.cursorMedia === media) root.cursorMedia = null
+
+          // First, so that a picture sits above it.
+          MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
+            cursorShape: Qt.PointingHandCursor
+            onPositionChanged: function(mouse) {
+              if (!pointerGate.moved(row, mouse)) return
+              root.scrollOnCursor = false
+              root.service.activityCursor = row.index
+            }
+            onClicked: function(mouse) {
+              root.service.activityCursor = row.index
+              if (mouse.button === Qt.RightButton) root.copy(row.modelData)
+              else root.activate()
+            }
+          }
 
           Column {
             id: entry
@@ -158,8 +221,9 @@ Item {
               Text {
                 textFormat: Text.PlainText
                 // A node change is when it was noticed, not when it happened.
-                text: (row.modelData.node_change === true ? "noticed " : "") + root.ago(row.modelData.created_at)
-                color: root.dim
+                text: row.justCopied ? "copied"
+                  : (row.modelData.node_change === true ? "noticed " : "") + root.ago(row.modelData.created_at)
+                color: row.justCopied ? Color.accent : root.dim
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption
               }
@@ -177,20 +241,16 @@ Item {
               maximumLineCount: 4
               elide: Text.ElideRight
             }
-          }
 
-          MouseArea {
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onPositionChanged: function(mouse) {
-              if (!pointerGate.moved(row, mouse)) return
-              root.scrollOnCursor = false
-              root.service.activityCursor = row.index
-            }
-            onClicked: {
-              root.service.activityCursor = row.index
-              root.activate()
+            MediaStrip {
+              id: media
+              width: parent.width
+              sources: root.partsOf(row.modelData).media || []
+              dim: root.dim
+              onPicked: function(address) {
+                root.service.activityCursor = row.index
+                root.copyValue(row.modelData, address)
+              }
             }
           }
         }
