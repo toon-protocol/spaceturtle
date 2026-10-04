@@ -338,10 +338,11 @@ if [[ $status == null ]] || jq -e '.agent_node | type == "object"' <<<"$status" 
         remaining_today: (.remaining_today // .remaining | str)})),
       packets: ($packets | group(
         if (.packets.fulfilled | type) == "number" and (.packets.rejected | type) == "number"
-          and ((.rejects // {}) | type) == "object"
+          and (.rejects | type) == "object" and all(.rejects[]; type == "number")
+          and (.fees_earned | type) == "string"
         then {fulfilled: .packets.fulfilled, rejected: .packets.rejected,
-          rejects: [(.rejects // {}) | to_entries | sort_by(.key)[] | {code: .key, count: (.value | count)}],
-          fees_earned: (.fees_earned | if . == null then "0" else str end)}
+          rejects: [.rejects | to_entries | sort_by(.key)[] | {code: .key, count: .value}],
+          fees_earned: .fees_earned}
         else error("shape") end)),
       subscriptions: (if $held == null and $incoming == null then null else {
         held: ($held | group(items("subscriptions") | [.[] | str])),

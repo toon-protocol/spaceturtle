@@ -232,6 +232,12 @@ check "state: a connector that carried nothing shows zeros, not unavailable" '.s
 echo '{"toon_app":"relay","packets":"many"}' > "$STUB_DIR/packetcount"
 out=$("$root/relay-events")
 check "state: packets of a shape not understood are unavailable, the rest shows" '.state.packets == null and .state.limits.per_day == "1000"'
+echo '{"toon_app":"relay","packets":{"fulfilled":1,"rejected":1},"rejects":{"F02":"abc"},"fees_earned":"0"}' > "$STUB_DIR/packetcount"
+out=$("$root/relay-events")
+check "state: a reject count that is not a number leaves packets unavailable" '.state.packets == null'
+echo '{"toon_app":"relay","packets":{"fulfilled":1,"rejected":0},"rejects":{}}' > "$STUB_DIR/packetcount"
+out=$("$root/relay-events")
+check "state: packets without fees earned are unavailable, not zero fees" '.state.packets == null'
 echo '{"error":"not_running"}' > "$STUB_DIR/packetcount"
 out=$("$root/relay-events")
 check "state: packets error document is unavailable" '.state.packets == null and .state.limits.per_day == "1000"'
@@ -412,7 +418,7 @@ out=$(at 1012)
 check "node changes: packet counts falling to 0 add nothing and leave attention alone" '.activity == [] and .urgent == false and .attention == "none"'
 echo '{"packets":{"fulfilled":99,"rejected":9},"rejects":{"F02":9},"fees_earned":"7"}' > "$STUB_DIR/packetcount"
 out=$(at 1014)
-check "node changes: packet counts moving add nothing" '.activity == [] and .urgent == false'
+check "node changes: packet counts moving add nothing" '.activity == [] and .urgent == false and .attention == "none"'
 echo '{"relay":{"name":"Shelly","prices":{"write":"12"}}}' > "$STUB_DIR/config"
 echo '{"peers":[{"id":"bob","direction":"inbound","status":"connected"}]}' > "$STUB_DIR/peerlist"
 echo '{"channels":[{"peer":"bob","direction":"inbound","status":"open"}]}' > "$STUB_DIR/channellist"

@@ -22,7 +22,7 @@ Item {
   function joined(parts) { return parts.filter(function(x) { return x !== "" }).join(", ") }
 
   // Rows: { group } starts a group; { label, value, note } is a row the cursor
-  // can stand on. `note` marks a group that could not be read.
+  // can stand on. `note` marks a row that is said of the group, not a value of it.
   readonly property var rows: {
     var list = []
     var st = node
@@ -30,8 +30,9 @@ Item {
     var current = ""
     function group(name) { current = name; list.push({ group: name }) }
     function row(label, value) { list.push({ label: label, value: String(value), under: current }) }
-    function unavailable() { list.push({ label: "", value: "unavailable", note: true, under: current }) }
-    function none() { list.push({ label: "", value: "none", note: true, under: current }) }
+    function note(text) { list.push({ label: "", value: text, note: true, under: current }) }
+    function unavailable() { note("unavailable") }
+    function none() { note("none") }
 
     group("Processes")
     if (!st.status) unavailable()
@@ -86,7 +87,7 @@ Item {
       for (var k = 0; k < st.packets.rejects.length; k++)
         row("Rejected " + st.packets.rejects[k].code, String(st.packets.rejects[k].count))
       row("Fees earned", st.packets.fees_earned + " (base units)")
-      list.push({ label: "", value: "Counts are since the connector last started", note: true, under: current })
+      note("Counts are since the connector last started")
     }
 
     group("Subscriptions")
