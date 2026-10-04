@@ -145,6 +145,7 @@ What `toon` reports of the node, in groups you move through with the cursor:
 - peerings, channels and routes
 - the spending limit and what is left today
 - packets fulfilled and rejected (one row per reject code) and fees earned, in base units; the counts restart with the connector
+- the packets the connector rejected, newest first: when, the destination, the reject code and the message. Fulfilled packets are counted, not listed. Rejected packets never light the turtle's dot, as no other Network traffic does
 - subscriptions held, and held to your relay
 - the ILP and connector addresses
 - the last log lines

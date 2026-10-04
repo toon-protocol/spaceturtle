@@ -1,0 +1,4 @@
+{"toon_app":"relay","packets":[
+{"ago":240,"destination":"g.toon.a86c49fe22274cf7.nowhere","outcome":"rejected","code":"F02","message":"no route to destination"},
+{"ago":3100,"destination":"g.toon.5f0c2e91b3d4.store","outcome":"rejected","code":"T04","message":"insufficient liquidity"},
+{"ago":9000,"destination":"g.toon.a86c49fe22274cf7.nowhere","outcome":"rejected","code":"F02","message":"no route to destination"}]}

@@ -39,6 +39,8 @@ case "$1 $2" in
     f="$STUB_DIR/$1$2"; [[ -r $f ]] && cat "$f" || exit 1 ;;
   "packet count")
     [[ -r $STUB_DIR/packetcount ]] && cat "$STUB_DIR/packetcount" || exit 2 ;;
+  "packet list")
+    [[ -r $STUB_DIR/packetlist ]] && cat "$STUB_DIR/packetlist" || exit 2 ;;
   "message list")
     # A toon without the command answers 2; $STUB_DIR/messages is what a newer one prints.
     [[ -r $STUB_DIR/messages ]] && cat "$STUB_DIR/messages" || exit 2 ;;
@@ -245,6 +247,26 @@ rm "$STUB_DIR/packetcount"
 out=$("$root/relay-events")
 check "state: a toon without packet count leaves packets unavailable" '.state.packets == null and .state.limits.per_day == "1000"'
 echo '{"toon_app":"relay","packets":{"fulfilled":12,"rejected":3},"rejects":{"T04":1,"F02":2},"fees_earned":"40"}' > "$STUB_DIR/packetcount"
+echo '{"toon_app":"relay","packets":[{"time":"2026-10-03T23:00:30.314592Z","destination":"g.a.nowhere","outcome":"rejected","code":"F02","message":"no route"},{"time":"2026-10-03T22:00:00Z","destination":"g.b","outcome":"rejected","code":"T04","message":"busy","extra":1}]}' > "$STUB_DIR/packetlist"
+rm -f "$STUB_DIR/calls"
+out=$("$root/relay-events")
+check "state: rejected packets, in the order printed, with four fields" '.state.rejected_packets == [{time:"2026-10-03T23:00:30.314592Z",destination:"g.a.nowhere",code:"F02",message:"no route"},{time:"2026-10-03T22:00:00Z",destination:"g.b",code:"T04",message:"busy"}]'
+grep -c "^packet list" "$STUB_DIR/calls" | grep -qx 1 || { echo "FAIL state: packet list not run exactly once"; fails=$((fails + 1)); }
+echo '{"packets":[]}' > "$STUB_DIR/packetlist"
+out=$("$root/relay-events")
+check "state: no rejected packets is an empty list" '.state.rejected_packets == []'
+echo '{"packets":[{"time":"t","code":"F02","message":"m","outcome":"rejected"},{"time":"t","destination":"d","code":"F02","message":"m","outcome":"fulfilled"},{"time":"t","destination":"d","code":"F02","message":"m","outcome":"rejected"}]}' > "$STUB_DIR/packetlist"
+out=$("$root/relay-events")
+check "state: incomplete and non-rejected entries are left out" '(.state.rejected_packets | length) == 1 and .state.rejected_packets[0].destination == "d"'
+echo '{"packets":"many"}' > "$STUB_DIR/packetlist"
+out=$("$root/relay-events")
+check "state: rejected packets of a shape not understood are unavailable, packets still show" '.state.rejected_packets == null and .state.packets.fulfilled == 12'
+echo '{"error":"not_running"}' > "$STUB_DIR/packetlist"
+out=$("$root/relay-events")
+check "state: rejected packets error document is unavailable" '.state.rejected_packets == null and .state.packets.fulfilled == 12'
+rm "$STUB_DIR/packetlist"
+out=$("$root/relay-events")
+check "state: a toon without packet list leaves rejected packets unavailable" '.state.rejected_packets == null and .state.packets.fulfilled == 12'
 out=$("$root/relay-events")
 rm "$STUB_DIR/channellist"; echo '{"error":"no channels"}' > "$STUB_DIR/routelist"
 out=$("$root/relay-events")
@@ -419,6 +441,9 @@ check "node changes: packet counts falling to 0 add nothing and leave attention 
 echo '{"packets":{"fulfilled":99,"rejected":9},"rejects":{"F02":9},"fees_earned":"7"}' > "$STUB_DIR/packetcount"
 out=$(at 1014)
 check "node changes: packet counts moving add nothing" '.activity == [] and .urgent == false and .attention == "none"'
+echo '{"packets":[{"time":"t","destination":"d","outcome":"rejected","code":"F02","message":"m"}]}' > "$STUB_DIR/packetlist"
+out=$(at 1015)
+check "node changes: new rejected packets add nothing and leave attention alone" '.activity == [] and .urgent == false and .attention == "none"'
 echo '{"relay":{"name":"Shelly","prices":{"write":"12"}}}' > "$STUB_DIR/config"
 echo '{"peers":[{"id":"bob","direction":"inbound","status":"connected"}]}' > "$STUB_DIR/peerlist"
 echo '{"channels":[{"peer":"bob","direction":"inbound","status":"open"}]}' > "$STUB_DIR/channellist"

@@ -25,6 +25,8 @@ case "${1:-} ${2:-}" in
   "route list") node routes ;;
   "limit show") node limits ;;
   "packet count") node packets ;;
+  "packet list")
+    jq -c --argjson now "$now" '{toon_app, packets: [.packets[] | . + {time: ($now - .ago | todate)} | del(.ago)]}' "$here/node/rejected-packets.json" ;;
   "logs --json") node logs ;;
   # What the supervisor opened: the same private messages that Network shows sealed.
   "message list")

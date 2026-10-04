@@ -30,7 +30,7 @@
 # spending limit); "looked_at" is when the Observer last looked, or null.
 # Read-only: nothing here opens the keystore, spends, changes state or
 # publishes. Only free `toon` commands are run: status, relay config, peer list,
-# channel list, route list, limit show, packet count, relay subscriptions, logs and message
+# channel list, route list, limit show, packet count, packet list, relay subscriptions, logs and message
 # list, which prints what the supervisor already opened. Wallet balances are
 # never read (they need the passphrase, ADR 0001).
 #
@@ -40,7 +40,14 @@
 # adds no Activity entry and never changes "urgent" or "attention".
 #
 # "state" is the node as `toon` reports it, or null when there is no agent node.
+# "rejected_packets" is what `toon packet list` prints, newest first, as the
+# command printed them: [{"time", "destination", "code", "message"}], [] when
+# nothing was rejected. An entry lacking one of them, or not a reject, is left
+# out. Rejected packets add no Activity entry and never change "urgent" or
+# "attention".
+#
 # Each group in it (status, relay, peers, channels, routes, limits, packets,
+# rejected_packets,
 # subscriptions, logs) is null when its command failed, returned an error
 # document or answered in a shape not understood, so the rest still shows.
 #
@@ -298,6 +305,7 @@ if [[ $status == null ]] || jq -e '.agent_node | type == "object"' <<<"$status" 
     --argjson routes "$(toon_json route list --json)" \
     --argjson limits "$(toon_json limit show --json)" \
     --argjson packets "$(toon_json packet count --json)" \
+    --argjson rejected "$(toon_json packet list --json)" \
     --argjson held "$(toon_json relay subscriptions --json)" \
     --argjson incoming "$incoming" \
     --argjson logs "$(toon_json logs --json)" '
@@ -343,6 +351,12 @@ if [[ $status == null ]] || jq -e '.agent_node | type == "object"' <<<"$status" 
         then {fulfilled: .packets.fulfilled, rejected: .packets.rejected,
           rejects: [.rejects | to_entries | sort_by(.key)[] | {code: .key, count: .value}],
           fees_earned: .fees_earned}
+        else error("shape") end)),
+      rejected_packets: ($rejected | group(
+        if (.packets | type) == "array"
+        then [.packets[] | select(type == "object" and .outcome == "rejected"
+            and all(.time, .destination, .code, .message; type == "string"))
+          | {time, destination, code, message}]
         else error("shape") end)),
       subscriptions: (if $held == null and $incoming == null then null else {
         held: ($held | group(items("subscriptions") | [.[] | str])),
