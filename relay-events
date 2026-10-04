@@ -215,7 +215,7 @@ relay_query() {
 state=null
 
 # Renderers: resolve an event into its parts, {label, title, summary, body,
-# links, ref}. A built-in Renderer handles a known kind and the fallback every
+# links, media, ref}. A built-in Renderer handles a known kind and the fallback every
 # other; the panel lays out parts and never interprets a kind. The part names
 # are the ones an agent-written description (ADR 0002) uses.
 #   label    what the event did, shown by its author ("" for a plain note)
@@ -223,6 +223,12 @@ state=null
 #   summary  a short line under the title, or ""
 #   body     the text
 #   links    http(s) addresses only
+#   media    the pictures to show, http(s) addresses only, at most four: what
+#            an `imeta` tag says is an image, and the addresses in the text
+#            that end as one. The same for every kind, built-in or described.
+#            The one exception is a stored file (kind 5094) that is a picture
+#            of at most 262144 base64 characters: its own bytes, as a `data:`
+#            address that relay-events builds and an event cannot supply.
 #   ref      the id of the event this one refers to, or ""
 # Renderers the agent wrote (ADR 0002): one JSON file per kind in
 # $config_dir/renderers/, read afresh each run so a new one shows on the next
@@ -260,7 +266,14 @@ def tags: (.tags | arrays // [])[] | arrays;
 def tag($n): [tags | select(.[0] == $n and length > 1) | .[1] | strings] | first // "";
 def text: (.content | strings) // "" | gsub("^\\s+|\\s+$"; "");
 def links: [tags | select((.[0] == "r" or .[0] == "url" or .[0] == "web") and length > 1) | .[1] | strings | select(test("^https?://"))] | unique;
-def base: {label: "", title: "", summary: "", body: text, links: links, ref: tag("e")};
+def image_address: test("^https?://\\S+\\.(png|jpe?g|gif|webp)(\\?\\S*)?$"; "i");
+def imeta_media: [tags | select(.[0] == "imeta") | [.[1:][] | strings] as $f
+  | ([$f[] | select(startswith("url ")) | ltrimstr("url ")] | first // "") as $u
+  | ([$f[] | select(startswith("m ")) | ltrimstr("m ")] | first // "") as $m
+  | select(($u | test("^https?://\\S+$")) and (($m | startswith("image/")) or ($m == "" and ($u | image_address)))) | $u];
+def media: (imeta_media + [text | scan("https?://\\S+") | select(image_address)])
+  | reduce .[] as $u ([]; if any(.[]; . == $u) then . else . + [$u] end) | .[0:4];
+def base: {label: "", title: "", summary: "", body: text, links: links, media: media, ref: tag("e")};
 def meta: (.content | strings | try fromjson catch null) | if type == "object" then . else {} end;
 def fallback:
   base + {label: ("kind " + (.kind | tostring)),
@@ -269,7 +282,7 @@ def fallback:
 def from($s): if $s == null then "" elif $s.tag != null then tag($s.tag) else text end;
 def described($d): {label: $d.label, title: from($d.title), summary: from($d.summary), body: from($d.body),
   links: ([$d.links[] as $l | tags | select(.[0] == $l.tag and length > 1) | .[1] | strings | select(test("^https?://"))] | unique),
-  ref: from($d.refers_to)};
+  media: media, ref: from($d.refers_to)};
 # A description that leaves the event nothing to show, its tags lacking every
 # part it names, gives way to the fallback, so no event is invisible.
 def described_or_fallback($d): . as $e | described($d) | if .title == "" and .summary == "" and .body == "" then $e | fallback else . end;
@@ -282,6 +295,12 @@ def parts:
   elif .kind == 7 then base + {label: "reacted", body: (text | if . == "+" or . == "" then "󰋑" elif . == "-" then "󰋕" else . end)}
   elif .kind == 1111 then base + {label: "commented"}
   elif .kind == 30023 then base + {label: "published", title: tag("title"), summary: tag("summary")}
+  elif .kind == 5094 then tag("output") as $type
+    | ([tags | select(.[0] == "i" and .[2] == "blob") | .[1] | strings] | first // "") as $blob
+    | base + {label: "stored a file", ref: "",
+        summary: ([$type, (if $blob == "" then "" else ($blob | (length * 3 / 4 | floor) - ([scan("=")] | length) | tostring) + " bytes" end)] | map(select(. != "")) | join(", ")),
+        media: (if ($type | test("^image/(png|jpeg|gif|webp)$")) and ($blob | length > 0 and length <= 262144 and test("^[A-Za-z0-9+/]+=*$"))
+          then ["data:" + $type + ";base64," + $blob] else media end)}
   elif .kind == 30817 then base + {label: "drafted", title: (tag("title") | if . == "" then tag("d") else . end), summary: tag("summary")}
   elif $custom[0][.kind | tostring] != null then described_or_fallback($custom[0][.kind | tostring])
   else fallback end;

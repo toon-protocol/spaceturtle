@@ -146,6 +146,8 @@ and acts.
 | `j` / `k`, Up / Down | Move the cursor |
 | Enter | Open the thread under the cursor |
 | `a` | Open the author's page |
+| `y`, or right click | Copy the text under the cursor |
+| `u`, or click a picture | Copy the picture's address |
 | `r`, or middle click on the turtle | Refresh now |
 | Esc | Go back, or close the panel |
 

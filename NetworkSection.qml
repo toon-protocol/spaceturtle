@@ -99,7 +99,8 @@ Item {
   // Leaving the view or the section leaves the Request unwritten.
   onVisibleChanged: if (!visible) cancelCompose()
 
-  // The label of the detail row whose value was just copied, for its "copied" flash.
+  // The label of the detail row whose value was just copied, or "event:" and the
+  // id of the event whose text was, for its "copied" flash.
   property string copiedLabel: ""
 
   readonly property string statusText: {
@@ -169,7 +170,8 @@ Item {
     return true
   }
 
-  // `y` or `c` copies the detail under the cursor, `o` opens a web address,
+  // `y` or `c` copies the detail or the event's text under the cursor, `u` the
+  // address of its first picture, `o` opens a web address,
   // `a` opens the author of the event under the cursor. `f` asks the agent to
   // follow or unfollow the author of the page; `w`, `e` and `b` to reply to,
   // react to or repost the note under the cursor.
@@ -177,6 +179,8 @@ Item {
     var detail = root.cursor < root.details.length ? root.details[root.cursor] : null
     if (text === "o" && detail && detail.openable) service.openUrl(detail.value)
     else if ((text === "y" || text === "c") && detail) root.copy(detail)
+    else if ((text === "y" || text === "c") && root.cursorEvent) root.copyEvent(root.cursorEvent)
+    else if (text === "u" && root.cursorEvent) root.copyFromEvent(root.cursorEvent, service.firstPicture(root.cursorEvent))
     else if (text === "a" && root.cursorEvent && !root.authorPage) service.openAuthor(root.cursorEvent.pubkey)
     else if (text === "f" && root.authorPage && !root.viewingSelf)
       root.compose(service.followsAuthor(root.profilePubkey) ? "unfollow" : "follow", root.profilePubkey, "")
@@ -202,6 +206,17 @@ Item {
   function copy(detail) {
     service.copy(detail.value)
     root.copiedLabel = detail.label
+    copiedTimer.restart()
+  }
+
+  // The whole of an event's text, not cut to the lines its row shows.
+  function copyEvent(event) { root.copyFromEvent(event, root.textOf(event)) }
+
+  // `u` or a click on a picture copies its address.
+  function copyFromEvent(event, value) {
+    if (event.missing === true || value === "") return
+    service.copy(value)
+    root.copiedLabel = "event:" + event.id
     copiedTimer.restart()
   }
 
@@ -255,12 +270,15 @@ Item {
   // What the event did, shown next to the author.
   function verbOf(event) { return String(partsOf(event).label || "") }
 
-  function bodyOf(event) {
+  function textOf(event) {
     var parts = partsOf(event)
     var lines = [parts.title, parts.summary, parts.body].filter(function(line) { return line })
     if (lines.length === 0 && parts.ref) lines.push(String(parts.ref).slice(0, 8))
     return lines.join("\n")
   }
+
+  // What a row shows: a picture shown under the text is not also named in it.
+  function bodyOf(event) { return service.withoutMedia(textOf(event), partsOf(event).media) }
 
   function ago(seconds) {
     var delta = Math.max(0, Math.floor(clock.now / 1000) - seconds)
@@ -652,6 +670,7 @@ Item {
     readonly property int depth: Math.min(modelData.depth || 0, 6)
     readonly property bool missing: modelData.missing === true
     readonly property real indent: depth * Style.space(14)
+    readonly property bool justCopied: !missing && root.copiedLabel === "event:" + modelData.id
     // Requests already waiting on this note, so it is not asked twice.
     readonly property string waitingText: missing ? "" : root.service.waitingKinds("", modelData.id)
       .map(function(k) { return k + " waiting" }).join(" · ")
@@ -676,11 +695,13 @@ Item {
     MouseArea {
       anchors.fill: parent
       hoverEnabled: true
+      acceptedButtons: Qt.LeftButton | Qt.RightButton
       cursorShape: Qt.PointingHandCursor
       onPositionChanged: function(mouse) { if (pointerGate.moved(row, mouse)) root.hover(row.target) }
-      onClicked: {
+      onClicked: function(mouse) {
         root.hover(row.target)
-        root.activate()
+        if (mouse.button === Qt.RightButton) root.copyEvent(row.modelData)
+        else root.activate()
       }
     }
 
@@ -779,8 +800,8 @@ Item {
           textFormat: Text.PlainText
           anchors.right: parent.right
           anchors.baseline: author.baseline
-          text: root.ago(row.modelData.created_at)
-          color: root.dim
+          text: row.justCopied ? "copied" : root.ago(row.modelData.created_at)
+          color: row.justCopied ? Color.accent : root.dim
           font.family: Style.font.family
           font.pixelSize: Style.font.caption
         }
@@ -798,6 +819,16 @@ Item {
         // In a thread the event under the cursor is read in full; the page scrolls within it.
         maximumLineCount: root.threadView && row.hasCursor ? 100000 : (root.authorPage ? 12 : 4)
         elide: Text.ElideRight
+      }
+
+      MediaStrip {
+        width: parent.width
+        sources: root.partsOf(row.modelData).media || []
+        dim: root.dim
+        onPicked: function(address) {
+          root.hover(row.target)
+          root.copyFromEvent(row.modelData, address)
+        }
       }
 
       Text {

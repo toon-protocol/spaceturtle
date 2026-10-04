@@ -495,6 +495,22 @@ Item {
     return count
   }
 
+  // An event's text without the addresses of the pictures shown under it.
+  function withoutMedia(text, media) {
+    var out = String(text || "")
+    var list = media || []
+    for (var i = 0; i < list.length; i++)
+      if (/^https?:\/\//.test(list[i])) out = out.split(list[i]).join("")
+    return out.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim()
+  }
+
+  // The first web picture of an event, or "".
+  function firstPicture(event) {
+    var list = (event && event.parts && event.parts.media) || []
+    for (var i = 0; i < list.length; i++) if (/^https?:\/\//.test(list[i])) return list[i]
+    return ""
+  }
+
   function copy(value) {
     if (value === "") return
     // Passed as an argument, never through a shell: the value comes from a profile.

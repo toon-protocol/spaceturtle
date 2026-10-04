@@ -41,6 +41,9 @@ One JSON file per kind, in `~/.config/spaceturtle/renderers/`.
 | `links` | A list of `{"tag": NAME}`: every value of every tag of that name that is an `http(s)` address, and nothing else |
 | `refers_to` | The id of the event this one refers to, shown in the part `ref` when the event has nothing else to show |
 
+The pictures of an event are not a field: every kind shows what an `imeta` tag says is an
+image, and the picture addresses in its content, whatever its description says.
+
 `title`, `summary`, `body` and `refers_to` each take one of two shapes:
 
 | Shape | Picks |
@@ -64,7 +67,7 @@ the tags and the content. That happens when:
 - `kind` is missing or not a whole number
 - a field has the wrong type
 - a source is anything but exactly one of the two shapes above
-- the kind has a built-in Renderer (0, 1, 3, 5, 6, 7, 16, 1111, 30023, 30817): the agent
+- the kind has a built-in Renderer (0, 1, 3, 5, 6, 7, 16, 1111, 5094, 30023, 30817): the agent
   never overrides one
 
 A broken file costs only its own kind. The rest of the document is unaffected.
