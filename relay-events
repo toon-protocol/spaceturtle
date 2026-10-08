@@ -30,7 +30,7 @@
 # spending limit); "looked_at" is when the Observer last looked, or null.
 # Read-only: nothing here opens the keystore, spends, changes state or
 # publishes. Only free `toon` commands are run: status, relay config, peer list,
-# channel list, route list, limit show, packet count, packet list, relay subscriptions, logs and message
+# channel list, route list, limit show, packet count, packet list, packet history, relay subscriptions, logs and message
 # list, which prints what the supervisor already opened. Wallet balances are
 # never read (they need the passphrase, ADR 0001).
 #
@@ -46,8 +46,18 @@
 # out. Rejected packets add no Activity entry and never change "urgent" or
 # "attention".
 #
+# "packet_history" is what `toon packet history --json` prints, the connector's
+# recent packets newest first, kept in its memory and forgotten when it restarts:
+# {"packets": [{"time", "direction", "destination", "from", "to", "amount",
+# "fee", "outcome", "code", "message"}], "dropped"} with only the fields a packet
+# has, all strings. A row that is not an object, or lacks a string time or
+# outcome, is left out; a field that is not a string is absent; "dropped" is 0
+# when missing or not a number. [] packets is a connector with its history off
+# or with nothing handled (toon prints the same). No packet adds an Activity
+# entry or changes "urgent" or "attention".
+#
 # Each group in it (status, relay, peers, channels, routes, limits, packets,
-# rejected_packets,
+# rejected_packets, packet_history,
 # subscriptions, logs) is null when its command failed, returned an error
 # document or answered in a shape not understood, so the rest still shows.
 #
@@ -336,6 +346,7 @@ if [[ $status == null ]] || jq -e '.agent_node | type == "object"' <<<"$status" 
     --argjson limits "$(toon_json limit show --json)" \
     --argjson packets "$(toon_json packet count --json)" \
     --argjson rejected "$(toon_json packet list --json)" \
+    --argjson history "$(toon_json packet history --json)" \
     --argjson held "$(toon_json relay subscriptions --json)" \
     --argjson incoming "$incoming" \
     --argjson logs "$(toon_json logs --json)" '
@@ -387,6 +398,14 @@ if [[ $status == null ]] || jq -e '.agent_node | type == "object"' <<<"$status" 
         then [.packets[] | select(type == "object" and .outcome == "rejected"
             and all(.time, .destination, .code, .message; type == "string"))
           | {time, destination, code, message}]
+        else error("shape") end)),
+      packet_history: ($history | group(
+        if (.packets | type) == "array"
+        then {packets: [.packets[] | select(type == "object" and (.time | type) == "string"
+            and (.outcome | type) == "string")
+          | {time, direction, destination, from, to, amount, fee, outcome, code, message}
+          | with_entries(select(.value | type == "string"))],
+          dropped: (if (.dropped | type) == "number" then .dropped else 0 end)}
         else error("shape") end)),
       subscriptions: (if $held == null and $incoming == null then null else {
         held: ($held | group(items("subscriptions") | [.[] | str])),

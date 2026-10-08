@@ -158,6 +158,7 @@ What `toon` reports of the node, in groups you move through with the cursor:
 - the spending limit and what is left today
 - packets fulfilled and rejected (one row per reject code) and fees earned, in base units; the counts restart with the connector
 - the packets the connector rejected, newest first: when, the destination, the reject code and the message. Fulfilled packets are counted, not listed. Rejected packets never light the turtle's dot, as no other Network traffic does
+- the connector's recent packets as "Packet history", newest first, one row each: when, then the direction (`delivered`, `forwarded` or `sent`; left out for a packet that expired or could not be routed), the outcome and reject code, the amount, the fee, the peers, the destination and the reject message. Amounts are bare numbers in base units. These are recent packets only, kept since the connector last started, and a second note says how many were not recorded when it dropped some. It takes the place of the rejected packets above when it has any packet; when it is unavailable or empty, the rejected packets show as before. No packet lights the turtle's dot or adds to Activity
 - subscriptions held, and held to your relay
 - the ILP and connector addresses
 - the last log lines
