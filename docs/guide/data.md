@@ -41,6 +41,7 @@ Only free, read-only `toon` commands:
 - `toon limit show`
 - `toon packet count`
 - `toon packet list`
+- `toon packet history`
 - `toon logs`
 - `toon message list`
 

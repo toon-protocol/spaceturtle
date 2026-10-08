@@ -109,12 +109,25 @@ Item {
       note("Counts are since the connector last started")
     }
 
-    group("Rejected packets")
-    if (!st.rejected_packets) unavailable()
-    else if (st.rejected_packets.length === 0) none()
-    else for (var q = 0; q < st.rejected_packets.length; q++) {
-      var rp = st.rejected_packets[q]
-      row(ago(rp.time), rp.destination + ", " + rp.code + ": " + rp.message)
+    var history = st.packet_history
+    if (history && history.packets.length > 0) {
+      group("Packet history")
+      for (var m = 0; m < history.packets.length; m++) {
+        var pk = history.packets[m]
+        var peers = pk.from && pk.to ? pk.from + " → " + pk.to : (pk.to ? "→ " + pk.to : (pk.from || ""))
+        row(ago(pk.time), joined([pk.direction || "", pk.outcome + (pk.code ? " " + pk.code : ""), pk.amount || "",
+          pk.fee ? "fee " + pk.fee : "", peers, pk.destination || "", pk.message || ""]))
+      }
+      note("Recent packets only, since the connector last started. Amounts are in base units")
+      if (history.dropped > 0) note(plural(history.dropped, "packet", "packets") + " not recorded")
+    } else {
+      group("Rejected packets")
+      if (!st.rejected_packets) unavailable()
+      else if (st.rejected_packets.length === 0) none()
+      else for (var q = 0; q < st.rejected_packets.length; q++) {
+        var rp = st.rejected_packets[q]
+        row(ago(rp.time), rp.destination + ", " + rp.code + ": " + rp.message)
+      }
     }
 
     group("Subscriptions")

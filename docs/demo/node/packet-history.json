@@ -1,0 +1,4 @@
+{"toon_app":"relay","dropped":0,"packets":[
+{"ago":120,"direction":"delivered","destination":"g.toon.a86c49fe22274cf7.relay","from":"peer-a","amount":"1000","outcome":"fulfilled"},
+{"ago":240,"direction":"sent","destination":"g.toon.a86c49fe22274cf7.nowhere","to":"peer-b","amount":"0","outcome":"rejected","code":"F02","message":"no route to destination"},
+{"ago":900,"direction":"forwarded","destination":"g.toon.a86c49fe22274cf7.relay","from":"peer-a","to":"peer-b","amount":"1000","fee":"10","outcome":"fulfilled"}]}
