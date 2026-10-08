@@ -269,7 +269,7 @@ check "state: rejected packets error document is unavailable" '.state.rejected_p
 rm "$STUB_DIR/packetlist"
 out=$("$root/relay-events")
 check "state: a toon without packet list leaves rejected packets unavailable" '.state.rejected_packets == null and .state.packets.fulfilled == 12'
-echo '{"toon_app":"relay","dropped":3,"packets":[{"time":"2026-10-04T13:00:30.314Z","direction":"forwarded","destination":"g.toon.a.relay","from":"peer-a","to":"peer-b","amount":"1000","fee":"10","outcome":"fulfilled","extra":"x"},{"time":"2026-10-04T13:00:12.001Z","direction":"sent","destination":"g.toon.a.nowhere","amount":"0","outcome":"rejected","code":"F02","message":"no route"},{"time":"2026-10-04T13:00:00Z","outcome":"rejected","code":"R00","amount":"1000","from":"peer-a","destination":"g.d","message":"expired"},{"direction":"sent","outcome":"fulfilled"},"junk",{"time":"t","outcome":"fulfilled","fee":10}]}' > "$STUB_DIR/packethistory"
+echo '{"toon_app":"relay","dropped":3,"packets":[{"time":"2026-10-04T13:00:30.314Z","direction":"forwarded","destination":"g.toon.a.relay","from":"peer-a","to":"peer-b","amount":"1000","fee":"10","outcome":"fulfilled","extra":"x"},{"time":"2026-10-04T13:00:12.001Z","direction":"sent","destination":"g.toon.a.nowhere","amount":"0","outcome":"rejected","code":"F02","message":"no route"},{"time":"2026-10-04T13:00:00Z","outcome":"rejected","code":"R00","amount":"1000","from":"peer-a","destination":"g.d","message":"expired"},{"direction":"sent","outcome":"fulfilled"},"junk",{"time":"t","direction":"sent"},{"time":"t","outcome":"fulfilled","fee":10}]}' > "$STUB_DIR/packethistory"
 : > "$STUB_DIR/calls"
 out=$("$root/relay-events")
 check "state: packet history, in the order printed, with only the ten fields" '.state.packet_history.packets == [{time:"2026-10-04T13:00:30.314Z",direction:"forwarded",destination:"g.toon.a.relay",from:"peer-a",to:"peer-b",amount:"1000",fee:"10",outcome:"fulfilled"},{time:"2026-10-04T13:00:12.001Z",direction:"sent",destination:"g.toon.a.nowhere",amount:"0",outcome:"rejected",code:"F02",message:"no route"},{time:"2026-10-04T13:00:00Z",outcome:"rejected",code:"R00",amount:"1000",from:"peer-a",destination:"g.d",message:"expired"},{time:"t",outcome:"fulfilled"}]'
@@ -278,15 +278,20 @@ grep -c "^packet history --json$" "$STUB_DIR/calls" | grep -qx 1 || { echo "FAIL
 echo '{"packets":[]}' > "$STUB_DIR/packethistory"
 out=$("$root/relay-events")
 check "state: an empty packet history is empty, with dropped 0, not unavailable" '.state.packet_history == {packets: [], dropped: 0}'
+echo '{"dropped":"3","packets":[]}' > "$STUB_DIR/packethistory"
+out=$("$root/relay-events")
+check "state: a packet history dropped that is not a number is 0" '.state.packet_history.dropped == 0'
+echo '{"packets":[]}' > "$STUB_DIR/packetlist"
 echo '{"packets":"many"}' > "$STUB_DIR/packethistory"
 out=$("$root/relay-events")
-check "state: packet history of a shape not understood is unavailable, the rest shows" '.state.packet_history == null and .state.packets.fulfilled == 12'
+check "state: packet history of a shape not understood is unavailable, the rest shows" '.state.packet_history == null and .state.packets.fulfilled == 12 and .state.rejected_packets == []'
 echo '{"error":"not_running"}' > "$STUB_DIR/packethistory"
 out=$("$root/relay-events")
-check "state: packet history error document is unavailable" '.state.packet_history == null and .state.packets.fulfilled == 12'
+check "state: packet history error document is unavailable" '.state.packet_history == null and .state.packets.fulfilled == 12 and .state.rejected_packets == []'
 rm "$STUB_DIR/packethistory"
 out=$("$root/relay-events")
-check "state: a toon without packet history leaves it unavailable" '.state.packet_history == null and .state.packets.fulfilled == 12'
+check "state: a toon without packet history leaves it unavailable" '.state.packet_history == null and .state.packets.fulfilled == 12 and .state.rejected_packets == []'
+rm "$STUB_DIR/packetlist"
 out=$("$root/relay-events")
 rm "$STUB_DIR/channellist"; echo '{"error":"no channels"}' > "$STUB_DIR/routelist"
 out=$("$root/relay-events")
