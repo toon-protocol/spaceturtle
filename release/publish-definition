@@ -4,7 +4,8 @@
 # byte for byte agent/spaceturtle.yaml, the file the gate checked on this commit.
 # docker-agent publishes a file as written only when tests/check-agent's
 # published-as-written rule holds; this is the check that it did.
-# Usage: release/publish-definition <tag or version>
+# Usage: release/publish-definition <tag or version> [--as-latest]
+# With --as-latest the same file goes to `latest` in place of the version (release/mark-latest).
 # Needs docker-agent, signed in to each registry (it reads Docker's own credentials).
 #   DOCKERHUB_NAMESPACE        as release/references reads it; unset, there is no mirror
 #   SPACETURTLE_DOCKER_AGENT   the docker-agent program (default: docker-agent)
@@ -15,6 +16,11 @@ die() { echo "release/publish-definition: $*" >&2; exit 1; }
 docker_agent=${SPACETURTLE_DOCKER_AGENT:-docker-agent}
 def=$root/agent/spaceturtle.yaml
 refs=$("$root/release/references" "${1-}" definition)
+case ${2-} in
+  "") ;;
+  --as-latest) refs=$(sed 's/:[^:]*$/:latest/' <<<"$refs") ;;
+  *) die "usage: release/publish-definition <tag or version> [--as-latest]" ;;
+esac
 command -v "$docker_agent" >/dev/null 2>&1 || die "docker-agent is not installed ($docker_agent)"
 
 # docker-agent writes what it pulls into the directory it runs in.

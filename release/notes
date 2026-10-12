@@ -1,5 +1,5 @@
 #!/bin/bash
-# Prints a release's notes: the command that runs it, every reference it publishes under
+# Prints a release's notes: the command that runs it in the agent's zone image, every reference it publishes under
 # its version, and the versions the two zone images carry (images/versions).
 # Usage: release/notes <tag or version>      Reads DOCKERHUB_NAMESPACE as release/references does.
 set -euo pipefail
@@ -11,8 +11,10 @@ cat <<OUT
 ## Run it
 
 \`\`\`
-docker agent run $(awk '$1 == "definition" { print $2; exit }' <<<"$refs")
+docker agent run $(awk '$1 == "definition" { print $2; exit }' <<<"$refs") --template $(awk '$1 == "agent" { print $2; exit }' <<<"$refs")
 \`\`\`
+
+\`--template\` names the agent's zone image, which holds \`toon\`. Without it the agent starts in \`docker-agent\`'s own image and none of its \`toon\` tools work.
 
 ## What this release publishes
 

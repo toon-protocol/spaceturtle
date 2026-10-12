@@ -99,6 +99,10 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: The agent definition, byte for byte the file the gate checked
         run: release/publish-definition "$GITHUB_REF_NAME"
+      # After everything under the version is published and checked, so latest never names
+      # a release that is only partly there. A pre-release moves nothing.
+      - name: latest
+        run: release/mark-latest "$GITHUB_REF_NAME"
       # Last, so a release exists only once everything it names is published.
       - name: Release notes
         env:
