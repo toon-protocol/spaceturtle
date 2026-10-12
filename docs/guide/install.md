@@ -8,8 +8,10 @@ installed and signed in to first, then `spaceturtle start`.
 
 - **Omarchy** with the Quickshell-based shell (the `omarchy plugin` commands). Built
   against Omarchy 4.0.4; see [Omarchy version](../development.md#omarchy-version).
-- **A running Install** (`spaceturtle start`), or any agent node with
-  [`toon`](https://github.com/toon-protocol/toon_cli) on `PATH` or in `~/.local/bin`.
+- **A running agent node**: [`toon`](https://github.com/toon-protocol/toon_cli) on `PATH`
+  or in `~/.local/bin`, and `toon up`. The panel cannot yet read the agent node of an
+  Install, which runs inside the connector's zone
+  ([ADR 0003](../adr/0003-the-agent-holds-no-key-that-pays.md)).
 - **`jq`, `curl` and `wl-copy`**. `wl-copy` is only used for copying values.
 
 ## 1. Add the plugin

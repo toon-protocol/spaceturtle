@@ -41,12 +41,15 @@ itself.
 
 ## Before you start
 
-Have these ready, because `spaceturtle start` checks them first and stops, changing
-nothing, when one is missing:
+Have these ready. `spaceturtle start` checks the first two before anything else and stops,
+changing nothing, when one is missing:
 
 - **A machine with KVM** (`/dev/kvm`). The connector's zone is a virtual machine.
-- **A Docker account, signed in to Docker Sandboxes** (`sbx`). Sign in with `sbx login`.
-- **`docker-agent`**, to run the agent's sessions.
+- **A Docker account, signed in to Docker Sandboxes** (`sbx`). Install
+  [`sbx`](https://github.com/docker/sbx-releases), then run `sbx login` and
+  `sbx daemon start -d`.
+- **`docker-agent`** needs no install of its own: it runs inside the agent's zone.
+- **systemd**, for the timer's user units.
 - **A model provider's key**, which is yours alone. Put it in
   `~/.config/spaceturtle-launcher/model-key` or run `spaceturtle key` after the first run.
 - **`bash`, `jq` and `curl`.**
@@ -69,9 +72,9 @@ On devnet, it:
 2. initialises the agent node inside it, makes the wallet and funds it from the devnet
    faucet;
 3. starts the supervisor, which runs the node's apps;
-4. writes a sealed backup of the wallet to `~/spaceturtle-backup`. **Keep it.**
-5. makes the agent key, with the default scope and spending limit, and places its private
+4. makes the agent key, with the default scope and spending limit, and places its private
    half in the agent's zone;
+5. writes a sealed backup of the wallet to `~/spaceturtle-backup`. **Keep it.**
 6. turns on the timer, which starts a session every 6 hours (`spaceturtle timer off` turns
    it off).
 
@@ -148,6 +151,8 @@ zone is not running. The model key is yours: put it in
 argument, and sits outside every directory the agent may read. Without it the launcher stops
 and says so.
 
+- `spaceturtle key` reads the model key from the terminal, without showing it, and writes
+  it to `~/.config/spaceturtle-launcher/model-key`, readable by you alone.
 - `spaceturtle set model <provider/model>` changes the model.
 - `spaceturtle timer on|off|interval <N>m|h|d` controls the timer, which starts a session
   with nobody present (`spaceturtle session --unattended`). `start` turns it on, every 6h,
@@ -191,7 +196,7 @@ no tool for any of them:
 | `spaceturtle status` | Also says whether the supervisor is running and how many apps are waiting |
 | `spaceturtle agent-key show` | The agent key's scope, limits and what is left today; never the private half |
 | `spaceturtle agent-key replace` | Makes a new key, revokes the old one, places the new private half in the agent's zone; the wallet is untouched |
-| `spaceturtle agent-key revoke` | Removes the key from the agent node's list; the agent's next order is refused |
+| `spaceturtle agent-key revoke` | Removes the key from the agent node's list and deletes its private half from the agent's zone; the agent's next order is refused |
 | `spaceturtle agent-key limit <amount>` | Sets the key's spending limit; the agent has no tool for it |
 
 `start` makes exactly one agent key, with the default scope (ADR 0003) and the default spending
@@ -203,7 +208,12 @@ read from the apps `toon status --json` reports as `pending`.
 
 ## The panel: an optional way to watch
 
-On Omarchy you can also watch the agent from the bar: a turtle in the bar, and a panel that opens on what the agent did. The panel only watches, and an Install runs without it.
+On Omarchy you can also watch the agent from the bar: a turtle in the bar, and a panel that
+opens on what the agent did. The panel only watches, and an Install runs without it.
+
+The panel reads an agent node through `toon` on your machine's `PATH`. Reading the agent node
+of an Install, inside the connector's zone, is not designed yet
+([ADR 0003](docs/adr/0003-the-agent-holds-no-key-that-pays.md)).
 
 <p align="center">
   <img src="docs/assets/panel-activity.gif" alt="The turtle in the Omarchy bar has a dot, and the panel opens to show what the agent did" width="640">
@@ -211,8 +221,8 @@ On Omarchy you can also watch the agent from the bar: a turtle in the bar, and a
 
 ### Install
 
-You need Omarchy 4.0.4, an Install that is running (`spaceturtle start`), and `jq`, `curl`
-and `wl-copy`.
+You need Omarchy 4.0.4, a running agent node with `toon` on your `PATH` (`toon up`), and
+`jq`, `curl` and `wl-copy`.
 
 **1. Add the plugin.** This puts the turtle in the bar.
 
