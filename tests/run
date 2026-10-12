@@ -1,6 +1,7 @@
 #!/bin/bash
-# Runs relay-events, mark-seen, request and the being-observed skill's answers against a stub `toon` and `curl` in a temporary home.
-# Needs only bash and jq. Usage: tests/run
+# Runs relay-events, mark-seen, request and the being-observed skill's answers against a stub `toon` and `curl` in a temporary home,
+# and holds the agent definition to its safety rules through tests/check-agent.
+# Needs only bash, jq and yq (mikefarah's). Usage: tests/run
 set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 fails=0 count=0
@@ -800,6 +801,46 @@ desc=$(sed -n '2,/^---$/p' "$root/skills/being-observed/SKILL.md" | grep '^descr
 count=$((count + 1))
 if [[ $desc == 'description: "'*'"' || ( -n $desc && $(grep -o ': ' <<<"$desc" | wc -l) -eq 1 ) ]]; then echo "ok   skill: the description is one YAML value"
 else echo "FAIL skill: the description holds an unquoted \": \", so the skills CLI skips the skill"; fails=$((fails + 1)); fi
+
+# --- the agent definition: tests/check-agent passes the real file, and fails each broken rule naming it
+agent_check() { # name, yq expression applied to a copy of the definition, rule and tool the failure must name (empty: must pass)
+  local f=$(mktemp); tmps+=("$f")
+  cp "$root/agent/spaceturtle.yaml" "$f"
+  yq -i "$2" "$f"
+  local res; res=$("$root/tests/check-agent" "$f"); local rc=$?
+  count=$((count + 1))
+  if [[ -z $3 ]]; then
+    if [[ $rc -eq 0 ]]; then echo "ok   agent: $1"; else echo "FAIL agent: $1: $res"; fails=$((fails + 1)); fi
+  elif [[ $rc -ne 0 && $res == *"FAIL $3"* ]]; then echo "ok   agent: $1"
+  else echo "FAIL agent: $1: expected a failure naming '$3', got rc=$rc: $res"; fails=$((fails + 1)); fi
+}
+tool='.agents.spaceturtle.toolsets += [{"type":"script","shell":{"probe":{"description":"d","args":{"who":{"type":"string"}},"cmd":"CMD"}}}]'
+with_cmd() { echo "${tool/CMD/"$1"}"; }
+agent_check "the definition as shipped" '.' ""
+agent_check "a shell tool" '.agents.spaceturtle.toolsets += [{"type":"shell"}]' "no-shell-tool: spaceturtle/shell"
+agent_check "a shell tool shared through use_toolsets" '.toolsets.sh = {"type":"shell"} | .agents.spaceturtle.use_toolsets = ["sh"]' "no-shell-tool: spaceturtle/shell"
+agent_check "a file tool without directories" 'del(.agents.spaceturtle.toolsets[0].allow_list)' "file-scope: spaceturtle/filesystem"
+agent_check "a file tool widened to the home" '.agents.spaceturtle.toolsets[0].allow_list += ["~"]' "file-scope: spaceturtle/filesystem"
+agent_check "a file tool widened by .." '.agents.spaceturtle.toolsets[0].allow_list += ["~/.config/spaceturtle/../toon"]' "file-scope: spaceturtle/filesystem"
+agent_check "a second file tool, unscoped" '.agents.spaceturtle.toolsets += [{"type":"file"}]' "file-scope: spaceturtle/file"
+agent_check "no sandbox" 'del(.runtime.sandbox)' "sandbox: spaceturtle"
+agent_check "a sandbox that is only the string true" '.runtime.sandbox = "true"' "sandbox: spaceturtle"
+agent_check "a skill on a branch" '.agents.spaceturtle.skills[0] = "https://github.com/toon-protocol/spaceturtle/tree/main/skills"' "skill-pinned: spaceturtle"
+agent_check "a skill from a bare repository" '.agents.spaceturtle.skills += ["https://github.com/toon-protocol/spaceturtle"]' "skill-pinned: spaceturtle"
+agent_check "a skill from a well-known URL" '.agents.spaceturtle.skills += ["https://skills.example.com"]' "skill-pinned: spaceturtle"
+agent_check "skills from the local filesystem" '.agents.spaceturtle.skills += ["local"]' "skill-pinned: spaceturtle"
+agent_check "a skill pinned by ref" '.agents.spaceturtle.skills[0] = "https://github.com/toon-protocol/spaceturtle?ref=8ab61103e210898761585249d2f6497fbfb28871&path=skills"' ""
+agent_check "a skill named, not a source" '.agents.spaceturtle.skills += ["being-observed"]' ""
+agent_check "a quoted argument" "$(with_cmd 'toon peer list --who \"$who\"')" ""
+agent_check "an argument in single quotes is not expanded, so it is not used" "$(with_cmd "toon peer list --who '\$who'")" ""
+agent_check "an unquoted argument" "$(with_cmd 'toon peer list --who $who')" "quoted-args: spaceturtle/probe"
+agent_check "an unquoted argument in braces" "$(with_cmd 'toon peer list --who ${who}')" "quoted-args: spaceturtle/probe"
+agent_check "an argument quoted only in part" "$(with_cmd 'toon peer list --who \"a\"$who')" "quoted-args: spaceturtle/probe"
+for c in "toon limit set 5" "toon wallet show" "toon wallet backup" "toon channel withdraw x" "toon channel open x" "toon create app" "toon init" "cd /tmp && toon  init" "toon --json wallet show" "'toon' wallet"; do
+  agent_check "a script running '$c'" "$(with_cmd "$c")" "forbidden-command: spaceturtle/probe"
+done
+agent_check "a script running toon limit show" "$(with_cmd 'toon limit show')" ""
+agent_check "a script whose toon subcommand is an argument" "$(with_cmd 'toon \"$who\"')" "forbidden-command: spaceturtle/probe"
 
 echo; echo "$count checks, $fails failed"
 [[ $fails -eq 0 ]]

@@ -26,7 +26,8 @@ labelled `wayfinder:*` are skipped (`.sandcastle/ready-issues.ts`). A human merg
 (else the `checks` job) of `.github/workflows/ci.yml` **on `main`**, in order. If there is
 no `ci.yml`, no such job, or no runnable step, the gate runs nothing and logs that loudly.
 Today the `gate` job of this repo's `.github/workflows/ci.yml` checks the scripts with
-`bash -n` and runs `tests/run`, which needs only bash and `jq`.
+`bash -n` and runs `tests/run`, which needs bash, `jq` and `yq` (mikefarah's). `tests/run`
+holds `agent/spaceturtle.yaml` to the safety rules of ADR 0003 through `tests/check-agent`.
 The rule lives in one place, `gateFromCi` in `.sandcastle/run-gate.ts`, tested by
 `.sandcastle/run-gate.test.ts`.
 

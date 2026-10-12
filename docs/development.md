@@ -4,7 +4,7 @@
 
 ## Tests
 
-`tests/run` runs `relay-events` (with its Renderer descriptions), `mark-seen` and `request` (and the answers the `being-observed` skill describes) against a stub `toon` and `curl` in a temporary home. It needs only bash and `jq`, and is what the `gate` job of `.github/workflows/ci.yml` runs.
+`tests/run` runs `relay-events` (with its Renderer descriptions), `mark-seen` and `request` (and the answers the `being-observed` skill describes) against a stub `toon` and `curl` in a temporary home, and holds the agent definition to the safety rules of ADR 0003 through `tests/check-agent`. It needs bash, `jq` and `yq` (mikefarah's), and is what the `gate` job of `.github/workflows/ci.yml` runs.
 
 ## Demo data
 
@@ -25,7 +25,9 @@ without an agent node.
 | `relay-events` | Prints the agent's activity, the relay's other events, each event with its resolved parts (label, title, summary, body, links, ref) and what it refers to and what refers to it, the events a thread needs beyond the limit, profiles, the Persona (the agent identity's newest profile with a name, or `null`), follow lists, node addresses, the node's state, the Requests and the agent's private messages (grouped into conversations, or why they cannot be read) as one JSON document, with its `attention` state (`none`, `news`, `urgent`) |
 | `skills/being-observed/SKILL.md` | The agent's skill: the public key file, the Persona (creating, reading and living by it, renaming the relay), reading the Requests, answering them, writing a Renderer for a kind |
 | `request` | Writes a Request into the queue, or withdraws a waiting one |
-| `tests/run` | The tests of `relay-events`, `mark-seen`, `request` and the `being-observed` skill's answers |
+| `agent/spaceturtle.yaml` | The agent's definition for `docker-agent`: its instruction, its file tool and the skills it loads |
+| `tests/check-agent` | Checks an agent definition against the rules that keep the agent away from the money (ADR 0003) |
+| `tests/run` | The tests of `relay-events`, `mark-seen`, `request`, the `being-observed` skill's answers and `tests/check-agent` |
 
 Saving a file in an installed copy reloads the plugin. If a change does not show, run `omarchy restart shell`.
 
