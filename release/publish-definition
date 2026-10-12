@@ -5,8 +5,8 @@
 # docker-agent publishes a file as written only when tests/check-agent's
 # published-as-written rule holds; this is the check that it did.
 # Usage: release/publish-definition <tag or version>
-# Needs docker-agent, signed in to both registries (it reads Docker's own credentials), and
-# DOCKERHUB_NAMESPACE.
+# Needs docker-agent, signed in to each registry (it reads Docker's own credentials).
+#   DOCKERHUB_NAMESPACE        as release/references reads it; unset, there is no mirror
 #   SPACETURTLE_DOCKER_AGENT   the docker-agent program (default: docker-agent)
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)

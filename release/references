@@ -1,23 +1,24 @@
 #!/bin/bash
 # Names everything a release publishes: the agent definition and the two zone images, in
-# GitHub's registry and on Docker Hub, all under the one version of the tag. Nothing is
+# GitHub's registry and, when DOCKERHUB_NAMESPACE names the account or organisation that
+# holds the mirror, on Docker Hub too, all under the one version of the tag. Nothing is
 # published as `latest`, which could name a definition and images of different releases.
 # Usage: release/references <tag or version> [definition|agent|connector]
 # Prints "<artifact> <reference>" lines, or only the references of the artifact named.
-# Needs DOCKERHUB_NAMESPACE, the Docker Hub account or organisation that holds the mirror.
 set -euo pipefail
 die() { echo "release/references: $*" >&2; exit 1; }
 
 version=${1-}; version=${version#v}
 [[ $version =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]] || die "'${1-}' is not a version (v1.2.3 or v1.2.3-rc.1)"
-[[ -n ${DOCKERHUB_NAMESPACE:-} ]] || die "DOCKERHUB_NAMESPACE is not set, so the Docker Hub mirror has no name"
 only=${2:-}
 [[ -z $only || $only =~ ^(definition|agent|connector)$ ]] || die "'$only' is not published: definition, agent or connector"
 
+registries=(ghcr.io/toon-protocol)
+[[ -z ${DOCKERHUB_NAMESPACE:-} ]] || registries+=("docker.io/$DOCKERHUB_NAMESPACE")
 for artifact in definition agent connector; do
   [[ -z $only || $only == "$artifact" ]] || continue
   name=spaceturtle; [[ $artifact == definition ]] || name=spaceturtle-$artifact-zone
-  for registry in ghcr.io/toon-protocol "docker.io/$DOCKERHUB_NAMESPACE"; do
+  for registry in "${registries[@]}"; do
     if [[ -n $only ]]; then echo "$registry/$name:$version"; else echo "$artifact $registry/$name:$version"; fi
   done
 done

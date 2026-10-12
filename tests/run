@@ -887,7 +887,7 @@ for bad in "" main 1.2 v1.2.3.4 "v1.2.3 x" v01.2.3 latest; do
   [[ $rc -ne 0 && $out == *"not a version"* ]]; release_check "'$bad' is not a version, and nothing is named" $?
 done
 out=$(DOCKERHUB_NAMESPACE= "$root/release/references" v1.2.3 2>&1); rc=$?
-[[ $rc -ne 0 && $out == *DOCKERHUB_NAMESPACE* ]]; release_check "without a Docker Hub namespace nothing is named" $?
+[[ $rc -eq 0 && $out == "$(grep ' ghcr.io/toon-protocol/' <<<"$want")" ]]; release_check "without a Docker Hub namespace, GitHub's registry alone is named" $?
 out=$(refs v1.2.3 turtle); rc=$?
 [[ $rc -ne 0 ]]; release_check "an artifact that does not exist is refused" $?
 
@@ -931,6 +931,9 @@ release_env; echo docker.io > "$STUB_DIR/alter"; publish v1.2.3; rc=$?
 release_env; echo docker.io > "$STUB_DIR/fail-on"; publish v1.2.3; rc=$?
 [[ $rc -ne 0 ]] && grep -q 'docker.io/toonhub/spaceturtle:1.2.3' "$tmp/out"; published_check "a push that fails fails the release and is named" $?
 
+release_env; DOCKERHUB_NAMESPACE= publish v1.2.3; rc=$?
+[[ $rc -eq 0 && $(ls "$STUB_DIR/registry") == 'ghcr.io_toon-protocol_spaceturtle:1.2.3' ]]; published_check "without a Docker Hub namespace the definition goes to GitHub's registry alone" $?
+
 release_env; publish not-a-version; rc=$?
 [[ $rc -ne 0 && ! -e $STUB_DIR/calls ]]; published_check "with no version nothing is pushed" $?
 
@@ -945,6 +948,8 @@ for v in 'docker agent run ghcr.io/toon-protocol/spaceturtle:1.2.3' $(refs v1.2.
   grep -qF -- "$v" <<<"$notes" || { lacking=1; echo "       the notes lack: $v"; }
 done
 release_check "the notes name the command, every reference and the toon, docker-agent and runtime versions" $lacking
+notes=$("$root/release/notes" v1.2.3 2>&1); rc=$?
+[[ $rc -eq 0 && $(grep -c 'ghcr.io/toon-protocol/' <<<"$notes") -eq 4 ]] && ! grep -q 'docker\.io' <<<"$notes"; release_check "without a Docker Hub namespace the notes name GitHub's registry alone" $?
 
 # --- the launcher: spaceturtle start, against a stub sbx in a temporary home ---
 launcher_env() {

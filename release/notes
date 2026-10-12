@@ -1,7 +1,7 @@
 #!/bin/bash
 # Prints a release's notes: the command that runs it, every reference it publishes under
 # its version, and the versions the two zone images carry (images/versions).
-# Usage: release/notes <tag or version>      Needs DOCKERHUB_NAMESPACE.
+# Usage: release/notes <tag or version>      Reads DOCKERHUB_NAMESPACE as release/references does.
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 refs=$("$root/release/references" "${1-}")

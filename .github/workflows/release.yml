@@ -1,7 +1,8 @@
 name: release
 # A tag vX.Y.Z publishes everything a person pulls, under that one version: the agent
-# definition as an OCI artifact and both zone images, to GitHub's registry and to Docker
-# Hub. release/references names them all; docs/releasing.md says what a release needs.
+# definition as an OCI artifact and both zone images, to GitHub's registry and, once the
+# DOCKERHUB_NAMESPACE variable is set, to Docker Hub. release/references names them all;
+# docs/releasing.md says what a release needs.
 on:
   push:
     tags: ['v[0-9]+.[0-9]+.[0-9]+', 'v[0-9]+.[0-9]+.[0-9]+-*']
@@ -38,6 +39,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/login-action@v3
+        if: vars.DOCKERHUB_NAMESPACE != ''
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -50,7 +52,7 @@ jobs:
             grep -E '^[A-Z0-9_]+=' images/versions.env
             echo ARGS
           } >> "$GITHUB_OUTPUT"
-      # One build goes to both registries, so each holds the same image under the same digest.
+      # One build goes to every registry, so each holds the same image under the same digest.
       # Without a provenance attestation a reference is the image itself, not an index around it.
       - name: The agent's zone image
         uses: docker/build-push-action@v6
