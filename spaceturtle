@@ -14,7 +14,21 @@
 #       The passphrase is made inside the zone and stays there: it is never
 #       printed and never written on the machine.
 #
-# Stops before doing anything when the machine has no KVM, `sbx` is missing or
+#   spaceturtle waiting
+#       Lists the apps the agent node holds until the Observer approves them: each
+#       one's name, image and how long it has waited.
+#   spaceturtle approve <app>
+#       Approves a waiting app: `toon approve` starts it, and an image that is not
+#       TOON's own runs under the sandboxed runtime (toon_cli#209).
+#   spaceturtle refuse <app> [reason]
+#       Refuses a waiting app and discards it.
+#   spaceturtle status
+#       Says whether the zone and the supervisor are running and how many apps wait.
+#   Approving or refusing an app that is not waiting says so and changes nothing.
+#   These commands run `toon` with the home, in the connector's zone. The agent has
+#   no tool for them (tests/check-agent).
+#
+# `start` stops before doing anything when the machine has no KVM, `sbx` is missing or
 # `sbx` is signed out, and says the cause and the remedy.
 #
 # Environment, so that tests can run against a temporary home:
@@ -125,7 +139,70 @@ start() {
   say "the connector's zone is running"
 }
 
+# The apps waiting, one JSON object per line: {name, image, since}. `toon status --json`
+# lists an app in the `pending` state with the image and the time it was asked for
+# (seconds since the epoch or RFC 3339); a field it does not carry is left empty.
+waiting_apps() {
+  local doc
+  doc=$(in_zone 'toon status --json') || die "toon status failed in the zone"
+  jq -c '[.. | objects | select((.state // .status // "") == "pending" and (.name // "") != "")
+    | {name, image: (.image // ""), since: (.requested_at // .asked_at // .since // .created_at // null)}]
+    | .[]' <<<"$doc" || die "toon status gave a document that is not JSON"
+}
+
+age() { # a time as seconds or RFC 3339 -> "3d", "5h", "12m", "40s", or "unknown"
+  local t=$1 now secs
+  [[ -n $t && $t != null ]] || { echo unknown; return; }
+  [[ $t =~ ^[0-9]+$ ]] || t=$(date -d "$t" +%s 2>/dev/null) || { echo unknown; return; }
+  now=$(date +%s); secs=$((now - t)); ((secs < 0)) && secs=0
+  if ((secs >= 86400)); then echo "$((secs / 86400))d"
+  elif ((secs >= 3600)); then echo "$((secs / 3600))h"
+  elif ((secs >= 60)); then echo "$((secs / 60))m"
+  else echo "${secs}s"; fi
+}
+
+cmd_waiting() {
+  preflight
+  local lines name image since n=0
+  lines=$(waiting_apps) || exit 1
+  while IFS= read -r l; do
+    [[ -n $l ]] || continue
+    name=$(jq -r .name <<<"$l"); image=$(jq -r .image <<<"$l"); since=$(jq -r .since <<<"$l")
+    printf '%s\t%s\t%s\n' "$name" "$image" "$(age "$since")"; n=$((n + 1))
+  done <<<"$lines"
+  ((n > 0)) || say "no app is waiting"
+}
+
+is_waiting() { waiting_apps | jq -e --arg n "$1" 'select(.name == $n)' >/dev/null; }
+
+# approve|refuse <app> [reason]: only an app that is waiting is touched.
+decide() {
+  local verb=$1 app=${2:-} reason=${3:-}
+  [[ -n $app && $app != -* ]] || die "usage: spaceturtle $verb <app>${reason:+ }$([[ $verb == refuse ]] && echo ' [reason]')"
+  preflight
+  is_waiting "$app" || die "$app is not waiting, so nothing was changed. 'spaceturtle waiting' lists what is."
+  if [[ $verb == approve ]]; then
+    in_zone "toon approve -- $(sh_quote "$app")" || die "toon approve failed in the zone"
+    say "approved $app: it starts now, and an image that is not TOON's own runs under the sandboxed runtime"
+  else
+    in_zone "toon refuse ${reason:+--reason $(sh_quote "$reason") }-- $(sh_quote "$app")" || die "toon refuse failed in the zone"
+    say "refused $app: it is discarded"
+  fi
+}
+
+cmd_status() {
+  preflight
+  zone_exists || die "the connector's zone ($zone) does not exist. Run 'spaceturtle start'."
+  if in_zone 'pgrep -f "[t]oon up" >/dev/null'; then say "the supervisor is running"
+  else say "the supervisor is not running. Run 'spaceturtle start'."; fi
+  say "$(waiting_apps | grep -c .) app(s) waiting for approval"
+}
+
 case ${1:-} in
   start) start ;;
-  *) die "usage: spaceturtle start" ;;
+  waiting) cmd_waiting ;;
+  approve) decide approve "${2:-}" ;;
+  refuse) decide refuse "${2:-}" "${3:-}" ;;
+  status) cmd_status ;;
+  *) die "usage: spaceturtle start | status | waiting | approve <app> | refuse <app> [reason]" ;;
 esac
