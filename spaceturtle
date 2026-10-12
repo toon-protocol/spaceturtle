@@ -73,6 +73,24 @@
 #       the agent's zone (in a session, idle), the network, each app and whether the
 #       relay answers; whether the supervisor runs and how many apps wait. Exits 0
 #       when the connector's zone is stopped or missing.
+#   spaceturtle agent-key show
+#       Prints the agent key's scope, limits and what is left today (read from the
+#       agent's zone, which holds the key), and never the private half.
+#   spaceturtle agent-key replace
+#       Makes a new agent key, revokes the old one, and places the new private half in the
+#       agent's zone. The wallet is untouched.
+#   spaceturtle agent-key revoke
+#       Removes the agent key from the agent node's list, so the agent's next order is
+#       refused, and deletes the private half from the agent's zone. `start` does not
+#       make another; `agent-key replace` does.
+#   spaceturtle agent-key limit <amount>
+#       Sets the agent key's spending limit. Only the Observer can: the agent has no tool for it.
+#   `start` makes exactly one agent key, with the default scope (ADR 0003) and the default
+#   spending limit, and puts its private half in the agent's zone and nowhere else: it goes
+#   from the connector's zone, where `toon` writes it to a file that is deleted once it is
+#   placed, to the agent's zone through a pipe, never through an argument, the machine or
+#   the output of the launcher. A second run makes none, and neither does `upgrade` after
+#   a revoke.
 #   Approving or refusing an app that is not waiting says so and changes nothing.
 #   `waiting`, `approve`, `refuse` and `status` run `toon` with the home, in the
 #   connector's zone. The agent has no tool for them (tests/check-agent).
@@ -131,6 +149,9 @@ die() { echo "spaceturtle: $*" >&2; exit 1; }
 say() { echo "spaceturtle: $*"; }
 done_() { [[ -e $marks/$1 ]]; }
 mark() { mkdir -p "$marks" && : > "$marks/$1"; }
+
+# Where the agent key's private half lives in the agent's zone, outside the directories its file tool may read.
+agent_key_path='$HOME/.config/toon-agent/key'
 
 # Quotes a value for the zone's sh.
 sh_quote() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
@@ -335,14 +356,15 @@ session() {
   need_connector
   local args=(run --name "$agent_zone" --image "$agent_image"
     --allow-host "$host" --allow-host "localhost:$connector_port"
-    -e "$key_var" -- docker-agent run --model "$model")
+    -e "$key_var" -e TOON_AGENT_KEY -- docker-agent run --model "$model")
   if (( unattended )); then
     mkdir -p "$state_dir" && date -u +%Y-%m-%dT%H:%M:%SZ > "$state_dir/last-unattended" || die "cannot write $state_dir/last-unattended"
     args+=(--max-cost "$(conf_get ceiling 1)" --exec "Begin a session: read the waiting Requests and answer them, then do your daily work.")
   fi
   args+=("$agent_def")
   # The key reaches the process by name (-e), never as an argument.
-  env "$key_var=$(<"$key_file")" "$sbx" "${args[@]}"
+  # The agent key's path, not the key, goes in the environment; the file is in the agent's zone.
+  env "$key_var=$(<"$key_file")" "TOON_AGENT_KEY=${agent_key_path/\$HOME//home/agent}" "$sbx" "${args[@]}"
 }
 
 # --- the timer: a systemd user timer that runs an unattended session ---
@@ -431,9 +453,134 @@ start() {
   step_node
   step_faucet
   step_supervisor
+  step_agentkey
   step_backup
   step_timer
   say "the connector's zone is running"
+}
+
+# --- the agent key: made and kept from outside the agent's zone ---
+# The ids of the agent keys on the agent node's list, one per line.
+agent_key_ids() {
+  local doc
+  doc=$(in_zone 'toon agent-key list --json') || return 1
+  jq -r '(if type == "array" then . else (.keys // .agent_keys // []) end)[] | (.id // .public_key // empty)' <<<"$doc"
+}
+
+# The agent's zone must exist and run before a key can be placed in it. Takes its state.
+ensure_agent_zone() {
+  local s=$1
+  if [[ $s == "not created" ]]; then
+    mkdir -p "$state_dir/agent-workspace" || die "cannot create $state_dir/agent-workspace"
+    "$sbx" create --name "$agent_zone" --template "$agent_image" shell "$state_dir/agent-workspace" || die "the agent's zone could not be created"
+  elif [[ $s == stopped ]]; then
+    "$sbx" start "$agent_zone" || die "the agent's zone could not be started"
+  fi
+}
+
+# Makes a key in the connector's zone, where the home is. The private half is a file there
+# until place_agent_key moves it.
+make_agent_key() {
+  in_zone 'rm -f /tmp/agent-key; umask 077; toon agent-key create --output /tmp/agent-key --json >/dev/null' \
+    || { in_zone 'rm -f /tmp/agent-key'; die "toon agent-key create failed in the zone"; }
+}
+
+# Moves the private half to the agent's zone through a pipe, then deletes it from the connector's zone.
+# The agent's zone is left stopped unless it was running, so `status` does not take it for a session.
+place_agent_key() {
+  local was; was=$(zone_state "$agent_zone")
+  ensure_agent_zone "$was"
+  if ! "$sbx" exec "$zone" sh -c 'cat /tmp/agent-key' | "$sbx" exec -i "$agent_zone" sh -c \
+    'umask 077 && mkdir -p "$HOME/.config/toon-agent" && cat > "$HOME/.config/toon-agent/key.new" && [ -s "$HOME/.config/toon-agent/key.new" ] && mv -f "$HOME/.config/toon-agent/key.new" "$HOME/.config/toon-agent/key"'; then
+    in_zone 'rm -f /tmp/agent-key'
+    die "the agent key could not be placed in the agent's zone"
+  fi
+  in_zone 'rm -f /tmp/agent-key' || die "the agent key is placed, but its copy in the connector's zone could not be deleted"
+  [[ $was == running ]] || "$sbx" stop "$agent_zone" || die "the agent key is placed, but the agent's zone could not be stopped"
+}
+
+revoke_agent_keys() { # ids
+  local id
+  for id in "$@"; do
+    in_zone "toon agent-key revoke -- $(sh_quote "$id")" || die "toon agent-key revoke failed in the zone"
+  done
+}
+
+# Exactly one agent key: made on the first run, never again. A run that finds a key on the
+# list and no private half (the agent's zone was replaced) makes a new key, as replace does.
+step_agentkey() {
+  done_ agentkey && return
+  local old
+  old=$(agent_key_ids) || die "toon agent-key list failed in the zone"
+  if [[ -z $old ]]; then
+    say "making the agent key"
+    make_agent_key
+    place_agent_key
+  elif in_zone 'test -s /tmp/agent-key'; then
+    say "placing the agent key made earlier"
+    place_agent_key
+  else
+    say "the agent key's private half is not in the agent's zone, so making a new key"
+    make_agent_key
+    place_agent_key
+    revoke_agent_keys $old
+  fi
+  mark agentkey
+}
+
+# Keeps a document from carrying a private half, whatever field it is in.
+scrub() { jq 'walk(if type == "object" then with_entries(select(.key | test("private|secret|seed"; "i") | not)) else . end)'; }
+
+cmd_agent_key() {
+  local sub=${1:-} old doc
+  case $sub in
+    show|replace|revoke) [[ $# -eq 1 ]] || die "usage: spaceturtle agent-key $sub" ;;
+    limit) [[ $# -eq 2 ]] && valid_ceiling "$2" || die "usage: spaceturtle agent-key limit <amount>, such as 5" ;;
+    *) die "usage: spaceturtle agent-key show | replace | revoke | limit <amount>" ;;
+  esac
+  preflight
+  [[ $(zone_state) == running ]] || die "the connector's zone ($zone) is not running. Run 'spaceturtle start' first."
+  command -v jq >/dev/null 2>&1 || die "jq is not installed."
+  old=$(agent_key_ids) || die "toon agent-key list failed in the zone"
+  case $sub in
+    show)
+      doc=$(in_zone 'toon agent-key list --json') || die "toon agent-key list failed in the zone"
+      scrub <<<"$doc" || die "toon agent-key list gave a document that is not JSON"
+      if [[ $(zone_state "$agent_zone") == running ]]; then
+        # What is left today is read by the key itself, from the agent's zone; the key is not printed.
+        "$sbx" exec "$agent_zone" sh -c "TOON_AGENT_KEY=$agent_key_path toon limit show --json" | scrub \
+          || say "what is left today could not be read from the agent's zone"
+      else
+        say "what is left today is read from the agent's zone, which is not running. Start a session, or run 'spaceturtle session'."
+      fi ;;
+    replace)
+      # The new key is made and placed before the old is revoked, so a failure leaves the old one working.
+      say "making a new agent key"
+      make_agent_key
+      place_agent_key
+      revoke_agent_keys $old
+      mark agentkey
+      say "the agent key is replaced. The wallet is as it was." ;;
+    revoke)
+      [[ -n $old ]] || { say "there is no agent key to revoke."; return 0; }
+      revoke_agent_keys $old
+      local astate; astate=$(zone_state "$agent_zone")
+      if [[ $astate != "not created" ]]; then
+        ensure_agent_zone "$astate"
+        "$sbx" exec "$agent_zone" sh -c "rm -f $agent_key_path" \
+          || die "the agent key is revoked, but its private half could not be deleted from the agent's zone"
+        [[ $astate == running ]] || "$sbx" stop "$agent_zone" || say "the agent's zone could not be stopped again"
+      fi
+      mark agentkey
+      say "the agent key is revoked: the agent's next order is refused. 'spaceturtle agent-key replace' makes another." ;;
+    limit)
+      [[ -n $old ]] || die "there is no agent key. Run 'spaceturtle start' or 'spaceturtle agent-key replace'."
+      local id
+      for id in $old; do
+        in_zone "toon agent-key set --limit $(sh_quote "$2") -- $(sh_quote "$id")" || die "toon agent-key set failed in the zone"
+      done
+      say "the agent key's spending limit is $2" ;;
+  esac
 }
 
 # The apps waiting, one JSON object per line: {name, image, since}. `toon status --json`
@@ -588,6 +735,10 @@ cmd_upgrade() {
   step_node
   step_faucet
   step_supervisor
+  # The agent's zone, and the private half in it, is gone: a key on the list is made again; a revoked one is not.
+  local keys; keys=$(agent_key_ids) || die "toon agent-key list failed in the zone"
+  [[ -z $keys ]] || rm -f "$marks/agentkey"
+  step_agentkey
   step_backup
   say "the connector's zone is upgraded and running"
 }
@@ -654,9 +805,10 @@ case ${1:-} in
   approve) decide approve "${2:-}" ;;
   refuse) decide refuse "${2:-}" "${3:-}" ;;
   status) cmd_status ;;
+  agent-key) shift; cmd_agent_key "$@" ;;
   stop) [[ $# -eq 1 ]] || die "usage: spaceturtle stop"; cmd_stop ;;
   upgrade) [[ $# -eq 1 ]] || die "usage: spaceturtle upgrade"; cmd_upgrade ;;
   backup) [[ $# -eq 1 ]] || die "usage: spaceturtle backup"; cmd_backup ;;
   remove) shift; cmd_remove "$@" ;;
-  *) die "usage: spaceturtle start | stop | upgrade | backup | remove [--delete-wallet] | mainnet [--keep-limit] | session | timer | set | key | status | waiting | approve <app> | refuse <app> [reason]" ;;
+  *) die "usage: spaceturtle start | stop | upgrade | backup | remove [--delete-wallet] | mainnet [--keep-limit] | session | timer | set | key | status | waiting | approve <app> | refuse <app> [reason] | agent-key show|replace|revoke|limit <amount>" ;;
 esac
