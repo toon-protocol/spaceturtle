@@ -1,0 +1,47 @@
+name: images
+# Builds the two zone images on every change to them. Publishing is another ticket.
+on:
+  pull_request:
+    paths: ['images/**', '.github/workflows/images.yml']
+  push:
+    branches: [main]
+    paths: ['images/**', '.github/workflows/images.yml']
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [agent, connector]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build arguments from images/versions.env
+        id: args
+        run: |
+          {
+            echo 'list<<ARGS'
+            grep -E '^[A-Z0-9_]+=' images/versions.env
+            echo ARGS
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: images/${{ matrix.image }}
+          file: images/${{ matrix.image }}/Dockerfile
+          build-args: ${{ steps.args.outputs.list }}
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: spaceturtle-${{ matrix.image }}-zone:ci
+      - name: toon in the image
+        run: docker run --rm --entrypoint toon spaceturtle-${{ matrix.image }}-zone:ci --version
+      - name: The agent's zone holds no wallet, passphrase or key
+        if: matrix.image == 'agent'
+        run: |
+          docker run --rm --entrypoint sh spaceturtle-agent-zone:ci -c '
+            ! env | grep -i -E "passphrase|mnemonic|secret|agent_key" &&
+            ! ls -d "$HOME/.toon" "$HOME/.config/toon" "$HOME/.local/share/toon" 2>/dev/null | grep .'
+      - name: gVisor and the overlay client's proxy line are in the connector's zone
+        if: matrix.image == 'connector'
+        run: |
+          docker run --rm --entrypoint sh spaceturtle-connector-zone:ci -c 'runsc --version && cat /usr/local/etc/anon/anonrc-defaults'

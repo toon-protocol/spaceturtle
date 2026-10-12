@@ -29,7 +29,7 @@ unquoted_vars() {
   done
 }
 
-forbidden='(^|[^[:alnum:]_.-])["'"'"']?toon["'"'"']?([[:space:]]+-[^[:space:]]+)*[[:space:]]+(limit[[:space:]]+set|wallet|channel[[:space:]]+withdraw|channel[[:space:]]+open|create|init)([^[:alnum:]_-]|$)'
+forbidden='(^|[^[:alnum:]_.-])["'"'"']?toon["'"'"']?([[:space:]]+-[^[:space:]]+)*[[:space:]]+(limit[[:space:]]+set|wallet|channel[[:space:]]+withdraw|channel[[:space:]]+open|create|init|approve|refuse)([^[:alnum:]_-]|$)'
 
 while IFS= read -r agent; do
   jqa() { jq -r --arg a "$agent" --arg n "${2-}" ".agents[\$a] | $1" <<<"$json"; }
