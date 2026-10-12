@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
-import { gateFromCi, inBash } from './run-gate.ts';
+import {
+  fixPrompt,
+  gateFixRun,
+  gateFromCi,
+  GATE_FIX_SIGNALS,
+  inBash,
+  runGateFix,
+} from './run-gate.ts';
 
 const CI = `
 name: CI
@@ -114,4 +121,73 @@ test('a step runs under sh, which has no pipefail of its own', () => {
 test('a step fails when any command in a pipe fails, or any line of it does', () => {
   assert.notEqual(sh(inBash('false | true')).status, 0);
   assert.equal(sh(inBash('false\necho reached')).stdout, '');
+});
+
+const FAILURE = { step: 'Tests', command: 'tests/run', exitCode: 1, output: 'not ok 3' };
+
+/** A fix attempt whose sessions answer with `signals`, in order. Records what happened. */
+async function fixAttempt(signals: (string | undefined)[], maxSessions = signals.length) {
+  const log: string[] = [];
+  const sessions = await runGateFix({
+    maxSessions,
+    session: async (n) => {
+      log.push(`session ${n}`);
+      return { completionSignal: signals[n - 1] };
+    },
+    push: async (n) => {
+      log.push(`push ${n}`);
+    },
+  });
+  return { sessions, log };
+}
+
+test('a gate-fix session that signals completion is the last one of its attempt', async () => {
+  const { sessions, log } = await fixAttempt([GATE_FIX_SIGNALS.complete, GATE_FIX_SIGNALS.complete]);
+  assert.equal(sessions, 1);
+  assert.deepEqual(log, ['session 1', 'push 1']);
+});
+
+test('a gate-fix session that says it is blocked ends the attempt too', async () => {
+  const { log } = await fixAttempt([GATE_FIX_SIGNALS.blocked, undefined]);
+  assert.deepEqual(log, ['session 1', 'push 1']);
+});
+
+test('a session that ends without a signal is followed by another, up to the limit', async () => {
+  const { sessions, log } = await fixAttempt([undefined, undefined, undefined, undefined], 3);
+  assert.equal(sessions, 3);
+  assert.deepEqual(log, ['session 1', 'push 1', 'session 2', 'push 2', 'session 3', 'push 3']);
+});
+
+test('every gate-fix session is pushed before the next one starts', async () => {
+  const { log } = await fixAttempt([undefined, GATE_FIX_SIGNALS.complete]);
+  assert.deepEqual(log, ['session 1', 'push 1', 'session 2', 'push 2']);
+});
+
+test('the fix prompt tells the agent how to say it is finished, fixed or already green', () => {
+  const prompt = fixPrompt(FAILURE, 1, 2);
+  for (const signal of Object.values(GATE_FIX_SIGNALS)) assert.ok(prompt.includes(signal), signal);
+  assert.match(prompt, /already passes/);
+});
+
+test('a gate-fix session that throws is still pushed, and the error is not swallowed', async () => {
+  const log: string[] = [];
+  await assert.rejects(
+    runGateFix({
+      session: async () => {
+        throw new Error('idle timeout');
+      },
+      push: async (n) => {
+        log.push(`push ${n}`);
+      },
+    }),
+    /idle timeout/
+  );
+  assert.deepEqual(log, ['push 1']);
+});
+
+test('a gate-fix session is one iteration that ends on either signal', () => {
+  const run = gateFixRun(2, 1, 'the prompt');
+  assert.equal(run.maxIterations, 1);
+  assert.deepEqual(run.completionSignal, [GATE_FIX_SIGNALS.complete, GATE_FIX_SIGNALS.blocked]);
+  assert.equal(run.name, 'gate-fix-2.1');
 });

@@ -32,7 +32,7 @@ import * as sandcastle from '@ai-hero/sandcastle';
 import { docker } from '@ai-hero/sandcastle/sandboxes/docker';
 import { sandboxSecrets } from './sandbox-secrets.ts';
 import { mintAppToken } from './mint-app-token.ts';
-import { fixPrompt, loadGate, runGate } from './run-gate.ts';
+import { fixPrompt, gateFixRun, loadGate, runGate, runGateFix } from './run-gate.ts';
 
 const issueNumber: string = (() => {
   const value = process.env.SANDCASTLE_ISSUE_NUMBER?.trim();
@@ -245,13 +245,15 @@ async function main() {
     let gate = await runGate(sandbox, gateSteps);
     for (let attempt = 1; !gate.passed && attempt <= MAX_GATE_FIX_ATTEMPTS; attempt++) {
       console.log(`\nGate is red — fix attempt ${attempt}/${MAX_GATE_FIX_ATTEMPTS}.`);
-      await sandbox.run({
-        name: `gate-fix-${attempt}`,
-        maxIterations: 20,
-        agent: sandcastle.claudeCode('claude-sonnet-5-5'),
-        prompt: fixPrompt(gate.failure!, attempt, MAX_GATE_FIX_ATTEMPTS),
+      const prompt = fixPrompt(gate.failure!, attempt, MAX_GATE_FIX_ATTEMPTS);
+      await runGateFix({
+        session: (n) =>
+          sandbox.run({
+            ...gateFixRun(attempt, n, prompt),
+            agent: sandcastle.claudeCode('claude-sonnet-5-5'),
+          }),
+        push: (n) => pushBranch(sandbox, `push:gate-fix-${attempt}.${n}`, { bestEffort: true }),
       });
-      await pushBranch(sandbox, `push:gate-fix-${attempt}`, { bestEffort: true });
       gate = await runGate(sandbox, gateSteps);
     }
     if (!gate.passed) {
