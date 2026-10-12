@@ -842,5 +842,23 @@ done
 agent_check "a script running toon limit show" "$(with_cmd 'toon limit show')" ""
 agent_check "a script whose toon subcommand is an argument" "$(with_cmd 'toon \"$who\"')" "forbidden-command: spaceturtle/probe"
 
+# --- the zone images (tests/check-images)
+image_check() { # name, shell snippet that breaks a copy of the images, expected output (empty = clean)
+  local d; d=$(mktemp -d); tmps+=("$d"); cp -r "$root/images" "$d/images"
+  (cd "$d/images" && eval "$2")
+  local got; got=$("$root/tests/check-images" "$d" 2>&1 | sed -n 's/^problem: //p' | head -1)
+  count=$((count+1))
+  if [[ -z $3 && -z $got ]] || [[ -n $3 && $got == *"$3"* ]]; then echo "ok   $1"; else echo "FAIL $1: got '$got', wanted '$3'"; fails=$((fails+1)); fi
+}
+image_check "the images as shipped" ":" ""
+image_check "a default for a version" "sed -i 's/^ARG TOON_VERSION\$/ARG TOON_VERSION=0.1.0/' agent/Dockerfile" "has a default"
+image_check "an unchecked toon" "sed -i '/sha256sum -c/d' connector/Dockerfile" "checksum is not verified"
+image_check "an unchecked gVisor" "sed -i '/sha512sum -c/d' connector/Dockerfile" "gVisor's checksum"
+image_check "an unpinned base" "sed -i 's/@\${DOCKER_AGENT_BASE_DIGEST}//' agent/Dockerfile" "not pinned by digest"
+image_check "a passphrase in the agent's zone" "echo 'ENV TOON_PASSPHRASE_FILE=/x' >> agent/Dockerfile" "passphrase, wallet or key"
+image_check "a toon init in the agent's zone" "echo 'RUN toon init' >> agent/Dockerfile" "passphrase, wallet or key"
+image_check "a pin that is no checksum" "sed -i 's/^TOON_SHA256_AMD64=.*/TOON_SHA256_AMD64=abc/' versions.env" "TOON_SHA256_AMD64 is not a sha256"
+image_check "a version images/versions leaves out" "sed -i '/GVISOR_VERSION/d' versions" "versions"
+
 echo; echo "$count checks, $fails failed"
 [[ $fails -eq 0 ]]

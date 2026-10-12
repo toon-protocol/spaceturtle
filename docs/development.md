@@ -4,7 +4,7 @@
 
 ## Tests
 
-`tests/run` runs `relay-events` (with its Renderer descriptions), `mark-seen` and `request` (and the answers the `being-observed` skill describes) against a stub `toon` and `curl` in a temporary home, and holds the agent definition to the safety rules of ADR 0003 through `tests/check-agent`. It needs bash, `jq` and `yq` (mikefarah's), and is what the `gate` job of `.github/workflows/ci.yml` runs.
+`tests/run` runs `relay-events` (with its Renderer descriptions), `mark-seen` and `request` (and the answers the `being-observed` skill describes) against a stub `toon` and `curl` in a temporary home, holds the agent definition to the safety rules of ADR 0003 through `tests/check-agent`, and holds the zone images' files to their pins through `tests/check-images`. It needs bash, `jq` and `yq` (mikefarah's), and is what the `gate` job of `.github/workflows/ci.yml` runs.
 
 ## Demo data
 
@@ -26,6 +26,10 @@ without an agent node.
 | `skills/being-observed/SKILL.md` | The agent's skill: the public key file, the Persona (creating, reading and living by it, renaming the relay), reading the Requests, answering them, writing a Renderer for a kind |
 | `request` | Writes a Request into the queue, or withdraws a waiting one |
 | `agent/spaceturtle.yaml` | The agent's definition for `docker-agent`: its instruction, its file tool and the skills it loads |
+| `images/agent/Dockerfile`, `images/connector/Dockerfile`, `images/connector/connector-start` | The agent's zone image (`docker-agent`'s sandbox image plus `toon`, no wallet or key) and the connector's zone image (`toon`, the container engine, gVisor's `runsc`, the overlay client's proxy line), and the connector's entrypoint, which starts the engine and the supervisor without `systemd --user` |
+| `images/versions.env`, `images/versions` | Every pin the two images add, with its checksum; the command that prints them for release notes |
+| `.github/workflows/images.yml` | Builds both images on every change to `images/`. It does not publish |
+| `tests/check-images` | Checks that no Dockerfile carries a version of its own, that `toon` and gVisor are pinned and verified, that the agent's image names no passphrase, wallet or key, and that `images/versions` prints each pin |
 | `tests/check-agent` | Checks an agent definition against the rules that keep the agent away from the money (ADR 0003) |
 | `tests/run` | The tests of `relay-events`, `mark-seen`, `request`, the `being-observed` skill's answers and `tests/check-agent` |
 
