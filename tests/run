@@ -1267,13 +1267,13 @@ rm_env; echo "cp zone-x" > "$STUB_DIR/fail-on"; rm_cmd "" y; rc=$?
 [[ $rc -ne 0 ]] && ! grep -q '^rm ' "$STUB_DIR/calls"; launcher_check "remove whose fresh backup fails removes nothing" $?
 
 # the agent key
-sbxcalls() { grep -c "$1" "$STUB_DIR/calls"; }
 launcher_env; run_launcher; rc=$?
 [[ $rc -eq 0 && $(wc -l < "$STUB_DIR/keys") -eq 1 ]] && grep -q 'toon agent-key create' "$STUB_DIR/calls"; launcher_check "a first run creates exactly one agent key, with the default scope and limit" $?
 ! grep -qE -- '--scope|--limit' <(grep 'agent-key create' "$STUB_DIR/calls"); launcher_check "the agent key is created without overriding the default scope or limit" $?
 [[ $(<"$STUB_DIR/agent-zone-key") == PRIVATE-HALF-1 ]]; launcher_check "the private half is placed in the agent's zone" $?
 ! grep -rq 'PRIVATE-HALF' "$tmp/out" "$SPACETURTLE_STATE_DIR" "$SPACETURTLE_CONFIG_DIR" "$HOME" "$SPACETURTLE_DATA_DIR" "$SPACETURTLE_BACKUP_DIR" "$STUB_DIR/calls" 2>/dev/null && [[ ! -e $STUB_DIR/agentkeyfile ]]
 launcher_check "the private half is nowhere else: not in the output, the launcher's files, the home, the calls, or the connector's zone" $?
+grep -q '^agent-x stopped' "$STUB_DIR/zones"; launcher_check "placing the key leaves the agent's zone stopped, not in a session" $?
 : > "$STUB_DIR/calls"; run_launcher; rc=$?
 [[ $rc -eq 0 && $(wc -l < "$STUB_DIR/keys") -eq 1 ]] && ! grep -q 'agent-key create' "$STUB_DIR/calls"; launcher_check "a second run creates no key" $?
 # an interrupted run (key on the list, marker missing, file still in the zone) places it and makes no second key
@@ -1287,6 +1287,12 @@ up_env; run_cmd agent-key revoke; rc=$?
 run_launcher; [[ $(wc -l < "$STUB_DIR/keys") -eq 0 ]]; launcher_check "start does not make a key after a revoke" $?
 up_env; : > "$STUB_DIR/calls"; rm -f "$STUB_DIR/agent-zone-key"; run_cmd agent-key replace; rc=$?
 [[ $rc -eq 0 && $(<"$STUB_DIR/keys") == key-2 && $(<"$STUB_DIR/agent-zone-key") == PRIVATE-HALF-2 ]] && ! grep -qE 'wallet|toon init' "$STUB_DIR/calls"; launcher_check "agent-key replace revokes the old key, places a new one and leaves the wallet alone" $?
+up_env; : > "$STUB_DIR/calls"; run_cmd agent-key replace
+p=$(line_no '^exec -i agent-x'); v=$(line_no 'toon agent-key revoke'); [[ -n $p && -n $v && $p -lt $v ]]; launcher_check "agent-key replace places the new key before it revokes the old one" $?
+up_env; echo "agent-x stopped" >> "$STUB_DIR/zones"; : > "$STUB_DIR/calls"; run_cmd agent-key revoke
+grep -q 'exec agent-x sh -c rm -f $HOME/.config/toon-agent/key' "$STUB_DIR/calls" && grep -q '^agent-x stopped' "$STUB_DIR/zones"; launcher_check "agent-key revoke deletes the private half from a stopped agent's zone, and leaves it stopped" $?
+upg_env; run_cmd agent-key revoke; run_cmd upgrade; rc=$?
+[[ $rc -eq 0 && ! -s $STUB_DIR/keys ]]; launcher_check "upgrade does not make a key after a revoke" $?
 up_env; : > "$STUB_DIR/calls"; run_cmd agent-key limit 3; rc=$?
 [[ $rc -eq 0 ]] && grep -q "toon agent-key set --limit '3' -- 'key-1'" "$STUB_DIR/calls"; launcher_check "agent-key limit sets the spending limit" $?
 up_env; run_cmd agent-key limit lots; rc=$?

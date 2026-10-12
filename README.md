@@ -138,7 +138,7 @@ which the agent has no tool for:
 
 `start` makes exactly one agent key, with the default scope (ADR 0003) and the default spending
 limit. Its private half goes from the connector's zone to the agent's zone through a pipe, and
-is kept nowhere else. A second `start` makes none.
+is kept nowhere else. A second `start` makes none, and neither does `upgrade` after a revoke.
 
 Approving or refusing an app that is not waiting says so and changes nothing. The list is
 read from the apps `toon status --json` reports as `pending`.
