@@ -842,6 +842,10 @@ for c in "toon approve app" "toon refuse app --reason x" "toon limit set 5" "too
 done
 agent_check "a script running toon limit show" "$(with_cmd 'toon limit show')" ""
 agent_check "a script whose toon subcommand is an argument" "$(with_cmd 'toon \"$who\"')" "forbidden-command: spaceturtle/probe"
+# docker-agent publishes the file as written only when it names its version and no instruction_file.
+agent_check "no version, so docker-agent would publish a rewritten file" 'del(.version)' "published-as-written: the definition"
+agent_check "a version that is a number" '.version = 16' "published-as-written: the definition"
+agent_check "an instruction_file, which docker-agent inlines" '.agents.spaceturtle.instruction_file = "instruction.md"' "published-as-written: spaceturtle"
 
 # --- the zone images (tests/check-images)
 image_check() { # name, shell snippet that breaks a copy of the images, expected output (empty = clean)
@@ -859,7 +863,93 @@ image_check "an unpinned base" "sed -i 's/@\${DOCKER_AGENT_BASE_DIGEST}//' agent
 image_check "a passphrase in the agent's zone" "echo 'ENV TOON_PASSPHRASE_FILE=/x' >> agent/Dockerfile" "passphrase, wallet or key"
 image_check "a toon init in the agent's zone" "echo 'RUN toon init' >> agent/Dockerfile" "passphrase, wallet or key"
 image_check "a pin that is no checksum" "sed -i 's/^TOON_SHA256_AMD64=.*/TOON_SHA256_AMD64=abc/' versions.env" "TOON_SHA256_AMD64 is not a sha256"
+image_check "a docker-agent that is not verified" "sed -i 's/^DOCKER_AGENT_SHA256_AMD64=.*/DOCKER_AGENT_SHA256_AMD64=/' versions.env" "DOCKER_AGENT_SHA256_AMD64 is not a sha256"
 image_check "a version images/versions leaves out" "sed -i '/GVISOR_VERSION/d' versions" "versions"
+
+# --- a release: the references, the definition published as written, and the notes ---
+release_check() { count=$((count + 1)); if [[ $2 -eq 0 ]]; then echo "ok   release: $1"; else echo "FAIL release: $1"; fails=$((fails + 1)); fi; }
+published_check() { [[ $2 -eq 0 ]] || sed 's/^/       /' "$tmp/out"; release_check "$@"; } # for a check of what `publish` did
+refs() { DOCKERHUB_NAMESPACE=toonhub "$root/release/references" "$@" 2>&1; }
+
+want='definition ghcr.io/toon-protocol/spaceturtle:1.2.3
+definition docker.io/toonhub/spaceturtle:1.2.3
+agent ghcr.io/toon-protocol/spaceturtle-agent-zone:1.2.3
+agent docker.io/toonhub/spaceturtle-agent-zone:1.2.3
+connector ghcr.io/toon-protocol/spaceturtle-connector-zone:1.2.3
+connector docker.io/toonhub/spaceturtle-connector-zone:1.2.3'
+[[ $(refs v1.2.3) == "$want" ]]; release_check "a tag names the definition and both images, in both registries, under one version and nothing else" $?
+[[ $(refs 1.2.3) == "$want" ]]; release_check "a version without the v names the same" $?
+[[ $(refs v1.2.3-rc.1 | grep -c ':1\.2\.3-rc\.1$') -eq 6 ]]; release_check "a pre-release is a version" $?
+[[ $(refs v1.2.3 agent) == 'ghcr.io/toon-protocol/spaceturtle-agent-zone:1.2.3
+docker.io/toonhub/spaceturtle-agent-zone:1.2.3' ]]; release_check "one artifact's references, as an image's tags" $?
+for bad in "" main 1.2 v1.2.3.4 "v1.2.3 x" v01.2.3 latest; do
+  out=$(refs "$bad"); rc=$?
+  [[ $rc -ne 0 && $out == *"not a version"* ]]; release_check "'$bad' is not a version, and nothing is named" $?
+done
+out=$(DOCKERHUB_NAMESPACE= "$root/release/references" v1.2.3 2>&1); rc=$?
+[[ $rc -eq 0 && $out == "$(grep ' ghcr.io/toon-protocol/' <<<"$want")" ]]; release_check "without a Docker Hub namespace, GitHub's registry alone is named" $?
+out=$(refs v1.2.3 turtle); rc=$?
+[[ $rc -ne 0 ]]; release_check "an artifact that does not exist is refused" $?
+
+# A docker-agent whose registry is a directory: `share push FILE REF` stores the file, and
+# `share pull --force REF` writes it where docker-agent does, as REF with _ for / and .yaml.
+# A reference containing the text in $STUB_DIR/alter comes back changed; one containing the
+# text in $STUB_DIR/fail-on is not pushed.
+release_env() {
+  new_env
+  export SPACETURTLE_DOCKER_AGENT=$tmp/bin/docker-agent DOCKERHUB_NAMESPACE=toonhub
+  mkdir -p "$STUB_DIR/registry"
+  cat > "$SPACETURTLE_DOCKER_AGENT" <<'STUB'
+#!/bin/bash
+echo "$*" >> "$STUB_DIR/calls"
+key() { echo "$STUB_DIR/registry/${1//\//_}"; }
+case "$1 $2" in
+  "share push")
+    [[ -r $STUB_DIR/fail-on && $4 == *"$(cat "$STUB_DIR/fail-on")"* ]] && exit 1
+    cp "$3" "$(key "$4")"
+    [[ -r $STUB_DIR/alter && $4 == *"$(cat "$STUB_DIR/alter")"* ]] && echo "# rewritten" >> "$(key "$4")"
+    exit 0 ;;
+  "share pull") [[ $3 == --force ]] && cp "$(key "$4")" "${4//\//_}.yaml" ;;
+  *) exit 2 ;;
+esac
+STUB
+  chmod +x "$SPACETURTLE_DOCKER_AGENT"
+}
+publish() { (cd "$tmp" && "$root/release/publish-definition" "$@") > "$tmp/out" 2>&1; }
+def=$root/agent/spaceturtle.yaml
+
+release_env; publish v1.2.3; rc=$?
+[[ $rc -eq 0 && $(ls "$STUB_DIR/registry" | wc -l) -eq 2 ]] \
+  && cmp -s "$STUB_DIR/registry/ghcr.io_toon-protocol_spaceturtle:1.2.3" "$def" && cmp -s "$STUB_DIR/registry/docker.io_toonhub_spaceturtle:1.2.3" "$def"
+published_check "the definition is pushed to both registries, each holding the file byte for byte" $?
+[[ $(grep -c '^share pull --force ' "$STUB_DIR/calls") -eq 2 ]]; published_check "each reference is read back from its registry, not from what was pushed" $?
+[[ -z $(ls "$tmp" | grep '\.yaml$') ]]; published_check "what is read back is not left where it ran" $?
+
+release_env; echo docker.io > "$STUB_DIR/alter"; publish v1.2.3; rc=$?
+[[ $rc -ne 0 ]] && grep -q 'docker.io/toonhub/spaceturtle:1.2.3 is not the file' "$tmp/out"; published_check "a registry holding a changed file fails the release and is named" $?
+
+release_env; echo docker.io > "$STUB_DIR/fail-on"; publish v1.2.3; rc=$?
+[[ $rc -ne 0 ]] && grep -q 'docker.io/toonhub/spaceturtle:1.2.3' "$tmp/out"; published_check "a push that fails fails the release and is named" $?
+
+release_env; DOCKERHUB_NAMESPACE= publish v1.2.3; rc=$?
+[[ $rc -eq 0 && $(ls "$STUB_DIR/registry") == 'ghcr.io_toon-protocol_spaceturtle:1.2.3' ]]; published_check "without a Docker Hub namespace the definition goes to GitHub's registry alone" $?
+
+release_env; publish not-a-version; rc=$?
+[[ $rc -ne 0 && ! -e $STUB_DIR/calls ]]; published_check "with no version nothing is pushed" $?
+
+release_env; SPACETURTLE_DOCKER_AGENT=$tmp/bin/missing publish v1.2.3; rc=$?
+[[ $rc -ne 0 ]] && grep -q 'docker-agent' "$tmp/out"; published_check "without docker-agent it stops and says so" $?
+
+unset SPACETURTLE_DOCKER_AGENT DOCKERHUB_NAMESPACE
+notes=$(DOCKERHUB_NAMESPACE=toonhub "$root/release/notes" v1.2.3 2>&1); lacking=$?
+pin() { sed -n "s/^$1=//p" "$root/images/versions.env"; }
+for v in 'docker agent run ghcr.io/toon-protocol/spaceturtle:1.2.3' $(refs v1.2.3 | cut -d' ' -f2) \
+  "toon                        $(pin TOON_VERSION)" "$(pin DOCKER_AGENT_VERSION)" "gVisor (runsc)              $(pin GVISOR_VERSION)"; do
+  grep -qF -- "$v" <<<"$notes" || { lacking=1; echo "       the notes lack: $v"; }
+done
+release_check "the notes name the command, every reference and the toon, docker-agent and runtime versions" $lacking
+notes=$("$root/release/notes" v1.2.3 2>&1); rc=$?
+[[ $rc -eq 0 && $(grep -c 'ghcr.io/toon-protocol/' <<<"$notes") -eq 4 ]] && ! grep -q 'docker\.io' <<<"$notes"; release_check "without a Docker Hub namespace the notes name GitHub's registry alone" $?
 
 # --- the launcher: spaceturtle start, against a stub sbx in a temporary home ---
 launcher_env() {

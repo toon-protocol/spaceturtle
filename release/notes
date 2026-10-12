@@ -1,0 +1,36 @@
+#!/bin/bash
+# Prints a release's notes: the command that runs it, every reference it publishes under
+# its version, and the versions the two zone images carry (images/versions).
+# Usage: release/notes <tag or version>      Reads DOCKERHUB_NAMESPACE as release/references does.
+set -euo pipefail
+root=$(cd "$(dirname "$0")/.." && pwd)
+refs=$("$root/release/references" "${1-}")
+# The references of one artifact, as a list.
+listed() { awk -v a="$1" '$1 == a { print "- `" $2 "`" }' <<<"$refs"; }
+cat <<OUT
+## Run it
+
+\`\`\`
+docker agent run $(awk '$1 == "definition" { print $2; exit }' <<<"$refs")
+\`\`\`
+
+## What this release publishes
+
+The agent definition, an OCI artifact holding \`agent/spaceturtle.yaml\` byte for byte as the gate checked it:
+
+$(listed definition)
+
+The agent's zone image:
+
+$(listed agent)
+
+The connector's zone image:
+
+$(listed connector)
+
+## Versions in the images
+
+\`\`\`
+$("$root/images/versions")
+\`\`\`
+OUT
