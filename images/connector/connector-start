@@ -1,0 +1,23 @@
+#!/bin/bash
+# The connector's zone's entrypoint. Starts the container engine if it is not running, then
+# runs the supervisor in this process, so nothing needs `systemd --user` (`toon up` without
+# --foreground installs a unit). The passphrase file is the one the launcher made in this zone.
+# Until `toon init` has written the passphrase file there is nothing to supervise, so it waits
+# for that file with the engine up, then starts the supervisor.
+set -euo pipefail
+
+if ! docker info >/dev/null 2>&1; then
+  sudo sh -c 'setsid nohup dockerd > /var/log/dockerd.log 2>&1 < /dev/null &'
+  for _ in $(seq 60); do
+    docker info >/dev/null 2>&1 && break
+    sleep 1
+  done
+  docker info >/dev/null 2>&1 || { echo "connector-start: the container engine did not start" >&2; exit 1; }
+fi
+
+export TOON_PASSPHRASE_FILE=${TOON_PASSPHRASE_FILE:-$HOME/.config/toon/passphrase}
+if [[ ! -r $TOON_PASSPHRASE_FILE ]]; then
+  echo "connector-start: no passphrase file at $TOON_PASSPHRASE_FILE; the container engine is up, waiting for toon init" >&2
+  until [[ -r $TOON_PASSPHRASE_FILE ]]; do sleep 5; done
+fi
+exec toon up --foreground
