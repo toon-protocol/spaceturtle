@@ -131,8 +131,11 @@ export async function loadGate(sandbox: Sandbox, base: string): Promise<Gate> {
  * A step's command as the sandbox must be given it. `sandbox.exec` runs its argument with
  * `sh`, which is dash in the sandbox image and has no `pipefail`; a `run:` step in CI is
  * bash. So the step is handed to bash, with the flags Actions gives a bash step.
+ * `~/.local/bin` is put on PATH, where a step's tools (yq) are installed by the image
+ * or by an earlier step; the sandbox's `sh` does not have it.
  */
-export const inBash = (command: string): string => `bash -eo pipefail -c ${shellQuote(command)}`;
+export const inBash = (command: string): string =>
+  `bash -eo pipefail -c ${shellQuote(`export PATH="$HOME/.local/bin:$PATH"\n${command}`)}`;
 
 /**
  * Run `steps` in order, stopping at the first failure.
