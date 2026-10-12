@@ -43,6 +43,9 @@ say() { echo "spaceturtle: $*"; }
 done_() { [[ -e $marks/$1 ]]; }
 mark() { mkdir -p "$marks" && : > "$marks/$1"; }
 
+# Quotes a value for the zone's sh.
+sh_quote() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
+
 # Every command in the zone sees the passphrase file that lives in the zone.
 in_zone() { "$sbx" exec "$zone" sh -c "export TOON_PASSPHRASE_FILE=\$HOME/.config/toon-passphrase; $1"; }
 
@@ -52,7 +55,7 @@ preflight() {
   "$sbx" ls >/dev/null 2>&1 || die "sbx is signed out or its daemon is not running. Run 'sbx login' and 'sbx daemon start -d', then run it again."
 }
 
-zone_exists() { "$sbx" ls 2>/dev/null | grep -qw -- "$zone"; }
+zone_exists() { "$sbx" ls 2>/dev/null | awk -v z="$zone" '$1 == z { found = 1 } END { exit !found }'; }
 
 step_zone() {
   if ! zone_exists; then
@@ -60,6 +63,8 @@ step_zone() {
     mkdir -p "$data_dir" || die "cannot create $data_dir"
     "$sbx" policy init balanced || die "sbx policy init failed"
     "$sbx" create --name "$zone" --cpus 4 --memory 4g shell "$data_dir" || die "sbx create failed"
+    # A new zone has none of the steps done in it, whatever an earlier zone had.
+    rm -rf "$marks"
   fi
   if ! done_ rule; then
     # The rule names the zone, so it is never machine-wide.
@@ -71,7 +76,7 @@ step_zone() {
     # mounted directory while the passphrase stays on the zone's own disk.
     in_zone 'sudo mkdir -p /usr/local/etc/anon &&
       echo "HTTPSProxy gateway.docker.internal:3128" | sudo tee /usr/local/etc/anon/anonrc-defaults >/dev/null &&
-      mkdir -p ~/.config && ln -sfn '"'$data_dir'"' ~/.config/toon' || die "the zone could not be set up"
+      mkdir -p ~/.config && ln -sfn '"$(sh_quote "$data_dir")"' ~/.config/toon' || die "the zone could not be set up"
     mark zone
   fi
 }
@@ -94,7 +99,8 @@ step_faucet() {
 }
 
 step_supervisor() {
-  in_zone 'pgrep -f "toon up" >/dev/null' && return
+  # The pattern does not match itself, so the shell running pgrep is not taken for toon up.
+  in_zone 'pgrep -f "[t]oon up" >/dev/null' && return
   say "starting the supervisor"
   in_zone 'setsid nohup toon up --foreground > ~/up.log 2>&1 < /dev/null &' || die "toon up failed in the zone"
 }
