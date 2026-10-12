@@ -80,7 +80,7 @@ Item {
 
   FloatingWindow {
     id: window
-    // Hyprland window rules match on this; see the README.
+    // Hyprland window rules match on this; see docs/guide/install.md.
     title: "Spaceturtle"
     color: Color.background
     implicitWidth: Style.space(560)
