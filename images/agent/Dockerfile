@@ -13,6 +13,7 @@ ARG TOON_SHA256_ARM64
 
 USER root
 RUN <<SCRIPT
+#!/bin/bash
 set -euxo pipefail
 case "$TARGETARCH" in
   amd64) arch=x86_64; sum=$TOON_SHA256_AMD64 ;;

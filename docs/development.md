@@ -31,7 +31,7 @@ without an agent node.
 | `.github/workflows/images.yml` | Builds both images on every change to `images/`. It does not publish |
 | `tests/check-images` | Checks that no Dockerfile carries a version of its own, that `toon` and gVisor are pinned and verified, that the agent's image names no passphrase, wallet or key, and that `images/versions` prints each pin |
 | `tests/check-agent` | Checks an agent definition against the rules that keep the agent away from the money (ADR 0003) |
-| `tests/run` | The tests of `relay-events`, `mark-seen`, `request`, the `being-observed` skill's answers and `tests/check-agent` |
+| `tests/run` | The tests of `relay-events`, `mark-seen`, `request`, the `being-observed` skill's answers, `tests/check-agent` and `tests/check-images` |
 
 Saving a file in an installed copy reloads the plugin. If a change does not show, run `omarchy restart shell`.
 

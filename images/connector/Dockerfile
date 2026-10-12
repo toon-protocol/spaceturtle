@@ -16,6 +16,7 @@ ARG GVISOR_SHA512_ARM64
 
 USER root
 RUN <<SCRIPT
+#!/bin/bash
 set -euxo pipefail
 case "$TARGETARCH" in
   amd64) arch=x86_64; tsum=$TOON_SHA256_AMD64; gsum=$GVISOR_SHA512_AMD64 ;;
@@ -31,13 +32,16 @@ install -m 0755 "/tmp/toon-v${TOON_VERSION}-linux-${arch}/toon" /usr/local/bin/t
 toon --version
 
 # gVisor's release is a bzip2 tarball; the loose runsc URL of its older documentation is gone.
+# The base has no bzip2 (the live test on #42), so it is installed to unpack and removed after,
+# leaving nothing unpinned in the image. socat, for the port forwarder, is the base's own.
 apt-get update
-apt-get install -y --no-install-recommends bzip2 socat
+apt-get install -y --no-install-recommends bzip2
 curl -fsSL -o /tmp/gvisor.tar.bz2 "https://storage.googleapis.com/gvisor/releases/release/${GVISOR_VERSION}/${arch}/gvisor.tar.bz2"
 echo "$gsum  /tmp/gvisor.tar.bz2" | sha512sum -c -
 mkdir /tmp/gvisor
 tar -xjf /tmp/gvisor.tar.bz2 -C /tmp/gvisor
 cp -r /tmp/gvisor/runsc /tmp/gvisor/containerd-shim-runsc-v1 /tmp/gvisor/gvisor-bin /usr/local/bin/
+apt-get purge -y --auto-remove bzip2
 apt-get clean
 rm -rf /var/lib/apt/lists/* /tmp/toon-v* /tmp/gvisor /tmp/gvisor.tar.bz2 "/tmp/$file"
 
