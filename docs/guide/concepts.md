@@ -35,7 +35,9 @@ order out only if it is within the key's **scope** and its **spending limit**.
 
 - **It can** do a provider's daily work: send packets, add and remove peerings, write
   routes, fund a channel it already has, land vouchers, add and remove apps, set prices,
-  read status and logs, and publish events.
+  read status and logs, and publish events. `toon` does not yet do all of that with an
+  agent key, and the agent has a tool only for what it does: see
+  [The launcher](launcher.md).
 - **It cannot** withdraw a channel, open one toward a counterparty of its choosing, raise
   its own spending limit, touch the wallet, or run an app whose image is not TOON's own
   until you approve it (`spaceturtle waiting`, `approve`, `refuse`).
