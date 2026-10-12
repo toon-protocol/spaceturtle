@@ -70,6 +70,20 @@ KVM and a signed-in `sbx`, and says what is missing and how to fix it before it 
 anything. The wallet's storage is `~/.local/share/spaceturtle/wallet` (`SPACETURTLE_DATA_DIR`),
 mounted into the zone and outside its image.
 
+The agent may ask to add an app whose image is not TOON's own, and the agent node holds it
+until you approve it. Four more commands, which run `toon` with the home in the zone and
+which the agent has no tool for:
+
+| Command | What it does |
+| --- | --- |
+| `spaceturtle waiting` | Lists each waiting app with its image and how long it has waited |
+| `spaceturtle approve <app>` | Starts it; an image that is not TOON's own runs under the sandboxed runtime |
+| `spaceturtle refuse <app> [reason]` | Discards it |
+| `spaceturtle status` | Says whether the supervisor is running and how many apps are waiting |
+
+Approving or refusing an app that is not waiting says so and changes nothing. The list is
+read from the apps `toon status --json` reports as `pending`.
+
 ## Install
 
 You need Omarchy 4.0.4, a running agent node (`toon up`), and `jq`, `curl` and

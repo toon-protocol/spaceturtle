@@ -14,7 +14,21 @@
 #       The passphrase is made inside the zone and stays there: it is never
 #       printed and never written on the machine.
 #
-# Stops before doing anything when the machine has no KVM, `sbx` is missing or
+#   spaceturtle waiting
+#       Lists the apps the agent node holds until the Observer approves them: each
+#       one's name, image and how long it has waited.
+#   spaceturtle approve <app>
+#       Approves a waiting app: `toon approve` starts it, and an image that is not
+#       TOON's own runs under the sandboxed runtime (toon_cli#209).
+#   spaceturtle refuse <app> [reason]
+#       Refuses a waiting app and discards it.
+#   spaceturtle status
+#       Says whether the zone and the supervisor are running and how many apps wait.
+#   Approving or refusing an app that is not waiting says so and changes nothing.
+#   These commands run `toon` with the home, in the connector's zone. The agent has
+#   no tool for them (tests/check-agent).
+#
+# Every command stops before doing anything when the machine has no KVM, `sbx` is missing or
 # `sbx` is signed out, and says the cause and the remedy.
 #
 # Environment, so that tests can run against a temporary home:
@@ -98,9 +112,11 @@ step_faucet() {
   mark faucet
 }
 
+# The pattern does not match itself, so the shell running pgrep is not taken for toon up.
+supervisor_running() { in_zone 'pgrep -f "[t]oon up" >/dev/null'; }
+
 step_supervisor() {
-  # The pattern does not match itself, so the shell running pgrep is not taken for toon up.
-  in_zone 'pgrep -f "[t]oon up" >/dev/null' && return
+  supervisor_running && return
   say "starting the supervisor"
   in_zone 'setsid nohup toon up --foreground > ~/up.log 2>&1 < /dev/null &' || die "toon up failed in the zone"
 }
@@ -125,7 +141,75 @@ start() {
   say "the connector's zone is running"
 }
 
+# The apps waiting, one JSON object per line: {name, image, since}. `toon status --json`
+# lists an app, in an `apps` array, in the `pending` state with the image and the time it
+# was asked for (seconds since the epoch or RFC 3339); a field it does not carry is left
+# empty. Only objects in an `apps` array are apps, so nothing else that is pending counts.
+# Dies when toon status fails, so callers must not run it in a pipeline or substitution
+# whose failure they ignore.
+waiting_apps() {
+  local doc
+  doc=$(in_zone 'toon status --json') || die "toon status failed in the zone"
+  jq -c '[.. | objects | .apps? | arrays | .[] | objects
+    | select((.state // .status // "") == "pending" and (.name // "") != "")
+    | {name, image: (.image // ""), since: (.requested_at // .asked_at // .since // .created_at // null)}]
+    | unique_by(.name) | .[]' <<<"$doc" || die "toon status gave a document that is not JSON"
+}
+
+age() { # a time as seconds or RFC 3339 -> "3d", "5h", "12m", "40s", or "unknown"
+  local t=$1 now secs
+  [[ -n $t && $t != null ]] || { echo unknown; return; }
+  [[ $t =~ ^[0-9]+$ ]] || t=$(date -d "$t" +%s 2>/dev/null) || { echo unknown; return; }
+  now=$(date +%s); secs=$((now - t)); ((secs < 0)) && secs=0
+  if ((secs >= 86400)); then echo "$((secs / 86400))d"
+  elif ((secs >= 3600)); then echo "$((secs / 3600))h"
+  elif ((secs >= 60)); then echo "$((secs / 60))m"
+  else echo "${secs}s"; fi
+}
+
+cmd_waiting() {
+  preflight
+  local lines l name image since n=0
+  lines=$(waiting_apps) || exit 1
+  while IFS= read -r l; do
+    [[ -n $l ]] || continue
+    name=$(jq -r .name <<<"$l"); image=$(jq -r .image <<<"$l"); since=$(jq -r .since <<<"$l")
+    printf '%s\t%s\t%s\n' "$name" "$image" "$(age "$since")"; n=$((n + 1))
+  done <<<"$lines"
+  ((n > 0)) || say "no app is waiting"
+}
+
+# approve|refuse <app> [reason]: only an app that is waiting is touched.
+decide() {
+  local verb=$1 app=${2:-} reason=${3:-} lines
+  [[ -n $app && $app != -* ]] || die "usage: spaceturtle $verb <app>$([[ $verb == refuse ]] && echo ' [reason]')"
+  preflight
+  lines=$(waiting_apps) || exit 1
+  jq -e --arg n "$app" 'select(.name == $n)' <<<"$lines" >/dev/null || die "$app is not waiting, so nothing was changed. 'spaceturtle waiting' lists what is."
+  if [[ $verb == approve ]]; then
+    in_zone "toon approve -- $(sh_quote "$app")" || die "toon approve failed in the zone"
+    say "approved $app: it starts now, and an image that is not TOON's own runs under the sandboxed runtime"
+  else
+    in_zone "toon refuse ${reason:+--reason $(sh_quote "$reason") }-- $(sh_quote "$app")" || die "toon refuse failed in the zone"
+    say "refused $app: it is discarded"
+  fi
+}
+
+cmd_status() {
+  preflight
+  zone_exists || die "the connector's zone ($zone) does not exist. Run 'spaceturtle start'."
+  local lines
+  if supervisor_running; then say "the supervisor is running"
+  else say "the supervisor is not running. Run 'spaceturtle start'."; fi
+  lines=$(waiting_apps) || exit 1
+  say "$(grep -c . <<<"$lines") app(s) waiting for approval"
+}
+
 case ${1:-} in
   start) start ;;
-  *) die "usage: spaceturtle start" ;;
+  waiting) cmd_waiting ;;
+  approve) decide approve "${2:-}" ;;
+  refuse) decide refuse "${2:-}" "${3:-}" ;;
+  status) cmd_status ;;
+  *) die "usage: spaceturtle start | status | waiting | approve <app> | refuse <app> [reason]" ;;
 esac
