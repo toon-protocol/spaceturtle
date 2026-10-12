@@ -75,7 +75,7 @@ funds are now at stake, that there is no faucet, and which wallet addresses to f
 asks you to type `mainnet`; anything else changes nothing. It lowers the spending limit to
 the mainnet default unless you pass `--keep-limit`. On an Install already on mainnet it says
 so and changes nothing. It runs `toon status --json`, `toon wallet addresses`,
-`toon network set mainnet` and `toon limit set --network-default` in the zone.
+`toon network set mainnet` and `toon limit set --network-default` in the connector's zone.
 
 ## Install
 

@@ -928,24 +928,28 @@ launcher_env; SPACETURTLE_SBX=$tmp/bin/missing run_launcher; rc=$?
 
 # --- the launcher: spaceturtle mainnet ---
 run_mainnet() { printf '%s\n' "$1" | "$root/spaceturtle" mainnet "${@:2}" > "$tmp/out" 2>&1; }
+changed_nothing() { ! grep -qE 'toon network set|toon limit set' "$STUB_DIR/calls"; }
 
 launcher_env; echo "zone-x running" > "$STUB_DIR/zones"
 run_mainnet "yes"; rc=$?
-[[ $rc -ne 0 ]] && ! grep -qE 'toon network set|toon limit set' "$STUB_DIR/calls"; launcher_check "mainnet without the typed word changes nothing" $?
+[[ $rc -ne 0 ]] && changed_nothing; launcher_check "mainnet without the typed word changes nothing" $?
 grep -q 0xAAA111 "$tmp/out" && grep -q SoLBBB222 "$tmp/out" && grep -qi 'no faucet' "$tmp/out" && grep -qi 'real funds' "$tmp/out"
 launcher_check "the message names the addresses to fund and says there is no faucet" $?
 : > "$STUB_DIR/calls"; run_mainnet ""; rc=$?
-[[ $rc -ne 0 ]] && ! grep -qE 'toon network set|toon limit set' "$STUB_DIR/calls"; launcher_check "mainnet with no answer changes nothing" $?
-run_mainnet "mainnet"; rc=$?
+[[ $rc -ne 0 ]] && changed_nothing; launcher_check "mainnet with no answer changes nothing" $?
+: > "$STUB_DIR/calls"; run_mainnet "mainnet"; rc=$?
 launcher_check "mainnet with the typed word succeeds" $rc
 grep -q 'toon network set mainnet' "$STUB_DIR/calls" && grep -q 'toon limit set --network-default' "$STUB_DIR/calls"; launcher_check "it moves the node and lowers the limit" $?
-grep -q mainnet "$STUB_DIR/network"; launcher_check "after it, status shows mainnet" $?
+s=$(grep -n 'toon status --json' "$STUB_DIR/calls" | tail -1 | cut -d: -f1); n=$(line_no 'toon network set mainnet')
+[[ -n $s && -n $n && $s -gt $n ]] && grep -q 'is on mainnet' "$tmp/out"; launcher_check "after it, status shows mainnet" $?
 : > "$STUB_DIR/calls"; run_mainnet "mainnet"; rc=$?
-[[ $rc -eq 0 ]] && grep -qi 'already on mainnet' "$tmp/out" && ! grep -qE 'toon network set|toon limit set' "$STUB_DIR/calls"; launcher_check "on mainnet already, it says so and changes nothing" $?
-launcher_env; echo "zone-x running" > "$STUB_DIR/zones"; run_mainnet "mainnet" --keep-limit
-grep -q 'toon network set mainnet' "$STUB_DIR/calls" && ! grep -q 'toon limit set' "$STUB_DIR/calls"; launcher_check "--keep-limit leaves the limit alone" $?
+[[ $rc -eq 0 ]] && grep -qi 'already on mainnet' "$tmp/out" && changed_nothing; launcher_check "on mainnet already, it says so and changes nothing" $?
+launcher_env; echo "zone-x running" > "$STUB_DIR/zones"; run_mainnet "mainnet" --keep-limit; rc=$?
+[[ $rc -eq 0 ]] && grep -q 'toon network set mainnet' "$STUB_DIR/calls" && ! grep -q 'toon limit set' "$STUB_DIR/calls"; launcher_check "--keep-limit leaves the limit alone" $?
+launcher_env; echo "zone-x running" > "$STUB_DIR/zones"; echo 'toon limit set' > "$STUB_DIR/fail-on"; run_mainnet "mainnet"; rc=$?
+[[ $rc -ne 0 ]] && grep -q 'limit could not be lowered' "$tmp/out" && grep -q 'toon limit set --network-default' "$tmp/out"; launcher_check "a failed limit stops and says how to lower it" $?
 launcher_env; run_mainnet "mainnet"; rc=$?
-[[ $rc -ne 0 ]] && ! grep -qE 'toon network set' "$STUB_DIR/calls" 2>/dev/null; launcher_check "with no zone it stops and changes nothing" $?
+[[ $rc -ne 0 ]] && changed_nothing; launcher_check "with no zone it stops and changes nothing" $?
 
 echo; echo "$count checks, $fails failed"
 [[ $fails -eq 0 ]]

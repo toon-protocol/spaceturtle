@@ -15,8 +15,8 @@
 #       printed and never written on the machine.
 #
 #   spaceturtle mainnet [--keep-limit]
-#       Moves the Install from devnet to mainnet, once the Observer has typed
-#       "mainnet" to confirm. It first says what changes: real funds are now at
+#       Moves the Install from devnet to mainnet, once the person running it has
+#       typed "mainnet" to confirm. It first says what changes: real funds are now at
 #       stake, there is no faucet, and which addresses to fund. Without the typed
 #       word nothing changes. It lowers the spending limit to the mainnet default
 #       unless --keep-limit is given. On an Install already on mainnet it says so
@@ -169,7 +169,7 @@ EOF2
   say "moving the node to mainnet"
   in_zone 'toon network set mainnet --json >/dev/null' || die "toon could not move the node to mainnet"
   if (( ! keep_limit )); then
-    in_zone 'toon limit set --network-default --json >/dev/null' || die "the node is on mainnet, but the spending limit could not be lowered. Lower it before funding anything."
+    in_zone 'toon limit set --network-default --json >/dev/null' || die "the node is on mainnet, but the spending limit could not be lowered. Lower it before funding anything: $sbx exec $zone sh -c 'TOON_PASSPHRASE_FILE=\$HOME/.config/toon-passphrase toon limit set --network-default'"
   fi
   network=$(node_network)
   [[ $network == mainnet ]] || die "the node did not report mainnet afterwards (it says '${network:-nothing}')"
