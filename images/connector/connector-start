@@ -28,12 +28,15 @@ home=$HOME/.toon/agent-node
 pgrep -f "[t]oon up" >/dev/null || rm -f "$home/supervisor.sock"
 
 # The supervisor's orders and the relay TOON app's connector listen on loopback, which a
-# published port does not reach. A forwarder on every address leads to each: 17100 to the
-# orders, 17101 to the connector. The launcher publishes those two to the machine's loopback.
+# published port does not reach. A forwarder on the zone's own address leads to each: 17100
+# to the orders, 17101 to the connector. The launcher publishes those two to the machine's
+# loopback. They listen on that one address, which is not on any app's network.
+own_address=$(hostname -i | tr ' ' '\n' | grep -m1 -E '^[0-9]+(\.[0-9]+){3}$' || true)
 forward() { # listening port, the loopback port it leads to
-  [[ $2 =~ ^[0-9]+$ ]] || return 0
+  [[ -n $own_address ]] || { echo "connector-start: the zone's own address is not known, so port $1 is not forwarded" >&2; return 0; }
+  [[ $2 =~ ^[0-9]+$ ]] || { echo "connector-start: nothing to forward port $1 to yet" >&2; return 0; }
   pgrep -f "socat TCP-LISTEN:$1," >/dev/null && return 0
-  setsid nohup socat "TCP-LISTEN:$1,fork,reuseaddr" "TCP:127.0.0.1:$2" >/dev/null 2>&1 < /dev/null &
+  setsid nohup socat "TCP-LISTEN:$1,bind=$own_address,fork,reuseaddr" "TCP:127.0.0.1:$2" >/dev/null 2>&1 < /dev/null &
 }
 forward 17100 "$(jq -r '.supervisor // "" | sub(".*:"; "")' "$home/agent-keys.json" 2>/dev/null)"
 forward 17101 "$(jq -r '.toon_apps[0].listen // "" | sub(".*:"; "")' "$home/state.json" 2>/dev/null)"

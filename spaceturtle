@@ -156,6 +156,7 @@ agent_image=${SPACETURTLE_AGENT_IMAGE:-ghcr.io/toon-protocol/spaceturtle-agent-z
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 agent_def=${SPACETURTLE_AGENT_DEF:-$here/agent/spaceturtle.yaml}
 connector_port=${SPACETURTLE_CONNECTOR_PORT:-47100}
+[[ $connector_port =~ ^[1-9][0-9]{0,4}$ ]] || { echo "spaceturtle: SPACETURTLE_CONNECTOR_PORT must be a port number, not '$connector_port'" >&2; exit 1; }
 relay_port=$((connector_port + 1))
 supervisor_wait=${SPACETURTLE_SUPERVISOR_WAIT:-180}
 # The agent definition as a session reads it, in a directory the agent's zone mounts read-only.
@@ -300,11 +301,12 @@ supervise() {
 }
 
 step_supervisor() {
-  # Written on every run, so a launcher that has moved or changed is the one the unit runs.
+  # Written and enabled on every run, so a launcher that has moved or changed is the one the unit runs.
   write_connector_unit
-  supervisor_running && return
-  say "starting the supervisor"
   "$systemctl_" --user enable spaceturtle-connector.service || die "the unit that keeps the connector's zone running could not be enabled"
+  # A supervisor with no unit holding its session would go with the zone, 30 seconds on.
+  supervisor_running && "$systemctl_" --user is-active --quiet spaceturtle-connector.service && return
+  say "starting the supervisor"
   "$systemctl_" --user restart spaceturtle-connector.service || die "the unit that keeps the connector's zone running could not be started"
   local waited=0
   until supervisor_running; do
@@ -518,10 +520,11 @@ UNIT
   "$systemctl_" --user daemon-reload || die "systemctl --user daemon-reload failed"
 }
 
-timer_on() {
+timer_on() { # "restart" when the interval may have changed
   write_timer
+  "$systemctl_" --user enable --now spaceturtle.timer || die "the timer could not be turned on"
   # A timer that is already running keeps the interval it started with until it is started again.
-  "$systemctl_" --user enable --now spaceturtle.timer && "$systemctl_" --user restart spaceturtle.timer || die "the timer could not be turned on"
+  [[ ${1:-} != restart ]] || "$systemctl_" --user restart spaceturtle.timer || die "the timer could not be started again"
   conf_set timer on
   say "the timer is on, every $(conf_get interval 6h)"
 }
@@ -540,7 +543,7 @@ timer() {
       valid_interval "${2:-}" || die "usage: spaceturtle timer interval <N>m|h|d, such as 6h"
       conf_set interval "$2"
       # A timer that is on is written again with the new interval.
-      [[ $(conf_get timer on) == on ]] && timer_on || say "the interval is $2; the timer is off"
+      [[ $(conf_get timer on) == on ]] && timer_on restart || say "the interval is $2; the timer is off"
       ;;
     *) die "usage: spaceturtle timer on|off|interval <N>m|h|d" ;;
   esac
@@ -624,7 +627,7 @@ place_agent_key() {
   local was; was=$(zone_state "$agent_zone")
   ensure_agent_zone "$was"
   if ! "$sbx" exec "$zone" sh -c 'cat /tmp/agent-key' | "$sbx" exec -i "$agent_zone" sh -c \
-    'umask 077 && mkdir -p "$HOME/.config/toon-agent" && jq --arg s "http://host.docker.internal:'"$connector_port"'" --arg c "http://host.docker.internal:'"$relay_port"'" ".supervisor = \$s | .toon_apps |= with_entries(.value = \$c)" > "$HOME/.config/toon-agent/key.new" && [ -s "$HOME/.config/toon-agent/key.new" ] && mv -f "$HOME/.config/toon-agent/key.new" "$HOME/.config/toon-agent/key"'; then
+    'umask 077 && mkdir -p "$HOME/.config/toon-agent" && jq --arg s "http://host.docker.internal:'"$connector_port"'" --arg c "http://host.docker.internal:'"$relay_port"'" ".supervisor = \$s | .toon_apps = ((.toon_apps // {}) | with_entries(.value = \$c))" > "$HOME/.config/toon-agent/key.new" && [ -s "$HOME/.config/toon-agent/key.new" ] && mv -f "$HOME/.config/toon-agent/key.new" "$HOME/.config/toon-agent/key"'; then
     in_zone 'rm -f /tmp/agent-key'
     die "the agent key could not be placed in the agent's zone"
   fi

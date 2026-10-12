@@ -1194,6 +1194,9 @@ grep -q "^Environment=PATH=$tmp/bin:" "$SPACETURTLE_UNIT_DIR/spaceturtle.service
 run_cmd status; grep -q '^timer: on, every 6h' "$tmp/out" && grep -q '^last unattended session: never' "$tmp/out"; launcher_check "status shows the timer on and no session yet" $?
 : > "$STUB_DIR/systemctl-calls"; run_cmd timer interval 2h; grep -q 'OnUnitActiveSec=2h' "$SPACETURTLE_UNIT_DIR/spaceturtle.timer" && grep -q 'OnActiveSec=2h' "$SPACETURTLE_UNIT_DIR/spaceturtle.timer" && ! grep -q OnBootSec "$SPACETURTLE_UNIT_DIR/spaceturtle.timer" \
   && grep -q 'restart spaceturtle.timer' "$STUB_DIR/systemctl-calls"; launcher_check "the interval can be set, counts from when the timer starts, and a running timer takes it" $?
+: > "$STUB_DIR/systemctl-calls"; run_launcher; ! grep -q 'restart spaceturtle.timer' "$STUB_DIR/systemctl-calls" && grep -q '^--user enable spaceturtle-connector.service$' "$STUB_DIR/systemctl-calls"
+launcher_check "a second start does not push the next session out, and enables the unit again" $?
+SPACETURTLE_CONNECTOR_PORT='1;x' run_launcher; [[ $? -ne 0 ]] && grep -q 'must be a port number' "$tmp/out"; launcher_check "a port that is not a number is refused" $?
 run_cmd timer interval soon; [[ $? -ne 0 ]]; launcher_check "a bad interval is refused" $?
 run_cmd timer off; grep -q 'disable --now spaceturtle.timer' "$STUB_DIR/systemctl-calls"; launcher_check "the timer can be turned off" $?
 run_cmd status; grep -q '^timer: off, every 2h' "$tmp/out"; launcher_check "status shows it off" $?
