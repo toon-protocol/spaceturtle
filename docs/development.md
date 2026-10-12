@@ -4,7 +4,7 @@
 
 ## Tests
 
-`tests/run` runs `relay-events` (with its Renderer descriptions), `mark-seen` and `request` (and the answers the `being-observed` skill describes) against a stub `toon` and `curl`, and the launcher's `spaceturtle start`, `waiting`, `approve`, `refuse` and `status` against a stub `sbx`, in a temporary home, and holds the agent definition to the safety rules of ADR 0003 through `tests/check-agent`. It needs bash, `jq` and `yq` (mikefarah's), and is what the `gate` job of `.github/workflows/ci.yml` runs.
+`tests/run` runs `relay-events` (with its Renderer descriptions), `mark-seen` and `request` (and the answers the `being-observed` skill describes) against a stub `toon` and `curl`, and the launcher's `spaceturtle start`, `waiting`, `approve`, `refuse` and `status` against a stub `sbx`, in a temporary home, holds the agent definition to the safety rules of ADR 0003 through `tests/check-agent`, and holds the zone images' files to their pins through `tests/check-images`. It needs bash, `jq` and `yq` (mikefarah's), and is what the `gate` job of `.github/workflows/ci.yml` runs.
 
 ## Demo data
 
@@ -27,8 +27,12 @@ without an agent node.
 | `request` | Writes a Request into the queue, or withdraws a waiting one |
 | `spaceturtle` | The launcher: `spaceturtle start` brings up the connector's zone on devnet, doing only the steps not yet done, with its step markers in `~/.local/state/spaceturtle/launcher`; `waiting`, `approve` and `refuse` list, approve and refuse the apps the agent node holds until the Observer approves them, and `status` says whether the supervisor runs and how many apps wait |
 | `agent/spaceturtle.yaml` | The agent's definition for `docker-agent`: its instruction, its file tool and the skills it loads |
+| `images/agent/Dockerfile`, `images/connector/Dockerfile`, `images/connector/connector-start` | The agent's zone image (`docker-agent`'s sandbox image plus `toon`, no wallet or key) and the connector's zone image (`toon`, the container engine, gVisor's `runsc`, the overlay client's proxy line), and the connector's entrypoint, which starts the engine and the supervisor without `systemd --user` |
+| `images/versions.env`, `images/versions` | Every pin the two images add, with its checksum; the command that prints them for release notes |
+| `.github/workflows/images.yml` | Builds both images on every change to `images/`. It does not publish |
+| `tests/check-images` | Checks that no Dockerfile carries a version of its own, that `toon` and gVisor are pinned and verified, that the agent's image names no passphrase, wallet or key, and that `images/versions` prints each pin |
 | `tests/check-agent` | Checks an agent definition against the rules that keep the agent away from the money and from approving its own apps (ADR 0003) |
-| `tests/run` | The tests of `relay-events`, `mark-seen`, `request`, the launcher, the `being-observed` skill's answers and `tests/check-agent` |
+| `tests/run` | The tests of `relay-events`, `mark-seen`, `request`, the launcher, the `being-observed` skill's answers, `tests/check-agent` and `tests/check-images` |
 
 Saving a file in an installed copy reloads the plugin. If a change does not show, run `omarchy restart shell`.
 
