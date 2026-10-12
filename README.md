@@ -58,6 +58,18 @@ plugin that shows it to you, in a panel that follows your theme.
 - **The turtle tells you when to look.** It gets a dot when the agent did something new,
   and a bigger one when the node needs you.
 
+## The launcher
+
+`spaceturtle start` brings up the connector's zone on devnet: a detached Docker Sandboxes
+virtual machine, with an any-address rule scoped to that zone alone, the agent node
+initialised inside it, the wallet funded from the faucet, the supervisor started, and a
+sealed backup of the wallet written to `~/spaceturtle-backup` (`SPACETURTLE_BACKUP_DIR`).
+Keep that backup. The passphrase is made inside the zone and never leaves it. A second run
+creates, initialises and funds nothing, and an interrupted run finishes the rest. It needs
+KVM and a signed-in `sbx`, and says what is missing and how to fix it before it does
+anything. The wallet's storage is `~/.local/share/spaceturtle/wallet` (`SPACETURTLE_DATA_DIR`),
+mounted into the zone and outside its image.
+
 ## Install
 
 You need Omarchy 4.0.4, a running agent node (`toon up`), and `jq`, `curl` and

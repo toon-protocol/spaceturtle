@@ -1,0 +1,131 @@
+#!/bin/bash
+# The launcher: the one program a person runs to have a spaceturtle.
+#
+#   spaceturtle start
+#       Brings the connector's zone up, step by step, and does only the steps
+#       not yet done, so a run that was interrupted finishes the rest when run
+#       again and a second run creates, initialises and funds nothing:
+#         1. zone        a detached Docker Sandboxes virtual machine, with an
+#                        any-address rule scoped to that zone alone
+#         2. node        the agent node, initialised on devnet inside it
+#         3. faucet      the wallet funded from the devnet faucet
+#         4. supervisor  `toon up`, started again whenever it is not running
+#         5. backup      a sealed backup of the wallet, handed to the Observer
+#       The passphrase is made inside the zone and stays there: it is never
+#       printed and never written on the machine.
+#
+# Stops before doing anything when the machine has no KVM, `sbx` is missing or
+# `sbx` is signed out, and says the cause and the remedy.
+#
+# Environment, so that tests can run against a temporary home:
+#   SPACETURTLE_SBX         the sbx program (default: sbx)
+#   SPACETURTLE_TOON_BIN    the toon binary copied into the zone (default: toon on PATH)
+#   SPACETURTLE_KVM         the KVM device (default: /dev/kvm)
+#   SPACETURTLE_ZONE        the zone's name (default: st-connector)
+#   SPACETURTLE_STATE_DIR   the state directory (default: ~/.local/state/spaceturtle);
+#                           the launcher keeps its step markers in `launcher`
+#   SPACETURTLE_DATA_DIR    the wallet's storage, outside the zone's image
+#                           (default: ~/.local/share/spaceturtle/wallet)
+#   SPACETURTLE_BACKUP_DIR  where the backup is written for the Observer
+#                           (default: ~/spaceturtle-backup)
+set -uo pipefail
+
+sbx=${SPACETURTLE_SBX:-sbx}
+kvm=${SPACETURTLE_KVM:-/dev/kvm}
+zone=${SPACETURTLE_ZONE:-st-connector}
+state_dir=${SPACETURTLE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/spaceturtle}
+marks=$state_dir/launcher
+data_dir=${SPACETURTLE_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/spaceturtle/wallet}
+backup_dir=${SPACETURTLE_BACKUP_DIR:-$HOME/spaceturtle-backup}
+
+die() { echo "spaceturtle: $*" >&2; exit 1; }
+say() { echo "spaceturtle: $*"; }
+done_() { [[ -e $marks/$1 ]]; }
+mark() { mkdir -p "$marks" && : > "$marks/$1"; }
+
+# Quotes a value for the zone's sh.
+sh_quote() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
+
+# Every command in the zone sees the passphrase file that lives in the zone.
+in_zone() { "$sbx" exec "$zone" sh -c "export TOON_PASSPHRASE_FILE=\$HOME/.config/toon-passphrase; $1"; }
+
+preflight() {
+  [[ -e $kvm ]] || die "this machine has no KVM ($kvm), and the connector's zone is a virtual machine. Turn on virtualisation in the firmware (VT-x or AMD-V) and load the kvm module, or use a machine that has it."
+  command -v "$sbx" >/dev/null 2>&1 || die "sbx (Docker Sandboxes) is not installed. Install it from https://github.com/docker/sbx-releases and run it again."
+  "$sbx" ls >/dev/null 2>&1 || die "sbx is signed out or its daemon is not running. Run 'sbx login' and 'sbx daemon start -d', then run it again."
+}
+
+zone_exists() { "$sbx" ls 2>/dev/null | awk -v z="$zone" '$1 == z { found = 1 } END { exit !found }'; }
+
+step_zone() {
+  if ! zone_exists; then
+    say "creating the connector's zone ($zone)"
+    mkdir -p "$data_dir" || die "cannot create $data_dir"
+    "$sbx" policy init balanced || die "sbx policy init failed"
+    "$sbx" create --name "$zone" --cpus 4 --memory 4g shell "$data_dir" || die "sbx create failed"
+    # A new zone has none of the steps done in it, whatever an earlier zone had.
+    rm -rf "$marks"
+  fi
+  if ! done_ rule; then
+    # The rule names the zone, so it is never machine-wide.
+    "$sbx" policy allow network --sandbox "$zone" --protocol tcp,udp "**" || die "the any-address rule failed"
+    mark rule
+  fi
+  if ! done_ zone; then
+    # The overlay client must use the forward proxy, and the wallet lives in the
+    # mounted directory while the passphrase stays on the zone's own disk.
+    in_zone 'sudo mkdir -p /usr/local/etc/anon &&
+      echo "HTTPSProxy gateway.docker.internal:3128" | sudo tee /usr/local/etc/anon/anonrc-defaults >/dev/null &&
+      mkdir -p ~/.config && ln -sfn '"$(sh_quote "$data_dir")"' ~/.config/toon' || die "the zone could not be set up"
+    mark zone
+  fi
+}
+
+step_node() {
+  done_ node && return
+  say "initialising the agent node on devnet"
+  "$sbx" cp "${SPACETURTLE_TOON_BIN:-$(command -v toon || true)}" "$zone:/tmp/toon" || die "toon could not be copied into the zone (set SPACETURTLE_TOON_BIN)"
+  in_zone 'sudo install -m 755 /tmp/toon /usr/local/bin/toon &&
+    { [ -s "$TOON_PASSPHRASE_FILE" ] || { umask 077 && head -c 32 /dev/urandom | base64 > "$TOON_PASSPHRASE_FILE"; }; } &&
+    toon init --accept-anyone-terms --network devnet --json >/dev/null' || die "toon init failed in the zone"
+  mark node
+}
+
+step_faucet() {
+  done_ faucet && return
+  say "funding the wallet from the faucet"
+  in_zone 'toon wallet fund --json >/dev/null' || die "toon wallet fund failed in the zone"
+  mark faucet
+}
+
+step_supervisor() {
+  # The pattern does not match itself, so the shell running pgrep is not taken for toon up.
+  in_zone 'pgrep -f "[t]oon up" >/dev/null' && return
+  say "starting the supervisor"
+  in_zone 'setsid nohup toon up --foreground > ~/up.log 2>&1 < /dev/null &' || die "toon up failed in the zone"
+}
+
+step_backup() {
+  done_ backup && return
+  say "making the backup"
+  mkdir -p "$backup_dir" && chmod 700 "$backup_dir" || die "cannot create $backup_dir"
+  in_zone 'toon wallet backup --output /tmp/wallet-backup >/dev/null' || die "toon wallet backup failed in the zone"
+  "$sbx" cp "$zone:/tmp/wallet-backup" "$backup_dir/wallet-backup" || die "the backup could not be copied out of the zone"
+  mark backup
+  say "the backup is at $backup_dir/wallet-backup. Keep it: it is the only way back to the wallet and the agent's identity if the zone is lost."
+}
+
+start() {
+  preflight
+  step_zone
+  step_node
+  step_faucet
+  step_supervisor
+  step_backup
+  say "the connector's zone is running"
+}
+
+case ${1:-} in
+  start) start ;;
+  *) die "usage: spaceturtle start" ;;
+esac
