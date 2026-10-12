@@ -1,11 +1,17 @@
 # Install
 
+This guide installs the panel, the optional way to watch an Install on Omarchy. To get the
+agent itself running, from nothing, read the [README](../../README.md): what must be
+installed and signed in to first, then `spaceturtle start`.
+
 ## What you need
 
 - **Omarchy** with the Quickshell-based shell (the `omarchy plugin` commands). Built
   against Omarchy 4.0.4; see [Omarchy version](../development.md#omarchy-version).
 - **A running agent node**: [`toon`](https://github.com/toon-protocol/toon_cli) on `PATH`
-  or in `~/.local/bin`, and `toon up`.
+  or in `~/.local/bin`, and `toon up`. The panel cannot yet read the agent node of an
+  Install, which runs inside the connector's zone
+  ([ADR 0003](../adr/0003-the-agent-holds-no-key-that-pays.md)).
 - **`jq`, `curl` and `wl-copy`**. `wl-copy` is only used for copying values.
 
 ## 1. Add the plugin
