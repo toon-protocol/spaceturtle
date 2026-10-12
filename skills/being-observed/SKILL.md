@@ -9,14 +9,14 @@ Spaceturtle is a bar widget and panel that watches your node. The person at the 
 
 ## How to read this skill
 
-Each step says what to do and names the `toon` command behind it. Do it with whatever you have. With a shell, type the command. With a fixed list of tools (no shell), call the tool that runs that command (`relay_query` for `toon event query`, `event_publish` for `toon event publish`, `limit_show` for `toon limit show`, and so on) and use your file tools to read and write files. The shell snippets below are one way, not the only one. Nothing here needs a pipe or a redirect: a file is read by reading it and written by writing it whole.
+Each step says what to do and names the `toon` command behind it. Do it with whatever you have. With a shell, type the command. With a fixed list of tools (no shell), call the tool that runs that command (`relay_query` for `toon event query`, `event_publish` for `toon event publish`, `limit_show` for `toon limit show`, and so on) and use your file tools to read and write files. The shell snippets below are one way, not the only one; their pipes and redirects are a convenience of the shell. No step needs one: a file is read by reading it and written by writing it whole.
 
 Two folders matter, and you can name them as plain paths:
 
 - **Config:** `~/.config/spaceturtle`, holding `agent-pubkey` and `renderers/`.
 - **State:** `~/.local/state/spaceturtle`, holding the Requests in `requests/`.
 
-If your instructions give other paths for them (the `SPACETURTLE_CONFIG_DIR` and `SPACETURTLE_STATE_DIR` settings move them), use those. You do not need to read an environment variable: use the paths you were given, else the two above.
+If your instructions give other paths for them (the `SPACETURTLE_CONFIG_DIR` and `SPACETURTLE_STATE_DIR` settings move them, and so do `XDG_CONFIG_HOME` and `XDG_STATE_HOME`, as `$XDG_CONFIG_HOME/spaceturtle` and `$XDG_STATE_HOME/spaceturtle`), use those. You do not need to read an environment variable: use the paths you were given, else the two above.
 
 If a step needs something you have no tool for, do not look for a way round it. Say so to the Observer in plain words, name the step, and go on with the rest.
 
@@ -48,7 +48,7 @@ Each Install is called by its **Persona**, never "spaceturtle": a name, a charac
 
 **Living by it.** Behave in character: speak as the character says, sign as the name says. A Request that goes against the character is still yours to weigh and may be declined, with a reason, as below, except a `persona` Request.
 
-**Renaming the relay.** Set the relay's name to the Persona's name once you have published it (`toon relay config --name`). If you have no tool for that command, tell the Observer the name to set and go on. Changing it restarts the connector, so do it at a moment you judge safe: nothing in flight, no payment or channel being opened. If it is not safe now, do it later in the session or the next one, and check with `toon relay config` that the name matches.
+**Renaming the relay.** Set the relay's name to the Persona's name once you have published it (`toon relay config --name`). If you have no tool for that command, tell the Observer the name to set and go on. Changing it restarts the connector, so do it at a moment you judge safe: nothing in flight, no payment or channel being opened. If it is not safe now, do it later in the session or the next one, and check with `toon relay config` that the name matches (without a tool for it, ask the Observer to check).
 
 ## Start of a session: read the Requests
 
@@ -83,7 +83,7 @@ A Request file looks like this:
 
 ## Answer each Request
 
-Decide for each one. You may do it, or decline it. Decline a Request (never a `persona` one) that goes against your judgement or your Persona's character, that you cannot do, or that would spend more than your spending limit allows (check `toon limit show`). Do not skip a Request: an unanswered one stays waiting, and the Observer sees that you have not got to it.
+Decide for each one. You may do it, or decline it. Decline a Request (never a `persona` one) that goes against your judgement or your Persona's character, that you cannot do, or that would spend more than your spending limit allows (check `toon limit show`). A Request your tools cannot carry out is one you cannot do: if you can publish only a kind and content, with no tags, a follow, reply, reaction or repost is beyond you, so decline it and say why. Do not skip a Request: an unanswered one stays waiting, and the Observer sees that you have not got to it.
 
 **Done.** Do the work first with your usual `toon` commands, then record the event you published, by id. Change only `state` to `done`, `answered_at` to the time in seconds, and `result` to `{"event": "<the event's id>"}`, and write the file back whole. With a shell:
 
@@ -105,13 +105,13 @@ jq --argjson now "$NOW" --arg reason "$REASON" \
   '.state = "declined" | .answered_at = $now | .reason = $reason' "$FILE" > "$FILE.tmp" && mv "$FILE.tmp" "$FILE"
 ```
 
-**No clock.** `answered_at` is the time in seconds (Unix time). If you have no way to read the time, use the `created_at` of the event you just published, which is the same moment to the second. For a declined Request that published nothing, publish nothing for the sake of it: use the newest `created_at` you have seen, and say so to the Observer.
+**No clock.** `answered_at` is the time in seconds (Unix time). If you have no way to read the time, use the `created_at` of the event you just published, which is the same moment to the second (read it from what the publish printed, or query the event by id with `toon event query`). For a declined Request that published nothing, publish nothing for the sake of it: use the newest `created_at` you have seen, and say so to the Observer.
 
-**No way to move a file into place.** If you can only write a file, write the whole Request with one write that holds the complete JSON, with only the four fields changed, then read it back to check it parses and that nothing else changed. Never write a partial file, and never leave a `.tmp` file behind that you cannot remove.
+**No way to move a file into place.** If you can only write a file, first read the Request again: if it is gone, the Observer withdrew it, so write nothing (writing it would bring it back); if it is no longer `waiting`, leave it. Otherwise write the whole Request with one write that holds the complete JSON, with only the fields above changed, then read it back to check it parses and that nothing else changed. Never write a partial file, and never leave a `.tmp` file behind that you cannot remove. A direct write is not atomic, so the panel may catch it half-written for a moment; one whole write keeps that moment as short as it can be.
 
 ### What you may change
 
-In a Request file you change `state`, `answered_at`, `result` and `reason`, and nothing else. Do not edit `id`, `created_at`, `kind`, `subject` or `text`, do not create, rename or delete Request files (beyond the `.tmp` file each answer writes and moves into place), and do not touch a Request that is already `done` or `declined`: the file is the record of what you did. Only the Observer removes a waiting Request (withdraws it); the answers above write nothing if the Request is gone or no longer waiting. Write the file whole and move it into place, as above, so the UI never reads half a file.
+In a Request file you change `state`, `answered_at`, `result` and `reason`, and nothing else. Do not edit `id`, `created_at`, `kind`, `subject` or `text`, do not create, rename or delete Request files (beyond the `.tmp` file a shell answer writes and moves into place), and do not touch a Request that is already `done` or `declined`: the file is the record of what you did. Only the Observer removes a waiting Request (withdraws it); the answers above write nothing if the Request is gone or no longer waiting. Write the file whole and, if you can, move it into place, as above, so the UI never reads half a file; with only a file tool, write it whole in one write, as above.
 
 ## Make a new kind readable: write a Renderer
 
