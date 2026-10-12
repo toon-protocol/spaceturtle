@@ -1,5 +1,5 @@
 name: images
-# Builds the two zone images on every change to them. Publishing is another ticket.
+# Builds the two zone images on every change to them. A release publishes them (release.yml).
 on:
   pull_request:
     paths: ['images/**', '.github/workflows/images.yml']

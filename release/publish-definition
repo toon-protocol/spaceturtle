@@ -1,0 +1,29 @@
+#!/bin/bash
+# Publishes the agent definition as an OCI artifact to every reference a release gives it
+# (release/references), then reads each one back from its registry and fails unless it is
+# byte for byte agent/spaceturtle.yaml, the file the gate checked on this commit.
+# docker-agent publishes a file as written only when tests/check-agent's
+# published-as-written rule holds; this is the check that it did.
+# Usage: release/publish-definition <tag or version>
+# Needs docker-agent, signed in to both registries (it reads Docker's own credentials), and
+# DOCKERHUB_NAMESPACE.
+#   SPACETURTLE_DOCKER_AGENT   the docker-agent program (default: docker-agent)
+set -euo pipefail
+root=$(cd "$(dirname "$0")/.." && pwd)
+die() { echo "release/publish-definition: $*" >&2; exit 1; }
+
+docker_agent=${SPACETURTLE_DOCKER_AGENT:-docker-agent}
+def=$root/agent/spaceturtle.yaml
+refs=$("$root/release/references" "${1-}" definition)
+command -v "$docker_agent" >/dev/null 2>&1 || die "docker-agent is not installed ($docker_agent)"
+
+# docker-agent writes what it pulls into the directory it runs in.
+work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
+cd "$work"
+while IFS= read -r ref; do
+  "$docker_agent" share push "$def" "$ref" || die "$ref could not be pushed"
+  # --force reads the registry again, never the copy the push left in docker-agent's store.
+  "$docker_agent" share pull --force "$ref" || die "$ref could not be read back"
+  cmp -s "$def" "${ref//\//_}.yaml" || die "$ref is not the file the gate checked (agent/spaceturtle.yaml)"
+  echo "published $ref, byte for byte agent/spaceturtle.yaml"
+done <<<"$refs"

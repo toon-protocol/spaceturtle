@@ -1,5 +1,8 @@
 # The spaceturtle agent for docker-agent. tests/check-agent holds this file to the rules
 # that keep the agent away from the money (ADR 0003); the gate runs it.
+# A release publishes this file byte for byte, which docker-agent does only for a file that
+# names its version.
+version: "16"
 agents:
   spaceturtle:
     description: An agent that lives on the TOON network, runs a relay and tells its Observer what it did.

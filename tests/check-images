@@ -31,7 +31,7 @@ grep -q 'sha512sum -c' connector/Dockerfile || problem "connector/Dockerfile: gV
 
 # A version or a checksum that is not what it should look like.
 [[ $TOON_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || problem "TOON_VERSION is not a release"
-for v in TOON_SHA256_AMD64 TOON_SHA256_ARM64; do [[ ${!v} =~ ^[0-9a-f]{64}$ ]] || problem "$v is not a sha256"; done
+for v in TOON_SHA256_AMD64 TOON_SHA256_ARM64 DOCKER_AGENT_SHA256_AMD64; do [[ ${!v} =~ ^[0-9a-f]{64}$ ]] || problem "$v is not a sha256"; done
 for v in GVISOR_SHA512_AMD64 GVISOR_SHA512_ARM64; do [[ ${!v} =~ ^[0-9a-f]{128}$ ]] || problem "$v is not a sha512"; done
 for v in DOCKER_AGENT_BASE_DIGEST CONNECTOR_BASE_DIGEST; do [[ ${!v} =~ ^sha256:[0-9a-f]{64}$ ]] || problem "$v is not a digest"; done
 

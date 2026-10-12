@@ -1,0 +1,111 @@
+name: release
+# A tag vX.Y.Z publishes everything a person pulls, under that one version: the agent
+# definition as an OCI artifact and both zone images, to GitHub's registry and to Docker
+# Hub. release/references names them all; docs/releasing.md says what a release needs.
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+', 'v[0-9]+.[0-9]+.[0-9]+-*']
+# One run at a time for a tag, so two runs never push over each other.
+concurrency: release-${{ github.ref }}
+defaults:
+  run:
+    shell: bash
+jobs:
+  gate:
+    uses: ./.github/workflows/ci.yml
+  publish:
+    needs: gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    env:
+      DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: What this release publishes
+        id: refs
+        run: |
+          release/references "$GITHUB_REF_NAME"
+          for image in agent connector; do
+            tags=$(release/references "$GITHUB_REF_NAME" "$image")
+            printf '%s<<TAGS\n%s\nTAGS\n' "$image" "$tags" >> "$GITHUB_OUTPUT"
+          done
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Build arguments from images/versions.env
+        id: args
+        run: |
+          {
+            echo 'list<<ARGS'
+            grep -E '^[A-Z0-9_]+=' images/versions.env
+            echo ARGS
+          } >> "$GITHUB_OUTPUT"
+      # One build goes to both registries, so each holds the same image under the same digest.
+      # Without a provenance attestation a reference is the image itself, not an index around it.
+      - name: The agent's zone image
+        uses: docker/build-push-action@v6
+        with:
+          context: images/agent
+          file: images/agent/Dockerfile
+          build-args: ${{ steps.args.outputs.list }}
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ${{ steps.refs.outputs.agent }}
+          labels: |
+            org.opencontainers.image.version=${{ steps.refs.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+      - name: The connector's zone image
+        uses: docker/build-push-action@v6
+        with:
+          context: images/connector
+          file: images/connector/Dockerfile
+          build-args: ${{ steps.args.outputs.list }}
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ${{ steps.refs.outputs.connector }}
+          labels: |
+            org.opencontainers.image.version=${{ steps.refs.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+      - name: toon runs in each image, as each registry holds it
+        run: |
+          for image in agent connector; do
+            for ref in $(release/references "$GITHUB_REF_NAME" "$image"); do
+              docker run --rm --pull always --entrypoint toon "$ref" --version
+            done
+          done
+      - name: docker-agent, the release the definition is tested with
+        run: |
+          . images/versions.env
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL -o "$HOME/.local/bin/docker-agent" "https://github.com/docker/docker-agent/releases/download/v$DOCKER_AGENT_VERSION/docker-agent-linux-amd64"
+          echo "$DOCKER_AGENT_SHA256_AMD64  $HOME/.local/bin/docker-agent" | sha256sum -c -
+          chmod +x "$HOME/.local/bin/docker-agent"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: The agent definition, byte for byte the file the gate checked
+        run: release/publish-definition "$GITHUB_REF_NAME"
+      # Last, so a release exists only once everything it names is published.
+      - name: Release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          release/notes "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
+          pre=(); [[ $GITHUB_REF_NAME == *-* ]] && pre=(--prerelease)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" "${pre[@]}"
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" "${pre[@]}"
+          fi

@@ -3,13 +3,15 @@ on:
   pull_request:
   push:
     branches: [main]
+  # A release runs the gate on the tagged commit before it publishes (release.yml).
+  workflow_call:
 jobs:
   gate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Syntax of the scripts
-        run: bash -n relay-events && bash -n mark-seen && bash -n request && bash -n tests/run && bash -n tests/check-agent && bash -n spaceturtle && bash -n tests/check-images && bash -n images/versions && bash -n images/connector/connector-start
+        run: bash -n relay-events && bash -n mark-seen && bash -n request && bash -n tests/run && bash -n tests/check-agent && bash -n spaceturtle && bash -n tests/check-images && bash -n images/versions && bash -n images/connector/connector-start && bash -n release/references && bash -n release/publish-definition && bash -n release/notes
       - name: Install yq when the runner lacks it
         run: command -v yq >/dev/null || { mkdir -p "$HOME/.local/bin" && curl -fsSL -o "$HOME/.local/bin/yq" https://github.com/mikefarah/yq/releases/download/v4.54.1/yq_linux_amd64 && chmod +x "$HOME/.local/bin/yq" && echo "$HOME/.local/bin" >> "${GITHUB_PATH:-/dev/null}"; }
       - name: yq is on the runner
