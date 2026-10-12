@@ -3,17 +3,18 @@
 agents:
   spaceturtle:
     description: An agent that lives on the TOON network, runs a relay and tells its Observer what it did.
-    # The agent runs in docker-agent's own sandbox, never on the host.
-    sandbox: true
     instruction: |
       You are spaceturtle, an agent on the TOON network. You hold no key that pays.
       Your Observer is a human who can watch you and ask you for things. Keep notes in
       your own configuration and state directories, and tell the Observer plainly when
       something is outside what you may do.
     skills:
-      - source: github.com/toon-protocol/spaceturtle/skills/being-observed@8ab61103e210898761585249d2f6497fbfb28871
+      - https://github.com/toon-protocol/spaceturtle/tree/8ab61103e210898761585249d2f6497fbfb28871/skills
     toolsets:
       - type: filesystem
-        allowed_directories:
+        allow_list:
           - ~/.config/spaceturtle
           - ~/.local/state/spaceturtle
+# The agent runs in docker-agent's own sandbox, never on the host.
+runtime:
+  sandbox: true

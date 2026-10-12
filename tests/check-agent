@@ -6,6 +6,7 @@
 set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 def=${1:-$root/agent/spaceturtle.yaml}
+command -v yq >/dev/null || { echo "FAIL readable: yq (mikefarah's) is not installed"; exit 1; }
 json=$(yq -o=json '.' "$def") || { echo "FAIL readable: $def is not YAML"; exit 1; }
 fails=0
 fail() { echo "FAIL $1: $2"; fails=$((fails + 1)); }
@@ -28,43 +29,49 @@ unquoted_vars() {
   done
 }
 
-forbidden='(^|[^[:alnum:]_.-])toon[[:space:]]+(limit[[:space:]]+set|wallet|channel[[:space:]]+withdraw|channel[[:space:]]+open|create|init)([^[:alnum:]_-]|$)'
+forbidden='(^|[^[:alnum:]_.-])["'"'"']?toon["'"'"']?([[:space:]]+-[^[:space:]]+)*[[:space:]]+(limit[[:space:]]+set|wallet|channel[[:space:]]+withdraw|channel[[:space:]]+open|create|init)([^[:alnum:]_-]|$)'
 
 while IFS= read -r agent; do
-  jqa() { jq -r --arg a "$agent" ".agents[\$a] | $1" <<<"$json"; }
+  jqa() { jq -r --arg a "$agent" --arg n "${2-}" ".agents[\$a] | $1" <<<"$json"; }
+  # The agent's toolsets: its own, then the shared ones it names in use_toolsets.
+  toolsets=$(jq -c --arg a "$agent" '. as $r | .agents[$a] | (.toolsets // []) + [(.use_toolsets // [])[] | $r.toolsets[.] // empty]' <<<"$json")
+  jqt() { jq -r --arg n "${2-}" "$1" <<<"$toolsets"; }
 
-  [[ $(jqa '.sandbox') == true ]] || fail sandbox "$agent: the definition does not require the agent's sandbox (sandbox: true)"
+  [[ $(jq '.runtime.sandbox == true' <<<"$json") == true ]] || fail sandbox "$agent: the definition does not require the agent's sandbox (runtime.sandbox: true)"
 
+  # A string that is "local" or a URL is a source; any other string only names a skill.
   while IFS= read -r src; do
-    [[ $src =~ @[0-9a-f]{40}$ ]] || fail skill-pinned "$agent: skill source '$src' is not pinned to a commit (@<40 hex>)"
-  done < <(jqa '(.skills // [])[] | if type == "object" then .source else . end')
+    [[ $src == local || $src == http://* || $src == https://* ]] || continue
+    [[ $src =~ ^https://github\.com/[^/?#]+/[^/?#]+(/tree/[0-9a-f]{40}(/[^?#]*)?|\?([^#]*&)?ref=[0-9a-f]{40}(&[^#]*)?)$ ]] ||
+      fail skill-pinned "$agent: skill source '$src' is not pinned to a commit (https://github.com/<owner>/<repo>/tree/<40 hex>/<dir>)"
+  done < <(jqa '(.skills // []) | if type == "array" then .[] | strings elif . == true then "local" else empty end')
 
-  n=$(jqa '(.toolsets // []) | length')
+  n=$(jqt 'length')
   for ((t = 0; t < n; t++)); do
-    type=$(jqa ".toolsets[$t].type")
+    type=$(jqt ".[$t].type")
     case $type in
       shell|bash) fail no-shell-tool "$agent/$type: a shell tool gives the agent any command" ;;
-      filesystem)
-        dirs=$(jqa ".toolsets[$t].allowed_directories // [] | .[]")
-        [[ -n $dirs ]] || fail file-scope "$agent/filesystem: no allowed_directories, so the file tool reaches everything"
+      filesystem|file)
+        dirs=$(jqt ".[$t].allow_list // [] | .[]")
+        [[ -n $dirs ]] || fail file-scope "$agent/$type: no allow_list, so the file tool reaches everything"
         while IFS= read -r d; do
           [[ -z $d ]] && continue
-          if [[ $d == *..* || ! $d =~ ^(~|\$HOME)/(\.config|\.local/state)/spaceturtle(/[^/]+)*/?$ ]]; then
-            fail file-scope "$agent/filesystem: '$d' is outside spaceturtle's own configuration and state directories"
+          if [[ $d == *..* || ! $d =~ ^~/(\.config|\.local/state)/spaceturtle(/[^/]+)*/?$ ]]; then
+            fail file-scope "$agent/$type: '$d' is outside spaceturtle's own configuration and state directories"
           fi
         done <<<"$dirs" ;;
       script)
         while IFS= read -r name; do
-          cmd=$(jqa ".toolsets[$t].shell[\"$name\"].cmd // \"\"")
-          args=$(jqa ".toolsets[$t].shell[\"$name\"].args // {} | keys[]")
+          cmd=$(jqt ".[$t].shell[\$n].cmd // \"\"" "$name")
+          args=$(jqt ".[$t].shell[\$n].args // {} | keys[]" "$name")
           flat=$(tr '\n' ' ' <<<"$cmd")
-          [[ $flat =~ $forbidden ]] && fail forbidden-command "$agent/$name: runs 'toon ${BASH_REMATCH[2]}', which the agent key's scope does not allow"
-          [[ $flat =~ (^|[^[:alnum:]_.-])toon[[:space:]]+[\"\'\$] ]] && fail forbidden-command "$agent/$name: the toon subcommand is not fixed, so it could be any command"
+          [[ $flat =~ $forbidden ]] && fail forbidden-command "$agent/$name: runs 'toon ${BASH_REMATCH[4]}', which the agent key's scope does not allow"
+          [[ $flat =~ (^|[^[:alnum:]_.-])[\"\']?toon[\"\']?([[:space:]]+-[^[:space:]]+)*[[:space:]]+[\"\'\$] ]] && fail forbidden-command "$agent/$name: the toon subcommand is not fixed, so it could be any command"
           used=$(unquoted_vars "$cmd" | sort -u)
           while IFS= read -r a; do
             [[ -n $a ]] && grep -qx "$a" <<<"$args" && fail quoted-args "$agent/$name: argument '$a' is used unquoted, so it could add a flag"
           done <<<"$used"
-        done < <(jqa ".toolsets[$t].shell // {} | keys[]") ;;
+        done < <(jqt ".[$t].shell // {} | keys[]") ;;
     esac
   done
 done < <(jq -r '.agents // {} | keys[]' <<<"$json")
