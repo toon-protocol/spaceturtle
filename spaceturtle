@@ -14,6 +14,14 @@
 #       The passphrase is made inside the zone and stays there: it is never
 #       printed and never written on the machine.
 #
+#   spaceturtle mainnet [--keep-limit]
+#       Moves the Install from devnet to mainnet, once the person running it has
+#       typed "mainnet" to confirm. It first says what changes: real funds are now at
+#       stake, there is no faucet, and which addresses to fund. Without the typed
+#       word nothing changes. It lowers the spending limit to the mainnet default
+#       unless --keep-limit is given. On an Install already on mainnet it says so
+#       and changes nothing.
+#
 #   spaceturtle session [--unattended]
 #       Starts a `docker-agent` session in the agent's zone, from the agent's zone
 #       image and the published agent definition. The session command carries an
@@ -172,6 +180,59 @@ step_backup() {
   "$sbx" cp "$zone:/tmp/wallet-backup" "$backup_dir/wallet-backup" || die "the backup could not be copied out of the zone"
   mark backup
   say "the backup is at $backup_dir/wallet-backup. Keep it: it is the only way back to the wallet and the agent's identity if the zone is lost."
+}
+
+# The network the node is on, from `toon status --json`; empty when it cannot be read.
+node_network() {
+  in_zone 'toon status --json' 2>/dev/null | jq -r '.network // .agent_node.network // empty' 2>/dev/null
+}
+
+mainnet() {
+  local keep_limit=0 arg network addresses answer
+  for arg in "$@"; do
+    case $arg in
+      --keep-limit) keep_limit=1 ;;
+      *) die "usage: spaceturtle mainnet [--keep-limit]" ;;
+    esac
+  done
+  preflight
+  zone_exists || die "there is no connector's zone yet. Run 'spaceturtle start' first."
+  command -v jq >/dev/null 2>&1 || die "jq is not installed, and it is needed to read the node's network."
+  network=$(node_network)
+  [[ -n $network ]] || die "the network the node is on could not be read from the zone. Run 'spaceturtle start' and try again."
+  if [[ $network == mainnet ]]; then
+    say "this Install is already on mainnet. Nothing was changed."
+    return 0
+  fi
+  addresses=$(in_zone 'toon wallet addresses') || die "the wallet's addresses could not be read from the zone"
+  [[ -n $addresses ]] || die "the zone listed no address to fund"
+  cat <<EOF2
+spaceturtle: this moves the Install from $network to mainnet.
+  - Real funds are now at stake: whoever breaks into the connector's zone holds what is in these addresses.
+  - There is no faucet on mainnet. Nothing is funded for you.
+  - Fund only what you can afford to lose, at these addresses:
+$(sed 's/^/      /' <<<"$addresses")
+EOF2
+  if (( keep_limit )); then
+    say "the spending limit is kept as it is (--keep-limit)."
+  else
+    say "the spending limit will be lowered to the mainnet default."
+  fi
+  printf 'spaceturtle: type "mainnet" to go on: '
+  IFS= read -r answer || answer=
+  if [[ $answer != mainnet ]]; then
+    echo
+    say "not confirmed. Nothing was changed."
+    return 1
+  fi
+  say "moving the node to mainnet"
+  in_zone 'toon network set mainnet --json >/dev/null' || die "toon could not move the node to mainnet"
+  if (( ! keep_limit )); then
+    in_zone 'toon limit set --network-default --json >/dev/null' || die "the node is on mainnet, but the spending limit could not be lowered. Lower it before funding anything: $sbx exec $zone sh -c 'TOON_PASSPHRASE_FILE=\$HOME/.config/toon-passphrase toon limit set --network-default'"
+  fi
+  network=$(node_network)
+  [[ $network == mainnet ]] || die "the node did not report mainnet afterwards (it says '${network:-nothing}')"
+  say "the Install is on mainnet. Fund the addresses above."
 }
 
 # --- settings: `name=value` lines in launcher.conf ---
@@ -399,6 +460,7 @@ cmd_status() {
 
 case ${1:-} in
   start) start ;;
+  mainnet) shift; mainnet "$@" ;;
   session) shift; session "$@" ;;
   timer) shift; timer "$@" ;;
   set) shift; set_ "$@" ;;
@@ -407,5 +469,5 @@ case ${1:-} in
   approve) decide approve "${2:-}" ;;
   refuse) decide refuse "${2:-}" "${3:-}" ;;
   status) cmd_status ;;
-  *) die "usage: spaceturtle start | session | timer | set | key | status | waiting | approve <app> | refuse <app> [reason]" ;;
+  *) die "usage: spaceturtle start | mainnet [--keep-limit] | session | timer | set | key | status | waiting | approve <app> | refuse <app> [reason]" ;;
 esac

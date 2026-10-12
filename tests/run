@@ -970,8 +970,10 @@ echo "$*" >> "$STUB_DIR/calls"
 [[ $1 == ls ]] && { [[ -e $STUB_DIR/signed-out ]] && exit 1; cat "$STUB_DIR/zones" 2>/dev/null; exit 0; }
 [[ -r $STUB_DIR/fail-on && $* == *"$(cat "$STUB_DIR/fail-on")"* ]] && exit 1
 [[ $* == *pgrep* ]] && { [[ -e $STUB_DIR/up ]]; exit; }
-[[ $* == *"toon status --json"* ]] && { cat "$STUB_DIR/status" 2>/dev/null; exit 0; }
+[[ $* == *"toon status --json"* ]] && { cat "$STUB_DIR/status" 2>/dev/null || echo "{\"network\":\"$(cat "$STUB_DIR/network" 2>/dev/null || echo devnet)\"}"; exit 0; }
 [[ $* == *"toon up"* ]] && : > "$STUB_DIR/up"
+[[ $* == *"toon wallet addresses"* ]] && { echo "evm 0xAAA111"; echo "solana SoLBBB222"; exit 0; }
+[[ $* == *"toon network set mainnet"* ]] && echo mainnet > "$STUB_DIR/network"
 [[ $1 == create ]] && echo "zone-x running" > "$STUB_DIR/zones"
 [[ $1 == cp && $2 == zone-x:* ]] && echo sealed > "$3"
 exit 0
@@ -1034,6 +1036,31 @@ launcher_env; touch "$STUB_DIR/signed-out"; run_launcher; rc=$?
 launcher_env; SPACETURTLE_SBX=$tmp/bin/missing run_launcher; rc=$?
 [[ $rc -ne 0 ]] && grep -qi 'not installed' "$tmp/out" && grep -q 'github.com/docker/sbx-releases' "$tmp/out" \
   && [[ ! -e $SPACETURTLE_STATE_DIR/launcher && ! -e $SPACETURTLE_DATA_DIR && ! -e $SPACETURTLE_BACKUP_DIR ]]; launcher_check "with sbx missing it stops before doing anything, with cause and remedy" $?
+
+# --- the launcher: spaceturtle mainnet ---
+run_mainnet() { printf '%s\n' "$1" | "$root/spaceturtle" mainnet "${@:2}" > "$tmp/out" 2>&1; }
+changed_nothing() { ! grep -qE 'toon network set|toon limit set' "$STUB_DIR/calls"; }
+
+launcher_env; echo "zone-x running" > "$STUB_DIR/zones"
+run_mainnet "yes"; rc=$?
+[[ $rc -ne 0 ]] && changed_nothing; launcher_check "mainnet without the typed word changes nothing" $?
+grep -q 0xAAA111 "$tmp/out" && grep -q SoLBBB222 "$tmp/out" && grep -qi 'no faucet' "$tmp/out" && grep -qi 'real funds' "$tmp/out"
+launcher_check "the message names the addresses to fund and says there is no faucet" $?
+: > "$STUB_DIR/calls"; run_mainnet ""; rc=$?
+[[ $rc -ne 0 ]] && changed_nothing; launcher_check "mainnet with no answer changes nothing" $?
+: > "$STUB_DIR/calls"; run_mainnet "mainnet"; rc=$?
+launcher_check "mainnet with the typed word succeeds" $rc
+grep -q 'toon network set mainnet' "$STUB_DIR/calls" && grep -q 'toon limit set --network-default' "$STUB_DIR/calls"; launcher_check "it moves the node and lowers the limit" $?
+s=$(grep -n 'toon status --json' "$STUB_DIR/calls" | tail -1 | cut -d: -f1); n=$(line_no 'toon network set mainnet')
+[[ -n $s && -n $n && $s -gt $n ]] && grep -q 'is on mainnet' "$tmp/out"; launcher_check "after it, status shows mainnet" $?
+: > "$STUB_DIR/calls"; run_mainnet "mainnet"; rc=$?
+[[ $rc -eq 0 ]] && grep -qi 'already on mainnet' "$tmp/out" && changed_nothing; launcher_check "on mainnet already, it says so and changes nothing" $?
+launcher_env; echo "zone-x running" > "$STUB_DIR/zones"; run_mainnet "mainnet" --keep-limit; rc=$?
+[[ $rc -eq 0 ]] && grep -q 'toon network set mainnet' "$STUB_DIR/calls" && ! grep -q 'toon limit set' "$STUB_DIR/calls"; launcher_check "--keep-limit leaves the limit alone" $?
+launcher_env; echo "zone-x running" > "$STUB_DIR/zones"; echo 'toon limit set' > "$STUB_DIR/fail-on"; run_mainnet "mainnet"; rc=$?
+[[ $rc -ne 0 ]] && grep -q 'limit could not be lowered' "$tmp/out" && grep -q 'toon limit set --network-default' "$tmp/out"; launcher_check "a failed limit stops and says how to lower it" $?
+launcher_env; run_mainnet "mainnet"; rc=$?
+[[ $rc -ne 0 ]] && changed_nothing; launcher_check "with no zone it stops and changes nothing" $?
 
 # --- sessions and the timer ---
 # A launcher whose connector's zone is running, with a model key.

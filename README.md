@@ -70,6 +70,13 @@ KVM and a signed-in `sbx`, and says what is missing and how to fix it before it 
 anything. The wallet's storage is `~/.local/share/spaceturtle/wallet` (`SPACETURTLE_DATA_DIR`),
 mounted into the zone and outside its image.
 
+`spaceturtle mainnet [--keep-limit]` moves a devnet Install to mainnet. It says that real
+funds are now at stake, that there is no faucet, and which wallet addresses to fund, then
+asks you to type `mainnet`; anything else changes nothing. It lowers the spending limit to
+the mainnet default unless you pass `--keep-limit`. On an Install already on mainnet it says
+so and changes nothing. It runs `toon status --json`, `toon wallet addresses`,
+`toon network set mainnet` and `toon limit set --network-default` in the connector's zone.
+
 `spaceturtle session` starts a `docker-agent` session in the agent's zone, from the agent's
 zone image (`SPACETURTLE_AGENT_IMAGE`) and `agent/spaceturtle.yaml`. The zone may reach the
 model provider and one loopback port, the one that leads to the connector's zone
