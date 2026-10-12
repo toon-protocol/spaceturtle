@@ -852,13 +852,15 @@ launcher_env() {
   : > "$SPACETURTLE_KVM"; : > "$SPACETURTLE_TOON_BIN"
   # An sbx that records its calls. `ls` lists the zones in $STUB_DIR/zones and fails
   # when $STUB_DIR/signed-out exists; a call whose arguments contain the text in
-  # $STUB_DIR/fail-on fails, and `cp` out of the zone writes a file.
+  # $STUB_DIR/fail-on fails, `toon status --json` prints $STUB_DIR/status, and `cp` out
+  # of the zone writes a file.
   cat > "$SPACETURTLE_SBX" <<'STUB'
 #!/bin/bash
 echo "$*" >> "$STUB_DIR/calls"
 [[ $1 == ls ]] && { [[ -e $STUB_DIR/signed-out ]] && exit 1; cat "$STUB_DIR/zones" 2>/dev/null; exit 0; }
 [[ -r $STUB_DIR/fail-on && $* == *"$(cat "$STUB_DIR/fail-on")"* ]] && exit 1
 [[ $* == *pgrep* ]] && { [[ -e $STUB_DIR/up ]]; exit; }
+[[ $* == *"toon status --json"* ]] && { cat "$STUB_DIR/status" 2>/dev/null; exit 0; }
 [[ $* == *"toon up"* ]] && : > "$STUB_DIR/up"
 [[ $1 == create ]] && echo "zone-x running" > "$STUB_DIR/zones"
 [[ $1 == cp && $2 == zone-x:* ]] && echo sealed > "$3"
@@ -928,24 +930,32 @@ waiting_env() {
   launcher_env
   echo "zone-x running" > "$STUB_DIR/zones"
   now=$(date +%s)
-  echo "{\"agent_node\":{\"toon_apps\":[{\"apps\":[{\"name\":\"relay\",\"state\":\"running\"},{\"name\":\"oracle\",\"state\":\"pending\",\"image\":\"docker.io/x/oracle:1\",\"requested_at\":$((now - 7300))}]}]}}" > "$STUB_DIR/status"
-  # `toon status --json` in the zone prints $STUB_DIR/status; the other calls are recorded.
-  sed -i 's|^\[\[ \$\* == \*pgrep|[[ $* == *"toon status --json"* ]] \&\& { cat "$STUB_DIR/status"; exit 0; }\n&|' "$SPACETURTLE_SBX"
+  # A peer that is pending is not an app, so it is not waiting.
+  echo "{\"peers\":[{\"name\":\"bob\",\"state\":\"pending\"}],\"agent_node\":{\"toon_apps\":[{\"apps\":[{\"name\":\"relay\",\"state\":\"running\"},{\"name\":\"oracle\",\"state\":\"pending\",\"image\":\"docker.io/x/oracle:1\",\"requested_at\":$((now - 7300))}]}]}}" > "$STUB_DIR/status"
 }
 run_cli() { "$root/spaceturtle" "$@" > "$tmp/out" 2>&1; }
 waiting_env; run_cli waiting; rc=$?
 launcher_check "waiting lists the name, image and age of each waiting app" $(( rc == 0 && $(grep -cP '^oracle\tdocker.io/x/oracle:1\t2h$' "$tmp/out") == 1 ? 0 : 1 ))
-! grep -q relay "$tmp/out"; launcher_check "waiting does not list an app that is running" $?
+! grep -qE 'relay|bob' "$tmp/out"; launcher_check "waiting does not list an app that is running, or anything pending that is not an app" $?
+waiting_env; echo '{"apps":[]}' > "$STUB_DIR/status"; run_cli waiting; rc=$?
+[[ $rc -eq 0 ]] && grep -q 'no app is waiting' "$tmp/out"; launcher_check "waiting with nothing waiting says so" $?
 waiting_env; : > "$STUB_DIR/calls"; run_cli approve oracle; rc=$?
 launcher_check "approve runs toon approve on a waiting app" $(( rc == 0 && $(grep -c "toon approve -- 'oracle'" "$STUB_DIR/calls") == 1 ? 0 : 1 ))
 waiting_env; : > "$STUB_DIR/calls"; run_cli refuse oracle "not mine"; rc=$?
 launcher_check "refuse runs toon refuse with the reason on a waiting app" $(( rc == 0 && $(grep -c "toon refuse --reason 'not mine' -- 'oracle'" "$STUB_DIR/calls") == 1 ? 0 : 1 ))
 for v in approve refuse; do
-  waiting_env; : > "$STUB_DIR/calls"; run_cli $v relay; rc=$?
+  waiting_env; : > "$STUB_DIR/calls"; run_cli "$v" relay; rc=$?
   [[ $rc -ne 0 ]] && grep -q 'not waiting' "$tmp/out" && ! grep -qE "toon (approve|refuse)" "$STUB_DIR/calls"; launcher_check "$v of an app that is not waiting says so and changes nothing" $?
 done
+waiting_env; : > "$STUB_DIR/calls"; run_cli refuse oracle; rc=$?
+launcher_check "refuse without a reason runs toon refuse with no reason" $(( rc == 0 && $(grep -c "toon refuse -- 'oracle'" "$STUB_DIR/calls") == 1 ? 0 : 1 ))
 waiting_env; run_cli status; rc=$?
 launcher_check "status shows the number waiting" $(( rc == 0 && $(grep -c '1 app(s) waiting' "$tmp/out") == 1 ? 0 : 1 ))
+waiting_env; echo "toon status --json" > "$STUB_DIR/fail-on"; run_cli status; rc=$?
+[[ $rc -ne 0 ]] && grep -q 'toon status failed' "$tmp/out" && ! grep -q 'waiting for approval' "$tmp/out"; launcher_check "status with toon status failing says so and counts nothing" $?
+waiting_env; echo "toon status --json" > "$STUB_DIR/fail-on"; : > "$STUB_DIR/calls"; run_cli approve oracle; rc=$?
+[[ $rc -ne 0 ]] && grep -q 'toon status failed' "$tmp/out" && ! grep -q 'not waiting' "$tmp/out" && ! grep -q "toon approve" "$STUB_DIR/calls"
+launcher_check "approve with toon status failing says so and changes nothing" $?
 
 echo; echo "$count checks, $fails failed"
 [[ $fails -eq 0 ]]
