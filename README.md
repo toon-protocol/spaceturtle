@@ -131,6 +131,14 @@ which the agent has no tool for:
 | `spaceturtle approve <app>` | Starts it; an image that is not TOON's own runs under the sandboxed runtime |
 | `spaceturtle refuse <app> [reason]` | Discards it |
 | `spaceturtle status` | Also says whether the supervisor is running and how many apps are waiting |
+| `spaceturtle agent-key show` | The agent key's scope, limits and what is left today; never the private half |
+| `spaceturtle agent-key replace` | Makes a new key, revokes the old one, places the new private half in the agent's zone; the wallet is untouched |
+| `spaceturtle agent-key revoke` | Removes the key from the agent node's list; the agent's next order is refused |
+| `spaceturtle agent-key limit <amount>` | Sets the key's spending limit; the agent has no tool for it |
+
+`start` makes exactly one agent key, with the default scope (ADR 0003) and the default spending
+limit. Its private half goes from the connector's zone to the agent's zone through a pipe, and
+is kept nowhere else. A second `start` makes none.
 
 Approving or refusing an app that is not waiting says so and changes nothing. The list is
 read from the apps `toon status --json` reports as `pending`.

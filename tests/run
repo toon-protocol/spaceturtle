@@ -998,12 +998,20 @@ echo "$*" >> "$STUB_DIR/calls"
 [[ $* == *connector-start* ]] && : > "$STUB_DIR/up"
 [[ $* == *"toon wallet addresses"* ]] && { echo "evm 0xAAA111"; echo "solana SoLBBB222"; exit 0; }
 [[ $* == *"toon network set mainnet"* ]] && echo mainnet > "$STUB_DIR/network"
+[[ $* == *"toon agent-key create"* ]] && { touch "$STUB_DIR/keys"; n=$(( $(wc -l < "$STUB_DIR/keys") + 1 )); echo "key-$n" >> "$STUB_DIR/keys"; echo "PRIVATE-HALF-$n" > "$STUB_DIR/agentkeyfile"; exit 0; }
+[[ $* == *"toon agent-key list"* ]] && { touch "$STUB_DIR/keys"; jq -Rn '[inputs | {id: ., scope: ["send","peer"], limit: 5, private_key: "PRIVATE-LEAK"}]' "$STUB_DIR/keys"; exit 0; }
+[[ $* == *"toon agent-key revoke"* ]] && { [[ $* =~ revoke\ --\ \'([^\']*)\' ]]; id=${BASH_REMATCH[1]}; sed -i "/^$id$/d" "$STUB_DIR/keys"; exit 0; }
+[[ $* == *'cat /tmp/agent-key'* ]] && { cat "$STUB_DIR/agentkeyfile" 2>/dev/null; exit 0; }
+[[ $* == *'test -s /tmp/agent-key'* ]] && { [[ -s $STUB_DIR/agentkeyfile ]]; exit; }
+[[ $* == *"rm -f /tmp/agent-key"* ]] && { rm -f "$STUB_DIR/agentkeyfile"; exit 0; }
+[[ $1 == exec && $2 == -i && $3 == agent-x ]] && { cat >> "$STUB_DIR/agent-zone-key"; exit 0; }
 [[ $1 == exec && $2 == -i ]] && { cat > "$STUB_DIR/stdin"; exit 0; }
 [[ $* == *'cat "$HOME/.config/toon-passphrase"'* ]] && { cat "$STUB_DIR/zone-passphrase" 2>/dev/null; exit 0; }
 [[ $* == *"curl -s"* ]] && { [[ -e $STUB_DIR/relay-down ]] && exit 1; exit 0; }
 [[ $1 == rm ]] && { sed -i "/^${@: -1} /d" "$STUB_DIR/zones"; [[ ${@: -1} == zone-x ]] && rm -f "$STUB_DIR/up"; exit 0; }
 [[ $1 == stop ]] && { sed -i "s/^$2 running/$2 stopped/" "$STUB_DIR/zones"; [[ $2 == zone-x ]] && rm -f "$STUB_DIR/up"; exit 0; }
 [[ $1 == start ]] && { sed -i "s/^$2 stopped/$2 running/" "$STUB_DIR/zones"; exit 0; }
+[[ $1 == create && $* == *"--name agent-x"* ]] && { echo "agent-x running" >> "$STUB_DIR/zones"; exit 0; }
 [[ $1 == create ]] && echo "zone-x running" > "$STUB_DIR/zones"
 [[ $1 == cp && $2 == zone-x:* ]] && echo sealed > "$3"
 exit 0
@@ -1057,11 +1065,11 @@ for step in "ln -sfn" "toon wallet fund" "connector-start" "toon wallet backup" 
   rm "$STUB_DIR/fail-on"; : > "$STUB_DIR/calls"; run_launcher; rc=$?
   launcher_check "a run after one that failed at '$step' succeeds" $rc
   [[ -s $SPACETURTLE_BACKUP_DIR/wallet-backup ]]; launcher_check "  and finishes the backup" $?
-  ! grep -E '^create ' "$STUB_DIR/calls" | grep -q .; launcher_check "  without creating the zone again" $?
+  ! grep -E '^create --name zone-x ' "$STUB_DIR/calls" | grep -q .; launcher_check "  without creating the zone again" $?
 done
 launcher_env; echo "zone-x" > "$STUB_DIR/fail-on"; run_launcher
 rm "$STUB_DIR/fail-on"; echo "zone-x running" > "$STUB_DIR/zones"; : > "$STUB_DIR/calls"; run_launcher
-! grep -E '^create ' "$STUB_DIR/calls" | grep -q .; launcher_check "a zone that exists is not created again" $?
+! grep -E '^create --name zone-x ' "$STUB_DIR/calls" | grep -q .; launcher_check "a zone that exists is not created again" $?
 launcher_env; echo "zone-x-old running" > "$STUB_DIR/zones"; run_launcher
 grep -q '^create ' "$STUB_DIR/calls"; launcher_check "a zone whose name only starts with the zone's is not taken for it" $?
 # The zone is lost: a new one gets every step again, not only the create.
@@ -1257,6 +1265,38 @@ rm_env; rm_cmd --everything; rc=$?
 [[ $rc -ne 0 ]] && grep -q 'usage: spaceturtle remove' "$tmp/out" && nothing_removed; launcher_check "remove refuses any other argument with the usage" $?
 rm_env; echo "cp zone-x" > "$STUB_DIR/fail-on"; rm_cmd "" y; rc=$?
 [[ $rc -ne 0 ]] && ! grep -q '^rm ' "$STUB_DIR/calls"; launcher_check "remove whose fresh backup fails removes nothing" $?
+
+# the agent key
+sbxcalls() { grep -c "$1" "$STUB_DIR/calls"; }
+launcher_env; run_launcher; rc=$?
+[[ $rc -eq 0 && $(wc -l < "$STUB_DIR/keys") -eq 1 ]] && grep -q 'toon agent-key create' "$STUB_DIR/calls"; launcher_check "a first run creates exactly one agent key, with the default scope and limit" $?
+! grep -qE -- '--scope|--limit' <(grep 'agent-key create' "$STUB_DIR/calls"); launcher_check "the agent key is created without overriding the default scope or limit" $?
+[[ $(<"$STUB_DIR/agent-zone-key") == PRIVATE-HALF-1 ]]; launcher_check "the private half is placed in the agent's zone" $?
+! grep -rq 'PRIVATE-HALF' "$tmp/out" "$SPACETURTLE_STATE_DIR" "$SPACETURTLE_CONFIG_DIR" "$HOME" "$SPACETURTLE_DATA_DIR" "$SPACETURTLE_BACKUP_DIR" "$STUB_DIR/calls" 2>/dev/null && [[ ! -e $STUB_DIR/agentkeyfile ]]
+launcher_check "the private half is nowhere else: not in the output, the launcher's files, the home, the calls, or the connector's zone" $?
+: > "$STUB_DIR/calls"; run_launcher; rc=$?
+[[ $rc -eq 0 && $(wc -l < "$STUB_DIR/keys") -eq 1 ]] && ! grep -q 'agent-key create' "$STUB_DIR/calls"; launcher_check "a second run creates no key" $?
+# an interrupted run (key on the list, marker missing, file still in the zone) places it and makes no second key
+launcher_env; run_launcher; rm -rf "$SPACETURTLE_STATE_DIR/launcher/agentkey"; rm -f "$STUB_DIR/agent-zone-key"; echo PRIVATE-HALF-1 > "$STUB_DIR/agentkeyfile"; run_launcher
+[[ $(wc -l < "$STUB_DIR/keys") -eq 1 && $(<"$STUB_DIR/agent-zone-key") == PRIVATE-HALF-1 ]]; launcher_check "a run that was interrupted before the key was placed places it and makes no second key" $?
+up_env; echo "agent-x running" >> "$STUB_DIR/zones"; run_cmd agent-key show; rc=$?
+[[ $rc -eq 0 ]] && grep -q '"scope"' "$tmp/out" && ! grep -qE 'PRIVATE|private' "$tmp/out"; launcher_check "agent-key show prints the scope and limits and never the private half" $?
+grep -q 'TOON_AGENT_KEY=.*toon limit show' "$STUB_DIR/calls"; launcher_check "agent-key show reads what is left today with the key, from the agent's zone" $?
+up_env; run_cmd agent-key revoke; rc=$?
+[[ $rc -eq 0 && ! -s $STUB_DIR/keys ]] && grep -q 'toon agent-key revoke -- .key-1.' "$STUB_DIR/calls"; launcher_check "agent-key revoke removes the key from the node's list" $?
+run_launcher; [[ $(wc -l < "$STUB_DIR/keys") -eq 0 ]]; launcher_check "start does not make a key after a revoke" $?
+up_env; : > "$STUB_DIR/calls"; rm -f "$STUB_DIR/agent-zone-key"; run_cmd agent-key replace; rc=$?
+[[ $rc -eq 0 && $(<"$STUB_DIR/keys") == key-2 && $(<"$STUB_DIR/agent-zone-key") == PRIVATE-HALF-2 ]] && ! grep -qE 'wallet|toon init' "$STUB_DIR/calls"; launcher_check "agent-key replace revokes the old key, places a new one and leaves the wallet alone" $?
+up_env; : > "$STUB_DIR/calls"; run_cmd agent-key limit 3; rc=$?
+[[ $rc -eq 0 ]] && grep -q "toon agent-key set --limit '3' -- 'key-1'" "$STUB_DIR/calls"; launcher_check "agent-key limit sets the spending limit" $?
+up_env; run_cmd agent-key limit lots; rc=$?
+[[ $rc -ne 0 ]] && grep -q 'usage' "$tmp/out"; launcher_check "agent-key limit refuses a value that is not an amount" $?
+upg_env; run_cmd upgrade; rc=$?
+[[ $rc -eq 0 && $(<"$STUB_DIR/keys") == key-2 ]]; launcher_check "upgrade, which removes the agent's zone, replaces the key" $?
+# no tool in the agent definition can do it
+bad=$tmp/bad.yaml; yq '.agents.spaceturtle.toolsets += [{"type":"script","shell":{"k":{"cmd":"toon agent-key set --limit 99","description":"x"}}}]' "$root/agent/spaceturtle.yaml" > "$bad"
+"$root/tests/check-agent" "$bad" > "$tmp/out" 2>&1; rc=$?
+[[ $rc -ne 0 ]] && grep -q forbidden-command "$tmp/out"; launcher_check "check-agent refuses a tool that runs toon agent-key" $?
 
 echo; echo "$count checks, $fails failed"
 [[ $fails -eq 0 ]]
