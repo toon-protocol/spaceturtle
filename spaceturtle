@@ -13,8 +13,27 @@
 #         4. supervisor  the image's `connector-start` (the container engine, then
 #                        `toon up`), started again whenever it is not running
 #         5. backup      a sealed backup of the wallet, handed to the Observer
-#       The passphrase is made inside the zone and stays there: it is never
-#       printed and never written on the machine.
+#       The passphrase is made inside the zone: it is never printed and never
+#       written to the machine's disk. `upgrade` carries it in memory to the new zone.
+#
+#   spaceturtle stop
+#       Stops the timer's unit (its on/off setting stays), a session in the agent's
+#       zone, then the connector's zone. Loses nothing; `start` brings it back and
+#       creates, initialises and funds nothing.
+#   spaceturtle upgrade
+#       Replaces the connector's zone with one from the newest connector's zone image,
+#       leaving the wallet's storage as it was. A fresh backup comes first; if it fails,
+#       or the passphrase cannot be read out of the old zone, nothing is changed. The
+#       passphrase goes through the standard output and input of `sbx exec`, never an
+#       argument, the environment or a file. The agent's zone is removed too.
+#   spaceturtle backup
+#       Writes a fresh sealed backup to the backup directory; the earlier one is replaced
+#       only once the new one has arrived whole. Needs the connector's zone running.
+#   spaceturtle remove [--delete-wallet]
+#       Offers a fresh backup, then removes both zones, the timer's units, the step
+#       markers, the settings and the model key. Keeps the wallet's storage and the
+#       backup directory. --delete-wallet also deletes the wallet's storage, after the
+#       word "delete" is typed; anything else changes nothing.
 #
 #   spaceturtle mainnet [--keep-limit]
 #       Moves the Install from devnet to mainnet, once the person running it has
@@ -50,8 +69,10 @@
 #       Refuses a waiting app and discards it.
 #   spaceturtle status
 #       The timer's state and interval, when the last unattended session started,
-#       the model and the ceiling; then whether the zone and the supervisor are
-#       running and how many apps wait.
+#       the model and the ceiling; the connector's zone (running, stopped, not created),
+#       the agent's zone (in a session, idle), the network, each app and whether the
+#       relay answers; whether the supervisor runs and how many apps wait. Exits 0
+#       when the connector's zone is stopped or missing.
 #   Approving or refusing an app that is not waiting says so and changes nothing.
 #   `waiting`, `approve`, `refuse` and `status` run `toon` with the home, in the
 #   connector's zone. The agent has no tool for them (tests/check-agent).
@@ -125,14 +146,28 @@ preflight() {
 
 zone_exists() { "$sbx" ls 2>/dev/null | awk -v z="$zone" '$1 == z { found = 1 } END { exit !found }'; }
 
+# The zone's state in `sbx ls`: running, stopped or "not created". Takes the zone's name.
+zone_state() {
+  "$sbx" ls 2>/dev/null | awk -v z="${1:-$zone}" '$1 == z { found = 1; run = ($0 ~ /running/) }
+    END { print !found ? "not created" : run ? "running" : "stopped" }'
+}
+
+# Creates the connector's zone from the connector's zone image; the markers are the caller's.
+create_zone() {
+  mkdir -p "$data_dir" || die "cannot create $data_dir"
+  "$sbx" policy init balanced || die "sbx policy init failed"
+  "$sbx" create --name "$zone" --cpus 4 --memory 4g --template "$connector_image" shell "$data_dir" || die "sbx create failed"
+}
+
 step_zone() {
   if ! zone_exists; then
     say "creating the connector's zone ($zone)"
-    mkdir -p "$data_dir" || die "cannot create $data_dir"
-    "$sbx" policy init balanced || die "sbx policy init failed"
-    "$sbx" create --name "$zone" --cpus 4 --memory 4g --template "$connector_image" shell "$data_dir" || die "sbx create failed"
+    create_zone
     # A new zone has none of the steps done in it, whatever an earlier zone had.
     rm -rf "$marks"
+  elif [[ $(zone_state) == stopped ]]; then
+    say "starting the connector's zone ($zone)"
+    "$sbx" start "$zone" || die "sbx start failed"
   fi
   if ! done_ rule; then
     # The rule names the zone, so it is never machine-wide.
@@ -172,14 +207,26 @@ step_supervisor() {
   in_zone 'setsid nohup connector-start > ~/up.log 2>&1 < /dev/null &' || die "connector-start failed in the zone"
 }
 
+# Writes a fresh sealed backup to the backup directory. The backup already there is
+# replaced only once the new one has arrived whole.
+make_backup() {
+  mkdir -p "$backup_dir" && chmod 700 "$backup_dir" || return 1
+  in_zone 'rm -f /tmp/wallet-backup; toon wallet backup --output /tmp/wallet-backup >/dev/null' || { echo "spaceturtle: toon wallet backup failed in the zone" >&2; return 1; }
+  rm -f "$backup_dir/wallet-backup.new"
+  if ! "$sbx" cp "$zone:/tmp/wallet-backup" "$backup_dir/wallet-backup.new" || [[ ! -s $backup_dir/wallet-backup.new ]]; then
+    rm -f "$backup_dir/wallet-backup.new"
+    echo "spaceturtle: the backup could not be copied out of the zone; the earlier backup, if any, is as it was" >&2
+    return 1
+  fi
+  mv -f "$backup_dir/wallet-backup.new" "$backup_dir/wallet-backup" || return 1
+  say "the backup is at $backup_dir/wallet-backup. Keep it: it is the only way back to the wallet and the agent's identity if the zone is lost."
+}
+
 step_backup() {
   done_ backup && return
   say "making the backup"
-  mkdir -p "$backup_dir" && chmod 700 "$backup_dir" || die "cannot create $backup_dir"
-  in_zone 'toon wallet backup --output /tmp/wallet-backup >/dev/null' || die "toon wallet backup failed in the zone"
-  "$sbx" cp "$zone:/tmp/wallet-backup" "$backup_dir/wallet-backup" || die "the backup could not be copied out of the zone"
+  make_backup || die "the backup failed"
   mark backup
-  say "the backup is at $backup_dir/wallet-backup. Keep it: it is the only way back to the wallet and the agent's identity if the zone is lost."
 }
 
 # The network the node is on, from `toon status --json`; empty when it cannot be read.
@@ -396,8 +443,8 @@ start() {
 # Dies when toon status fails, so callers must not run it in a pipeline or substitution
 # whose failure they ignore.
 waiting_apps() {
-  local doc
-  doc=$(in_zone 'toon status --json') || die "toon status failed in the zone"
+  local doc=${1-}
+  [[ -n $doc ]] || doc=$(in_zone 'toon status --json') || die "toon status failed in the zone"
   jq -c '[.. | objects | .apps? | arrays | .[] | objects
     | select((.state // .status // "") == "pending" and (.name // "") != "")
     | {name, image: (.image // ""), since: (.requested_at // .asked_at // .since // .created_at // null)}]
@@ -445,17 +492,155 @@ decide() {
 
 cmd_status() {
   preflight
-  local lines last=never
+  local lines last=never state astate doc network relay l url
   [[ -s $state_dir/last-unattended ]] && last=$(<"$state_dir/last-unattended")
   echo "timer: $(conf_get timer on), every $(conf_get interval 6h)"
   echo "last unattended session: $last"
   echo "model: $(conf_get model anthropic/claude-sonnet-5-5)"
   echo "ceiling: $(conf_get ceiling 1) per unattended session"
-  zone_exists || die "the connector's zone ($zone) does not exist. Run 'spaceturtle start'."
+  state=$(zone_state)
+  say "the connector's zone ($zone): $state"
+  [[ $(zone_state "$agent_zone") == running ]] && astate="in a session" || astate=idle
+  say "the agent's zone ($agent_zone): $astate"
+  if [[ $state != running ]]; then
+    say "the node's network, its apps and its relay cannot be read while the connector's zone is $state. Run 'spaceturtle start'."
+    return 0
+  fi
   if supervisor_running; then say "the supervisor is running"
   else say "the supervisor is not running. Run 'spaceturtle start'."; fi
-  lines=$(waiting_apps) || exit 1
+  doc=$(in_zone 'toon status --json') || die "toon status failed in the zone"
+  network=$(jq -r '.network // .agent_node.network // empty' <<<"$doc" 2>/dev/null)
+  say "network: ${network:-cannot be read}"
+  lines=$(jq -r '[.. | objects | .apps? | arrays | .[] | objects | select((.name // "") != "")
+    | {name, state: (.state // .status // "")}] | unique_by(.name) | .[] | "\(.name)\t\(.state)"' <<<"$doc" 2>/dev/null)
+  while IFS=$'\t' read -r l astate; do
+    [[ -n $l ]] || continue
+    if [[ $astate == running ]]; then say "app $l: running"; else say "app $l: not running (${astate:-unknown})"; fi
+  done <<<"$lines"
+  relay=$(jq -r 'first(.. | objects | (.relay_url?, (.relay? | if type == "string" then . elif type == "object" then (.url // .address // .ws_url) else empty end))
+    | strings | select(length > 0)) // empty' <<<"$doc" 2>/dev/null)
+  if [[ -z $relay ]]; then
+    say "relay: the node reports no address, so it cannot be checked"
+  else
+    url=$relay
+    case $url in ws://*) url=http://${url#ws://} ;; wss://*) url=https://${url#wss://} ;; *://*) ;; *) url=http://$url ;; esac
+    if in_zone "curl -s -o /dev/null --max-time 5 --url $(sh_quote "$url")"; then say "relay: reachable at $relay"
+    else say "relay: not reachable at $relay"; fi
+  fi
+  lines=$(waiting_apps "$doc") || exit 1
   say "$(grep -c . <<<"$lines") app(s) waiting for approval"
+}
+
+# Stops everything and loses nothing: the timer's unit (its setting stays), a session in the
+# agent's zone, then the connector's zone. `start` brings it back.
+cmd_stop() {
+  preflight
+  local state; state=$(zone_state)
+  if [[ $state == "not created" ]]; then
+    say "there is no connector's zone, so there is nothing to stop."
+    return 0
+  fi
+  if [[ -e $unit_dir/spaceturtle.timer ]]; then
+    "$systemctl_" --user stop spaceturtle.timer || die "the timer could not be stopped"
+  fi
+  if [[ $(zone_state "$agent_zone") == running ]]; then
+    "$sbx" stop "$agent_zone" || die "the session in the agent's zone ($agent_zone) could not be stopped"
+  fi
+  if [[ $state == running ]]; then
+    "$sbx" stop "$zone" || die "the connector's zone ($zone) could not be stopped"
+  fi
+  say "stopped. The wallet, the passphrase and the timer's setting are as they were. Run 'spaceturtle start' to bring it back."
+}
+
+cmd_backup() {
+  preflight
+  [[ $(zone_state) == running ]] || die "the connector's zone ($zone) is not running, so there is nothing to back up. Run 'spaceturtle start' first."
+  make_backup || die "the backup failed"
+}
+
+# Replaces the connector's zone with one from the newest image. The wallet's storage stays
+# as it was. The passphrase travels through memory: out of the old zone on the standard
+# output of sbx exec, into the new one on the standard input of sbx exec -i.
+cmd_upgrade() {
+  preflight
+  local state pass
+  state=$(zone_state)
+  [[ $state != "not created" ]] || die "there is no connector's zone yet. Run 'spaceturtle start' first."
+  [[ $state == running ]] || die "the connector's zone ($zone) is $state. Run 'spaceturtle start' first; nothing was changed."
+  say "making a fresh backup before anything is removed"
+  make_backup || die "the backup failed, so nothing was changed."
+  pass=$("$sbx" exec "$zone" sh -c 'cat "$HOME/.config/toon-passphrase"') && [[ -n $pass ]] \
+    || die "the passphrase could not be read out of the old zone, so nothing was changed."
+  say "replacing the connector's zone ($zone)"
+  if [[ $(zone_state "$agent_zone") != "not created" ]]; then
+    "$sbx" rm --force "$agent_zone" || die "the agent's zone ($agent_zone) could not be removed"
+  fi
+  "$sbx" rm --force "$zone" || die "the old connector's zone could not be removed"
+  create_zone
+  # The node, the faucet and the backup belong to the wallet, which is kept; the rest belong to the zone.
+  rm -f "$marks/rule" "$marks/zone"
+  step_zone
+  if ! printf '%s\n' "$pass" | "$sbx" exec -i "$zone" sh -c 'mkdir -p "$HOME/.config" && umask 077 && cat > "$HOME/.config/toon-passphrase" && [ -s "$HOME/.config/toon-passphrase" ]'; then
+    pass=
+    die "the new zone ($zone) is made, but the passphrase could not be placed in it. The backup at $backup_dir/wallet-backup is the way back."
+  fi
+  pass=
+  step_node
+  step_faucet
+  step_supervisor
+  step_backup
+  say "the connector's zone is upgraded and running"
+}
+
+# Removes spaceturtle from the machine, but not the wallet's storage nor the backup directory.
+cmd_remove() {
+  local delete=0 arg answer z
+  for arg in "$@"; do
+    case $arg in
+      --delete-wallet) delete=1 ;;
+      *) die "usage: spaceturtle remove [--delete-wallet]" ;;
+    esac
+  done
+  preflight
+  if (( delete )); then
+    say "--delete-wallet deletes the wallet's storage, $data_dir. Without the backup the wallet cannot be opened again, and funds in it are lost."
+    printf 'spaceturtle: type "delete" to go on: '
+    IFS= read -r answer || answer=
+    if [[ $answer != delete ]]; then
+      echo
+      say "not confirmed. Nothing was changed."
+      return 1
+    fi
+  fi
+  if [[ $(zone_state) == running ]]; then
+    say "the passphrase goes with the connector's zone, and the wallet's storage cannot be opened without the backup."
+    printf 'spaceturtle: make a fresh backup first? [Y/n] '
+    IFS= read -r answer || answer=
+    case $answer in
+      n|N|no|No|NO) say "no fresh backup was made" ;;
+      *) make_backup || die "the backup failed, so nothing was removed. Answer n to remove without it." ;;
+    esac
+  fi
+  for z in "$agent_zone" "$zone"; do
+    [[ $(zone_state "$z") == "not created" ]] || "$sbx" rm --force "$z" || die "the zone $z could not be removed"
+  done
+  if [[ -e $unit_dir/spaceturtle.timer ]]; then
+    "$systemctl_" --user disable --now spaceturtle.timer || die "the timer could not be turned off"
+  fi
+  rm -f "$unit_dir/spaceturtle.timer" "$unit_dir/spaceturtle.service"
+  "$systemctl_" --user daemon-reload
+  rm -rf "$marks"
+  rm -f "$state_dir/last-unattended" "$conf" "$conf.new" "$key_file"
+  rmdir "$state_dir" "$config_dir" "$(dirname "$key_file")" 2>/dev/null
+  if (( delete )); then
+    [[ -n $data_dir && $data_dir != / ]] || die "will not delete '$data_dir'"
+    rm -rf "$data_dir" || die "cannot delete $data_dir"
+    say "the wallet's storage ($data_dir) is deleted."
+  else
+    say "the wallet's storage is kept at $data_dir"
+  fi
+  say "the backup directory is kept at $backup_dir. Nothing deletes it."
+  say "spaceturtle is removed from this machine."
 }
 
 case ${1:-} in
@@ -469,5 +654,9 @@ case ${1:-} in
   approve) decide approve "${2:-}" ;;
   refuse) decide refuse "${2:-}" "${3:-}" ;;
   status) cmd_status ;;
-  *) die "usage: spaceturtle start | mainnet [--keep-limit] | session | timer | set | key | status | waiting | approve <app> | refuse <app> [reason]" ;;
+  stop) [[ $# -eq 1 ]] || die "usage: spaceturtle stop"; cmd_stop ;;
+  upgrade) [[ $# -eq 1 ]] || die "usage: spaceturtle upgrade"; cmd_upgrade ;;
+  backup) [[ $# -eq 1 ]] || die "usage: spaceturtle backup"; cmd_backup ;;
+  remove) shift; cmd_remove "$@" ;;
+  *) die "usage: spaceturtle start | stop | upgrade | backup | remove [--delete-wallet] | mainnet [--keep-limit] | session | timer | set | key | status | waiting | approve <app> | refuse <app> [reason]" ;;
 esac
