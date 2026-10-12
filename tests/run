@@ -837,7 +837,7 @@ agent_check "an argument in single quotes is not expanded, so it is not used" "$
 agent_check "an unquoted argument" "$(with_cmd 'toon peer list --who $who')" "quoted-args: spaceturtle/probe"
 agent_check "an unquoted argument in braces" "$(with_cmd 'toon peer list --who ${who}')" "quoted-args: spaceturtle/probe"
 agent_check "an argument quoted only in part" "$(with_cmd 'toon peer list --who \"a\"$who')" "quoted-args: spaceturtle/probe"
-for c in "toon limit set 5" "toon wallet show" "toon wallet backup" "toon channel withdraw x" "toon channel open x" "toon create app" "toon init" "cd /tmp && toon  init" "toon --json wallet show" "'toon' wallet"; do
+for c in "toon approve app" "toon refuse app --reason x" "toon limit set 5" "toon wallet show" "toon wallet backup" "toon channel withdraw x" "toon channel open x" "toon create app" "toon init" "cd /tmp && toon  init" "toon --json wallet show" "'toon' wallet"; do
   agent_check "a script running '$c'" "$(with_cmd "$c")" "forbidden-command: spaceturtle/probe"
 done
 agent_check "a script running toon limit show" "$(with_cmd 'toon limit show')" ""
@@ -957,15 +957,20 @@ launcher_env() {
   export SPACETURTLE_SBX=$tmp/bin/sbx SPACETURTLE_KVM=$tmp/kvm SPACETURTLE_TOON_BIN=$tmp/bin/toon
   export SPACETURTLE_ZONE=zone-x SPACETURTLE_DATA_DIR=$tmp/wallet SPACETURTLE_BACKUP_DIR=$tmp/backup
   : > "$SPACETURTLE_KVM"; : > "$SPACETURTLE_TOON_BIN"
+  export SPACETURTLE_SYSTEMCTL=$tmp/bin/systemctl SPACETURTLE_UNIT_DIR=$tmp/units SPACETURTLE_MODEL_KEY_FILE=$tmp/model-key
+  export SPACETURTLE_AGENT_ZONE=agent-x SPACETURTLE_CONNECTOR_PORT=7123
+  printf '#!/bin/bash\necho "$*" >> "$STUB_DIR/systemctl-calls"\n' > "$SPACETURTLE_SYSTEMCTL"; chmod +x "$SPACETURTLE_SYSTEMCTL"
   # An sbx that records its calls. `ls` lists the zones in $STUB_DIR/zones and fails
   # when $STUB_DIR/signed-out exists; a call whose arguments contain the text in
-  # $STUB_DIR/fail-on fails, and `cp` out of the zone writes a file.
+  # $STUB_DIR/fail-on fails, `toon status --json` prints $STUB_DIR/status, and `cp` out
+  # of the zone writes a file.
   cat > "$SPACETURTLE_SBX" <<'STUB'
 #!/bin/bash
 echo "$*" >> "$STUB_DIR/calls"
 [[ $1 == ls ]] && { [[ -e $STUB_DIR/signed-out ]] && exit 1; cat "$STUB_DIR/zones" 2>/dev/null; exit 0; }
 [[ -r $STUB_DIR/fail-on && $* == *"$(cat "$STUB_DIR/fail-on")"* ]] && exit 1
 [[ $* == *pgrep* ]] && { [[ -e $STUB_DIR/up ]]; exit; }
+[[ $* == *"toon status --json"* ]] && { cat "$STUB_DIR/status" 2>/dev/null; exit 0; }
 [[ $* == *"toon up"* ]] && : > "$STUB_DIR/up"
 [[ $1 == create ]] && echo "zone-x running" > "$STUB_DIR/zones"
 [[ $1 == cp && $2 == zone-x:* ]] && echo sealed > "$3"
@@ -1029,6 +1034,78 @@ launcher_env; touch "$STUB_DIR/signed-out"; run_launcher; rc=$?
 launcher_env; SPACETURTLE_SBX=$tmp/bin/missing run_launcher; rc=$?
 [[ $rc -ne 0 ]] && grep -qi 'not installed' "$tmp/out" && grep -q 'github.com/docker/sbx-releases' "$tmp/out" \
   && [[ ! -e $SPACETURTLE_STATE_DIR/launcher && ! -e $SPACETURTLE_DATA_DIR && ! -e $SPACETURTLE_BACKUP_DIR ]]; launcher_check "with sbx missing it stops before doing anything, with cause and remedy" $?
+
+# --- sessions and the timer ---
+# A launcher whose connector's zone is running, with a model key.
+session_env() {
+  launcher_env; run_launcher
+  echo secret-key-123 > "$SPACETURTLE_MODEL_KEY_FILE"; : > "$STUB_DIR/calls"
+}
+run_cmd() { "$root/spaceturtle" "$@" > "$tmp/out" 2>&1; }
+session_env; run_cmd session; rc=$?
+run=$(grep '^run ' "$STUB_DIR/calls")
+[[ $rc -eq 0 && $run == *"--image ghcr.io/toon-protocol/spaceturtle-agent:latest"* && $run == *"agent/spaceturtle.yaml"* ]]; launcher_check "a session passes the zone image and the definition" $?
+[[ $(grep -o -- '--allow-host [^ ]*' <<<"$run" | tr '\n' ' ') == "--allow-host api.anthropic.com --allow-host localhost:7123 " ]]; launcher_check "the allow-list is exactly the provider and one loopback port" $?
+! grep -q secret-key-123 "$STUB_DIR/calls"; launcher_check "the model key is not an argument" $?
+[[ $run != *--max-cost* ]]; launcher_check "a session by hand has no unattended ceiling" $?
+run_cmd set model openai/gpt-x; : > "$STUB_DIR/calls"; run_cmd session
+[[ $(grep -o -- '--allow-host [^ ]*' "$STUB_DIR/calls" | head -1) == "--allow-host api.openai.com" && $(grep '^run ' "$STUB_DIR/calls") == *"--model openai/gpt-x"* ]]; launcher_check "one setting changes the model, and the provider follows" $?
+: > "$STUB_DIR/calls"; run_cmd session --unattended; rc=$?
+grep '^run ' "$STUB_DIR/calls" | grep -q -- '--max-cost 1 '; launcher_check "an unattended session has a cost ceiling by default" $?
+run_cmd set ceiling 0.25; : > "$STUB_DIR/calls"; run_cmd session --unattended
+grep '^run ' "$STUB_DIR/calls" | grep -q -- '--max-cost 0.25 '; launcher_check "the ceiling can be changed" $?
+run_cmd set ceiling 0; [[ $? -ne 0 ]]; launcher_check "a ceiling of zero is refused" $?
+run_cmd status; grep -q '^last unattended session: 20' "$tmp/out"; launcher_check "status shows the last unattended session's time" $?
+session_env; rm "$SPACETURTLE_MODEL_KEY_FILE"; run_cmd session; rc=$?
+[[ $rc -ne 0 ]] && grep -q 'no model key' "$tmp/out" && grep -q "$SPACETURTLE_MODEL_KEY_FILE" "$tmp/out" && ! grep -q '^run ' "$STUB_DIR/calls"; launcher_check "with no model key it stops and says how to supply one" $?
+session_env; : > "$STUB_DIR/calls"; rm "$STUB_DIR/up"; run_cmd session; rc=$?
+[[ $rc -ne 0 ]] && grep -q "connector's zone" "$tmp/out" && ! grep -q '^run ' "$STUB_DIR/calls"; launcher_check "with the supervisor not running no session starts, and it says so" $?
+session_env; rm "$STUB_DIR/zones"; : > "$STUB_DIR/calls"; run_cmd session; rc=$?
+[[ $rc -ne 0 ]] && grep -q "connector's zone" "$tmp/out" && ! grep -q '^run ' "$STUB_DIR/calls"; launcher_check "with no connector zone no session starts, and it says so" $?
+session_env; echo "zone-x stopped" > "$STUB_DIR/zones"; run_cmd session; rc=$?
+[[ $rc -ne 0 ]] && ! grep -q '^run ' "$STUB_DIR/calls"; launcher_check "with the connector's zone stopped no session starts" $?
+
+launcher_env; run_launcher
+grep -q 'enable --now spaceturtle.timer' "$STUB_DIR/systemctl-calls" && grep -q 'OnUnitActiveSec=6h' "$SPACETURTLE_UNIT_DIR/spaceturtle.timer"   && grep -q 'session --unattended' "$SPACETURTLE_UNIT_DIR/spaceturtle.service"; launcher_check "start turns the timer on at a conservative interval" $?
+run_cmd status; grep -q '^timer: on, every 6h' "$tmp/out" && grep -q '^last unattended session: never' "$tmp/out"; launcher_check "status shows the timer on and no session yet" $?
+run_cmd timer interval 2h; grep -q 'OnUnitActiveSec=2h' "$SPACETURTLE_UNIT_DIR/spaceturtle.timer"; launcher_check "the interval can be set" $?
+run_cmd timer interval soon; [[ $? -ne 0 ]]; launcher_check "a bad interval is refused" $?
+run_cmd timer off; grep -q 'disable --now spaceturtle.timer' "$STUB_DIR/systemctl-calls"; launcher_check "the timer can be turned off" $?
+run_cmd status; grep -q '^timer: off, every 2h' "$tmp/out"; launcher_check "status shows it off" $?
+: > "$STUB_DIR/systemctl-calls"; run_launcher; ! grep -q enable "$STUB_DIR/systemctl-calls"; launcher_check "start does not turn a timer off by the Observer back on" $?
+run_cmd timer interval 3h; ! grep -q enable "$STUB_DIR/systemctl-calls"; launcher_check "an interval set while it is off leaves it off" $?
+run_cmd timer on; grep -q 'enable --now' "$STUB_DIR/systemctl-calls" && grep -q 'OnUnitActiveSec=3h' "$SPACETURTLE_UNIT_DIR/spaceturtle.timer"; launcher_check "the timer can be turned on again" $?
+
+# --- the launcher: waiting, approve, refuse and status, against a stub sbx whose toon lists a waiting app ---
+waiting_env() {
+  launcher_env
+  echo "zone-x running" > "$STUB_DIR/zones"
+  now=$(date +%s)
+  # A peer that is pending is not an app, so it is not waiting.
+  echo "{\"peers\":[{\"name\":\"bob\",\"state\":\"pending\"}],\"agent_node\":{\"toon_apps\":[{\"apps\":[{\"name\":\"relay\",\"state\":\"running\"},{\"name\":\"oracle\",\"state\":\"pending\",\"image\":\"docker.io/x/oracle:1\",\"requested_at\":$((now - 7300))}]}]}}" > "$STUB_DIR/status"
+}
+waiting_env; run_cmd waiting; rc=$?
+launcher_check "waiting lists the name, image and age of each waiting app" $(( rc == 0 && $(grep -cP '^oracle\tdocker.io/x/oracle:1\t2h$' "$tmp/out") == 1 ? 0 : 1 ))
+! grep -qE 'relay|bob' "$tmp/out"; launcher_check "waiting does not list an app that is running, or anything pending that is not an app" $?
+waiting_env; echo '{"apps":[]}' > "$STUB_DIR/status"; run_cmd waiting; rc=$?
+[[ $rc -eq 0 ]] && grep -q 'no app is waiting' "$tmp/out"; launcher_check "waiting with nothing waiting says so" $?
+waiting_env; : > "$STUB_DIR/calls"; run_cmd approve oracle; rc=$?
+launcher_check "approve runs toon approve on a waiting app" $(( rc == 0 && $(grep -c "toon approve -- 'oracle'" "$STUB_DIR/calls") == 1 ? 0 : 1 ))
+waiting_env; : > "$STUB_DIR/calls"; run_cmd refuse oracle "not mine"; rc=$?
+launcher_check "refuse runs toon refuse with the reason on a waiting app" $(( rc == 0 && $(grep -c "toon refuse --reason 'not mine' -- 'oracle'" "$STUB_DIR/calls") == 1 ? 0 : 1 ))
+for v in approve refuse; do
+  waiting_env; : > "$STUB_DIR/calls"; run_cmd "$v" relay; rc=$?
+  [[ $rc -ne 0 ]] && grep -q 'not waiting' "$tmp/out" && ! grep -qE "toon (approve|refuse)" "$STUB_DIR/calls"; launcher_check "$v of an app that is not waiting says so and changes nothing" $?
+done
+waiting_env; : > "$STUB_DIR/calls"; run_cmd refuse oracle; rc=$?
+launcher_check "refuse without a reason runs toon refuse with no reason" $(( rc == 0 && $(grep -c "toon refuse -- 'oracle'" "$STUB_DIR/calls") == 1 ? 0 : 1 ))
+waiting_env; run_cmd status; rc=$?
+launcher_check "status shows the number waiting" $(( rc == 0 && $(grep -c '1 app(s) waiting' "$tmp/out") == 1 ? 0 : 1 ))
+waiting_env; echo "toon status --json" > "$STUB_DIR/fail-on"; run_cmd status; rc=$?
+[[ $rc -ne 0 ]] && grep -q 'toon status failed' "$tmp/out" && ! grep -q 'waiting for approval' "$tmp/out"; launcher_check "status with toon status failing says so and counts nothing" $?
+waiting_env; echo "toon status --json" > "$STUB_DIR/fail-on"; : > "$STUB_DIR/calls"; run_cmd approve oracle; rc=$?
+[[ $rc -ne 0 ]] && grep -q 'toon status failed' "$tmp/out" && ! grep -q 'not waiting' "$tmp/out" && ! grep -q "toon approve" "$STUB_DIR/calls"
+launcher_check "approve with toon status failing says so and changes nothing" $?
 
 echo; echo "$count checks, $fails failed"
 [[ $fails -eq 0 ]]
