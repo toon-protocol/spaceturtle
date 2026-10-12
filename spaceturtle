@@ -10,16 +10,23 @@
 #                        that zone alone; nothing is copied into it from the machine
 #         2. node        the agent node, initialised on devnet inside it
 #         3. faucet      the wallet funded from the devnet faucet
-#         4. supervisor  the image's `connector-start` (the container engine, then
-#                        `toon up`), started again whenever it is not running
-#         5. backup      a sealed backup of the wallet, handed to the Observer
+#         4. agent key   one agent key, its private half placed in the agent's zone
+#         5. supervisor  the image's `connector-start` (the container engine, the
+#                        forwarders, then `toon up`), run by a systemd user unit that
+#                        holds a session open in the zone: Docker Sandboxes stops a
+#                        zone nobody is attached to, and the unit also brings the
+#                        zone back after the machine restarts
+#         6. backup      a sealed backup of the wallet, handed to the Observer
 #       The passphrase is made inside the zone: it is never printed and never
 #       written to the machine's disk. `upgrade` carries it in memory to the new zone.
 #
 #   spaceturtle stop
 #       Stops the timer's unit (its on/off setting stays), a session in the agent's
-#       zone, then the connector's zone. Loses nothing; `start` brings it back and
-#       creates, initialises and funds nothing.
+#       zone, the unit that keeps the connector's zone running, then that zone. Loses
+#       nothing; `start` brings it back and creates, initialises and funds nothing.
+#   spaceturtle supervise
+#       What that unit runs: `connector-start` in a session in the connector's zone,
+#       until it ends. Not for a person to run.
 #   spaceturtle upgrade
 #       Replaces the connector's zone with one from the newest connector's zone image,
 #       leaving the wallet's storage as it was. A fresh backup comes first; if it fails,
@@ -44,13 +51,15 @@
 #       and changes nothing.
 #
 #   spaceturtle session [--unattended]
-#       Starts a `docker-agent` session in the agent's zone, from the agent's zone
-#       image and the published agent definition. The session command carries an
-#       allow-list of exactly two things: the model provider's host and one loopback
-#       port, the one that leads to the connector's zone. By hand it is a
-#       conversation; --unattended is what the timer runs: no one is present, and
-#       the session has a ceiling on model cost. Nothing starts while the
-#       connector's zone is not running.
+#       Starts a `docker-agent` session in the agent's zone, with the agent
+#       definition mounted read-only. The agent's zone is allowed the model
+#       provider's host, the host of the network's connector, and the two loopback
+#       ports that lead to the connector's zone, on top of what the machine's own
+#       `sbx` policy allows every sandbox. By hand
+#       it is a conversation; --unattended is what the timer runs: no one is
+#       present, every tool call the definition offers runs unasked, and the session
+#       has a ceiling on model cost, written into its copy of the definition as
+#       docker-agent's `budget`. Nothing starts while the connector's zone is not running.
 #   spaceturtle timer on|off|interval <N>m|h|d
 #       The timer starts an unattended session. `start` turns it on, every 6h,
 #       unless it was turned off. It is a systemd user timer.
@@ -84,12 +93,14 @@
 #       refused, and deletes the private half from the agent's zone. `start` does not
 #       make another; `agent-key replace` does.
 #   spaceturtle agent-key limit <amount>
-#       Sets the agent key's spending limit. Only the Observer can: the agent has no tool for it.
+#       Sets what the agent key may spend in a UTC day, in the token's base units. Only
+#       the Observer can: the agent has no tool for it.
 #   `start` makes exactly one agent key, with the default scope (ADR 0003) and the default
 #   spending limit, and puts its private half in the agent's zone and nowhere else: it goes
 #   from the connector's zone, where `toon` writes it to a file that is deleted once it is
 #   placed, to the agent's zone through a pipe, never through an argument, the machine or
-#   the output of the launcher. A second run makes none, and neither does `upgrade` after
+#   the output of the launcher. On the way in, the addresses in the key file become the two
+#   loopback ports of the machine that lead to the connector's zone. A second run makes none, and neither does `upgrade` after
 #   a revoke.
 #   Approving or refusing an app that is not waiting says so and changes nothing.
 #   `waiting`, `approve`, `refuse` and `status` run `toon` with the home, in the
@@ -121,7 +132,10 @@
 #   SPACETURTLE_AGENT_ZONE  the agent's zone's name (default: st-agent)
 #   SPACETURTLE_AGENT_IMAGE the agent's zone image (default: ghcr.io/toon-protocol/spaceturtle-agent-zone:latest)
 #   SPACETURTLE_AGENT_DEF   the agent definition (default: agent/spaceturtle.yaml beside this file)
-#   SPACETURTLE_CONNECTOR_PORT  the loopback port that leads to the connector's zone (default: 7100)
+#   SPACETURTLE_CONNECTOR_PORT  the first of the two loopback ports of the machine that lead to the
+#                           connector's zone: this one to the supervisor's orders, the next
+#                           to the relay TOON app's connector (default: 47100)
+#   SPACETURTLE_SUPERVISOR_WAIT  how many seconds `start` waits for the supervisor (default: 180)
 #   SPACETURTLE_SYSTEMCTL   the systemctl program (default: systemctl)
 #   SPACETURTLE_UNIT_DIR    where the timer's units are written (default: ~/.config/systemd/user)
 set -uo pipefail
@@ -141,7 +155,13 @@ agent_zone=${SPACETURTLE_AGENT_ZONE:-st-agent}
 agent_image=${SPACETURTLE_AGENT_IMAGE:-ghcr.io/toon-protocol/spaceturtle-agent-zone:latest}
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 agent_def=${SPACETURTLE_AGENT_DEF:-$here/agent/spaceturtle.yaml}
-connector_port=${SPACETURTLE_CONNECTOR_PORT:-7100}
+connector_port=${SPACETURTLE_CONNECTOR_PORT:-47100}
+relay_port=$((connector_port + 1))
+supervisor_wait=${SPACETURTLE_SUPERVISOR_WAIT:-180}
+# The agent definition as a session reads it, in a directory the agent's zone mounts read-only.
+session_dir=$state_dir/session
+# toon's home in the connector's zone; step_zone links it to the wallet's storage.
+toon_home='$HOME/.toon/agent-node'
 systemctl_=${SPACETURTLE_SYSTEMCTL:-systemctl}
 unit_dir=${SPACETURTLE_UNIT_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}
 
@@ -176,7 +196,9 @@ zone_state() {
 # Creates the connector's zone from the connector's zone image; the markers are the caller's.
 create_zone() {
   mkdir -p "$data_dir" || die "cannot create $data_dir"
-  "$sbx" policy init balanced || die "sbx policy init failed"
+  # sbx refuses to create before the machine's policy is initialised, and refuses to initialise
+  # it twice. A policy that is already there is the Observer's own and is left as it is.
+  "$sbx" policy init balanced >/dev/null 2>&1 || "$sbx" policy ls >/dev/null 2>&1 || die "sbx policy init failed"
   "$sbx" create --name "$zone" --cpus 4 --memory 4g --template "$connector_image" shell "$data_dir" || die "sbx create failed"
 }
 
@@ -188,7 +210,8 @@ step_zone() {
     rm -rf "$marks"
   elif [[ $(zone_state) == stopped ]]; then
     say "starting the connector's zone ($zone)"
-    "$sbx" start "$zone" || die "sbx start failed"
+    # sbx has no command that only starts a zone; running anything in a stopped one starts it.
+    "$sbx" exec "$zone" true || die "the connector's zone could not be started"
   fi
   if ! done_ rule; then
     # The rule names the zone, so it is never machine-wide.
@@ -196,11 +219,24 @@ step_zone() {
     mark rule
   fi
   if ! done_ zone; then
-    # The image holds the overlay client's proxy setting. The wallet lives in the
-    # mounted directory while the passphrase stays on the zone's own disk.
-    in_zone 'mkdir -p ~/.config && ln -sfn '"$(sh_quote "$data_dir")"' ~/.config/toon' || die "the zone could not be set up"
+    # The image holds the overlay client's proxy setting. toon's home is the mounted
+    # directory, so the wallet lives there, while the passphrase stays on the zone's own disk.
+    in_zone 'mkdir -p ~/.config ~/.toon && ln -sfn '"$(sh_quote "$data_dir")"' ~/.toon/agent-node' || die "the zone could not be set up"
     mark zone
   fi
+  publish_ports
+}
+
+# The two forwarders of `connector-start`, published to the machine's loopback, where the
+# agent's zone reaches them. A published port is gone when a zone is made again, so every run looks.
+publish_ports() {
+  local have pair
+  have=$("$sbx" ports "$zone" 2>/dev/null)
+  for pair in "$connector_port:17100" "$relay_port:17101"; do
+    awk -v h="${pair%%:*}" -v s="${pair##*:}" '$2 == h && $3 == s { found = 1 } END { exit !found }' <<<"$have" && continue
+    "$sbx" ports "$zone" --publish "127.0.0.1:$pair" \
+      || die "port ${pair%%:*} of this machine could not be led to the connector's zone. If something else holds it, set SPACETURTLE_CONNECTOR_PORT to the first of two free ports and run it again."
+  done
 }
 
 step_node() {
@@ -209,6 +245,14 @@ step_node() {
   in_zone '{ [ -s "$TOON_PASSPHRASE_FILE" ] || { umask 077 && head -c 32 /dev/urandom | base64 > "$TOON_PASSPHRASE_FILE"; }; } &&
     toon init --accept-anyone-terms --network devnet --json >/dev/null' || die "toon init failed in the zone"
   mark node
+}
+
+# An app whose image is not on toon's list of trusted images runs under gVisor, which the
+# connector's zone image holds. toon reads the runtime's name from this file when the app is added.
+step_runtime() {
+  done_ runtime && return
+  in_zone "[ -s $toon_home/untrusted-runtime ] || echo runsc > $toon_home/untrusted-runtime" || die "the sandboxed runtime could not be set in the zone"
+  mark runtime
 }
 
 step_faucet() {
@@ -221,18 +265,59 @@ step_faucet() {
 # The pattern does not match itself, so the shell running pgrep is not taken for the supervisor.
 supervisor_running() { in_zone 'pgrep -f "[t]oon up" >/dev/null'; }
 
+# The unit that keeps the connector's zone running. Docker Sandboxes stops a zone once
+# nobody is attached to it, and nothing starts its daemon when the machine does; the unit
+# holds one session open, starts the daemon first, and is started again when it ends.
+write_connector_unit() {
+  local sbx_path; sbx_path=$(command -v "$sbx") || die "sbx is not installed"
+  mkdir -p "$unit_dir" || die "cannot create $unit_dir"
+  cat > "$unit_dir/spaceturtle-connector.service" <<UNIT
+[Unit]
+Description=The spaceturtle connector's zone, kept running with the supervisor in it
+
+[Service]
+Environment=PATH=$(dirname "$sbx_path"):/usr/local/bin:/usr/bin:/bin
+ExecStartPre=-$sbx_path daemon start -d
+ExecStart=$here/spaceturtle supervise
+Restart=always
+RestartSec=15
+# The daemon this unit started serves every sandbox on the machine, so stopping the unit ends the session and leaves the daemon.
+KillMode=process
+
+[Install]
+WantedBy=default.target
+UNIT
+  "$systemctl_" --user daemon-reload || die "systemctl --user daemon-reload failed"
+}
+
+# What the unit runs: a session in the connector's zone that lasts as long as the supervisor.
+supervise() {
+  preflight
+  zone_exists || die "there is no connector's zone. Run 'spaceturtle start' first."
+  # A supervisor outlives the session that started it when that session is cut from outside
+  # the zone. It is kept, and this session only watches it, so the zone stays up either way.
+  exec "$sbx" exec "$zone" sh -c 'export TOON_PASSPHRASE_FILE=$HOME/.config/toon-passphrase; pgrep -f "[t]oon up" >/dev/null || exec connector-start; while pgrep -f "[t]oon up" >/dev/null; do sleep 5; done; exit 1'
+}
+
 step_supervisor() {
+  # Written on every run, so a launcher that has moved or changed is the one the unit runs.
+  write_connector_unit
   supervisor_running && return
   say "starting the supervisor"
-  # The image's entrypoint may not have run, so the launcher starts it; it reads the passphrase file in_zone names.
-  in_zone 'setsid nohup connector-start > ~/up.log 2>&1 < /dev/null &' || die "connector-start failed in the zone"
+  "$systemctl_" --user enable spaceturtle-connector.service || die "the unit that keeps the connector's zone running could not be enabled"
+  "$systemctl_" --user restart spaceturtle-connector.service || die "the unit that keeps the connector's zone running could not be started"
+  local waited=0
+  until supervisor_running; do
+    ((waited < supervisor_wait)) || die "the supervisor did not start in the zone. 'journalctl --user -u spaceturtle-connector' says why."
+    sleep 3; waited=$((waited + 3))
+  done
 }
 
 # Writes a fresh sealed backup to the backup directory. The backup already there is
 # replaced only once the new one has arrived whole.
 make_backup() {
   mkdir -p "$backup_dir" && chmod 700 "$backup_dir" || return 1
-  in_zone 'rm -f /tmp/wallet-backup; toon wallet backup --output /tmp/wallet-backup >/dev/null' || { echo "spaceturtle: toon wallet backup failed in the zone" >&2; return 1; }
+  in_zone 'rm -f /tmp/wallet-backup; toon wallet backup --out /tmp/wallet-backup >/dev/null' || { echo "spaceturtle: toon wallet backup failed in the zone" >&2; return 1; }
   rm -f "$backup_dir/wallet-backup.new"
   if ! "$sbx" cp "$zone:/tmp/wallet-backup" "$backup_dir/wallet-backup.new" || [[ ! -s $backup_dir/wallet-backup.new ]]; then
     rm -f "$backup_dir/wallet-backup.new"
@@ -250,9 +335,9 @@ step_backup() {
   mark backup
 }
 
-# The network the node is on, from `toon status --json`; empty when it cannot be read.
+# The network the node is on, from the home's record of it; empty when it cannot be read.
 node_network() {
-  in_zone 'toon status --json' 2>/dev/null | jq -r '.network // .agent_node.network // empty' 2>/dev/null
+  in_zone "cat $toon_home/state.json" 2>/dev/null | jq -r '.network // empty' 2>/dev/null
 }
 
 mainnet() {
@@ -272,7 +357,7 @@ mainnet() {
     say "this Install is already on mainnet. Nothing was changed."
     return 0
   fi
-  addresses=$(in_zone 'toon wallet addresses') || die "the wallet's addresses could not be read from the zone"
+  addresses=$(in_zone 'toon wallet show') || die "the wallet's addresses could not be read from the zone"
   [[ -n $addresses ]] || die "the zone listed no address to fund"
   cat <<EOF2
 spaceturtle: this moves the Install from $network to mainnet.
@@ -325,6 +410,8 @@ provider_of() {
     openai)    host=api.openai.com key_var=OPENAI_API_KEY ;;
     google)    host=generativelanguage.googleapis.com key_var=GOOGLE_API_KEY ;;
     mistral)   host=api.mistral.ai key_var=MISTRAL_API_KEY ;;
+    # A ChatGPT account in place of an API key: the key file holds the account's access token.
+    chatgpt)   host=chatgpt.com key_var=CHATGPT_OAUTH_TOKEN ;;
     *) host=${SPACETURTLE_MODEL_HOST:-}; key_var=MODEL_API_KEY
        [[ -n $host ]] || die "the launcher does not know the host of '${model%%/*}'. Set SPACETURTLE_MODEL_HOST to it." ;;
   esac
@@ -343,6 +430,33 @@ need_connector() {
     || die "the connector's zone ($zone) is not running, so no session is started. Run 'spaceturtle start' first."
 }
 
+# The definition a session reads, written fresh each time into the directory the agent's zone
+# mounts read-only. An unattended one carries the ceiling as docker-agent's run-wide budget.
+write_session_def() { # 1 when unattended
+  local out=$session_dir/spaceturtle.yaml
+  mkdir -p "$session_dir" && cp "$agent_def" "$out.new" || die "cannot write $out"
+  if (( $1 )); then
+    grep -q '^budget:' "$agent_def" && die "$agent_def has a budget of its own, so the ceiling cannot be added to it"
+    printf 'budget:\n  max_cost: %s\n' "$(conf_get ceiling 1)" >> "$out.new" || die "cannot write $out"
+  fi
+  mv -f "$out.new" "$out" || die "cannot write $out"
+}
+
+# Allows the agent's zone to reach a host. The rule names the zone, and is added once for a host.
+allow_host() {
+  local m=agent-allow-${1//[^A-Za-z0-9.-]/_}
+  done_ "$m" && return
+  "$sbx" policy allow network --sandbox "$agent_zone" "$1" || die "the agent's zone could not be allowed to reach $1"
+  mark "$m"
+}
+
+# The host of the connector of the network the node was initialised for, from the home's record;
+# empty when there is none. A packet for an app behind that connector is sealed to it, and
+# `toon` asks it for its identity from the agent's zone.
+network_connector_host() {
+  in_zone "cat $toon_home/state.json" 2>/dev/null | jq -r '.connector_url // empty | capture("^https://(?<h>[A-Za-z0-9.-]+)(:443)?(/|$)").h // empty' 2>/dev/null
+}
+
 session() {
   local unattended=0
   case ${1:-} in
@@ -354,17 +468,27 @@ session() {
   need_model_key
   provider_of
   need_connector
-  local args=(run --name "$agent_zone" --image "$agent_image"
-    --allow-host "$host" --allow-host "localhost:$connector_port"
-    -e "$key_var" -e TOON_AGENT_KEY -- docker-agent run --model "$model")
+  [[ $(zone_state "$agent_zone") != "not created" ]] || die "there is no agent's zone ($agent_zone), so there is no agent key to work with. Run 'spaceturtle agent-key replace' to make both."
+  write_session_def "$unattended"
+  allow_host "$host"
+  local peer; peer=$(network_connector_host)
+  [[ -z $peer ]] || allow_host "$peer"
+  local def=$session_dir/spaceturtle.yaml
+  local attach=(-it) run=("$def")
   if (( unattended )); then
     mkdir -p "$state_dir" && date -u +%Y-%m-%dT%H:%M:%SZ > "$state_dir/last-unattended" || die "cannot write $state_dir/last-unattended"
-    args+=(--max-cost "$(conf_get ceiling 1)" --exec "Begin a session: read the waiting Requests and answer them, then do your daily work.")
+    # Nobody answers a prompt, and the definition's tools are the whole of what the agent may do.
+    attach=()
+    run=(--exec --yolo "$def" "Begin a session: read the waiting Requests and answer them, then do your daily work.")
   fi
-  args+=("$agent_def")
   # The key reaches the process by name (-e), never as an argument.
   # The agent key's path, not the key, goes in the environment; the file is in the agent's zone.
-  env "$key_var=$(<"$key_file")" "TOON_AGENT_KEY=${agent_key_path/\$HOME//home/agent}" "$sbx" "${args[@]}"
+  # The agent's zone is its sandbox already, so docker-agent is told not to make another.
+  # Everything leaves the zone through the sandbox's proxy, whose certificate is in the zone's
+  # own bundle and not among the roots `toon` is built with, so `toon` is given the bundle.
+  env "$key_var=$(<"$key_file")" "TOON_AGENT_KEY=${agent_key_path/\$HOME//home/agent}" \
+    "$sbx" exec "${attach[@]}" -e "$key_var" -e TOON_AGENT_KEY -e TOON_TRUSTED_ROOT=/etc/ssl/certs/ca-certificates.crt \
+    "$agent_zone" docker-agent run --sandbox=false --model "$model" "${run[@]}"
 }
 
 # --- the timer: a systemd user timer that runs an unattended session ---
@@ -377,6 +501,7 @@ Description=A spaceturtle session with nobody present
 
 [Service]
 Type=oneshot
+Environment=PATH=$(dirname "$(command -v "$sbx")"):/usr/local/bin:/usr/bin:/bin
 ExecStart=$here/spaceturtle session --unattended
 UNIT
   cat > "$unit_dir/spaceturtle.timer" <<UNIT
@@ -384,7 +509,7 @@ UNIT
 Description=Starts a spaceturtle session every $interval
 
 [Timer]
-OnBootSec=$interval
+OnActiveSec=$interval
 OnUnitActiveSec=$interval
 
 [Install]
@@ -395,7 +520,8 @@ UNIT
 
 timer_on() {
   write_timer
-  "$systemctl_" --user enable --now spaceturtle.timer || die "the timer could not be turned on"
+  # A timer that is already running keeps the interval it started with until it is started again.
+  "$systemctl_" --user enable --now spaceturtle.timer && "$systemctl_" --user restart spaceturtle.timer || die "the timer could not be turned on"
   conf_set timer on
   say "the timer is on, every $(conf_get interval 6h)"
 }
@@ -451,9 +577,11 @@ start() {
   preflight
   step_zone
   step_node
+  step_runtime
   step_faucet
-  step_supervisor
+  # The key comes first: the supervisor listens for orders only once the node has one.
   step_agentkey
+  step_supervisor
   step_backup
   step_timer
   say "the connector's zone is running"
@@ -471,27 +599,32 @@ agent_key_ids() {
 ensure_agent_zone() {
   local s=$1
   if [[ $s == "not created" ]]; then
-    mkdir -p "$state_dir/agent-workspace" || die "cannot create $state_dir/agent-workspace"
-    "$sbx" create --name "$agent_zone" --template "$agent_image" shell "$state_dir/agent-workspace" || die "the agent's zone could not be created"
+    mkdir -p "$state_dir/agent-workspace" "$session_dir" || die "cannot create $state_dir/agent-workspace"
+    "$sbx" create --name "$agent_zone" --cpus 2 --memory 2g --template "$agent_image" shell "$state_dir/agent-workspace" "$session_dir:ro" || die "the agent's zone could not be created"
+    # Of the machine, a new zone may reach the two ports that lead to the connector's zone.
+    rm -f "$marks"/agent-allow-*
+    "$sbx" policy allow network --sandbox "$agent_zone" "localhost:$connector_port,localhost:$relay_port" || die "the agent's zone could not be allowed to reach the connector's zone"
   elif [[ $s == stopped ]]; then
-    "$sbx" start "$agent_zone" || die "the agent's zone could not be started"
+    "$sbx" exec "$agent_zone" true || die "the agent's zone could not be started"
   fi
 }
 
 # Makes a key in the connector's zone, where the home is. The private half is a file there
 # until place_agent_key moves it.
 make_agent_key() {
-  in_zone 'rm -f /tmp/agent-key; umask 077; toon agent-key create --output /tmp/agent-key --json >/dev/null' \
+  in_zone 'rm -f /tmp/agent-key; umask 077; toon agent-key create --out /tmp/agent-key --json >/dev/null' \
     || { in_zone 'rm -f /tmp/agent-key'; die "toon agent-key create failed in the zone"; }
 }
 
 # Moves the private half to the agent's zone through a pipe, then deletes it from the connector's zone.
+# The key file names the supervisor's orders and the TOON app's connector on the connector's zone's
+# loopback; on the way in they become the machine's two ports that lead there.
 # The agent's zone is left stopped unless it was running, so `status` does not take it for a session.
 place_agent_key() {
   local was; was=$(zone_state "$agent_zone")
   ensure_agent_zone "$was"
   if ! "$sbx" exec "$zone" sh -c 'cat /tmp/agent-key' | "$sbx" exec -i "$agent_zone" sh -c \
-    'umask 077 && mkdir -p "$HOME/.config/toon-agent" && cat > "$HOME/.config/toon-agent/key.new" && [ -s "$HOME/.config/toon-agent/key.new" ] && mv -f "$HOME/.config/toon-agent/key.new" "$HOME/.config/toon-agent/key"'; then
+    'umask 077 && mkdir -p "$HOME/.config/toon-agent" && jq --arg s "http://host.docker.internal:'"$connector_port"'" --arg c "http://host.docker.internal:'"$relay_port"'" ".supervisor = \$s | .toon_apps |= with_entries(.value = \$c)" > "$HOME/.config/toon-agent/key.new" && [ -s "$HOME/.config/toon-agent/key.new" ] && mv -f "$HOME/.config/toon-agent/key.new" "$HOME/.config/toon-agent/key"'; then
     in_zone 'rm -f /tmp/agent-key'
     die "the agent key could not be placed in the agent's zone"
   fi
@@ -535,7 +668,7 @@ cmd_agent_key() {
   local sub=${1:-} old doc
   case $sub in
     show|replace|revoke) [[ $# -eq 1 ]] || die "usage: spaceturtle agent-key $sub" ;;
-    limit) [[ $# -eq 2 ]] && valid_ceiling "$2" || die "usage: spaceturtle agent-key limit <amount>, such as 5" ;;
+    limit) [[ $# -eq 2 && $2 =~ ^[1-9][0-9]*$ ]] || die "usage: spaceturtle agent-key limit <amount>, a whole number of the token's base units, such as 5000000" ;;
     *) die "usage: spaceturtle agent-key show | replace | revoke | limit <amount>" ;;
   esac
   preflight
@@ -575,26 +708,31 @@ cmd_agent_key() {
       say "the agent key is revoked: the agent's next order is refused. 'spaceturtle agent-key replace' makes another." ;;
     limit)
       [[ -n $old ]] || die "there is no agent key. Run 'spaceturtle start' or 'spaceturtle agent-key replace'."
-      local id
+      local id per flags
+      doc=$(in_zone 'toon agent-key list --json') || die "toon agent-key list failed in the zone"
       for id in $old; do
-        in_zone "toon agent-key set --limit $(sh_quote "$2") -- $(sh_quote "$id")" || die "toon agent-key set failed in the zone"
+        # toon refuses a day's limit under what one command may pay, so that comes down with it.
+        per=$(jq -r --arg k "$id" '(if type == "array" then . else (.keys // .agent_keys // []) end)[] | select((.id // .public_key) == $k) | .spending_limit.per_command // empty' <<<"$doc" 2>/dev/null)
+        flags="--max-per-day $(sh_quote "$2")"
+        [[ $per =~ ^[0-9]+$ ]] && (( per > $2 )) && flags+=" --max-per-command $(sh_quote "$2")"
+        in_zone "toon agent-key set $flags -- $(sh_quote "$id")" || die "toon agent-key set failed in the zone"
       done
-      say "the agent key's spending limit is $2" ;;
+      say "the agent key may spend $2 in a day" ;;
   esac
 }
 
 # The apps waiting, one JSON object per line: {name, image, since}. `toon status --json`
-# lists an app, in an `apps` array, in the `pending` state with the image and the time it
-# was asked for (seconds since the epoch or RFC 3339); a field it does not carry is left
-# empty. Only objects in an `apps` array are apps, so nothing else that is pending counts.
+# lists them in `pending_apps`, each with its name, the image or URL asked for and the time
+# it was asked (seconds since the epoch or RFC 3339); a field it does not carry is left
+# empty. One the Observer refused is still listed, as refused, and is not waiting.
 # Dies when toon status fails, so callers must not run it in a pipeline or substitution
 # whose failure they ignore.
 waiting_apps() {
   local doc=${1-}
   [[ -n $doc ]] || doc=$(in_zone 'toon status --json') || die "toon status failed in the zone"
-  jq -c '[.. | objects | .apps? | arrays | .[] | objects
-    | select((.state // .status // "") == "pending" and (.name // "") != "")
-    | {name, image: (.image // ""), since: (.requested_at // .asked_at // .since // .created_at // null)}]
+  jq -c '[.. | objects | .pending_apps? | arrays | .[] | objects
+    | select((.name // "") != "" and (.state // .status // "pending") == "pending" and (.refused // null) == null)
+    | {name, image: (.image // .url // ""), since: (.requested_at // .asked_at // .since // .created_at // .at // null)}]
     | unique_by(.name) | .[]' <<<"$doc" || die "toon status gave a document that is not JSON"
 }
 
@@ -656,16 +794,16 @@ cmd_status() {
   if supervisor_running; then say "the supervisor is running"
   else say "the supervisor is not running. Run 'spaceturtle start'."; fi
   doc=$(in_zone 'toon status --json') || die "toon status failed in the zone"
-  network=$(jq -r '.network // .agent_node.network // empty' <<<"$doc" 2>/dev/null)
+  network=$(node_network)
   say "network: ${network:-cannot be read}"
   lines=$(jq -r '[.. | objects | .apps? | arrays | .[] | objects | select((.name // "") != "")
-    | {name, state: (.state // .status // "")}] | unique_by(.name) | .[] | "\(.name)\t\(.state)"' <<<"$doc" 2>/dev/null)
+    | {name, running: (.running == true)}] | unique_by(.name) | .[] | "\(.name)\t\(.running)"' <<<"$doc" 2>/dev/null)
   while IFS=$'\t' read -r l astate; do
     [[ -n $l ]] || continue
-    if [[ $astate == running ]]; then say "app $l: running"; else say "app $l: not running (${astate:-unknown})"; fi
+    if [[ $astate == true ]]; then say "app $l: running"; else say "app $l: not running"; fi
   done <<<"$lines"
-  relay=$(jq -r 'first(.. | objects | (.relay_url?, (.relay? | if type == "string" then . elif type == "object" then (.url // .address // .ws_url) else empty end))
-    | strings | select(length > 0)) // empty' <<<"$doc" 2>/dev/null)
+  # The relay is the app of that name; it answers reads at its read address.
+  relay=$(jq -r 'first(.. | objects | .apps? | arrays | .[] | objects | select(.name == "relay") | .read_address | strings | select(length > 0)) // empty' <<<"$doc" 2>/dev/null)
   if [[ -z $relay ]]; then
     say "relay: the node reports no address, so it cannot be checked"
   else
@@ -693,7 +831,11 @@ cmd_stop() {
   if [[ $(zone_state "$agent_zone") == running ]]; then
     "$sbx" stop "$agent_zone" || die "the session in the agent's zone ($agent_zone) could not be stopped"
   fi
-  if [[ $state == running ]]; then
+  # The unit would start the zone again, now and when the machine restarts; `start` enables it again.
+  if [[ -e $unit_dir/spaceturtle-connector.service ]]; then
+    "$systemctl_" --user disable --now spaceturtle-connector.service || die "the unit that keeps the connector's zone running could not be stopped"
+  fi
+  if [[ $(zone_state) == running ]]; then
     "$sbx" stop "$zone" || die "the connector's zone ($zone) could not be stopped"
   fi
   say "stopped. The wallet, the passphrase and the timer's setting are as they were. Run 'spaceturtle start' to bring it back."
@@ -722,6 +864,10 @@ cmd_upgrade() {
   if [[ $(zone_state "$agent_zone") != "not created" ]]; then
     "$sbx" rm --force "$agent_zone" || die "the agent's zone ($agent_zone) could not be removed"
   fi
+  # The unit would hold a session in the zone being removed; step_supervisor starts it again.
+  if [[ -e $unit_dir/spaceturtle-connector.service ]]; then
+    "$systemctl_" --user stop spaceturtle-connector.service || die "the unit that keeps the connector's zone running could not be stopped"
+  fi
   "$sbx" rm --force "$zone" || die "the old connector's zone could not be removed"
   create_zone
   # The node, the faucet and the backup belong to the wallet, which is kept; the rest belong to the zone.
@@ -733,12 +879,13 @@ cmd_upgrade() {
   fi
   pass=
   step_node
+  step_runtime
   step_faucet
-  step_supervisor
   # The agent's zone, and the private half in it, is gone: a key on the list is made again; a revoked one is not.
   local keys; keys=$(agent_key_ids) || die "toon agent-key list failed in the zone"
   [[ -z $keys ]] || rm -f "$marks/agentkey"
   step_agentkey
+  step_supervisor
   step_backup
   say "the connector's zone is upgraded and running"
 }
@@ -772,17 +919,21 @@ cmd_remove() {
       *) make_backup || die "the backup failed, so nothing was removed. Answer n to remove without it." ;;
     esac
   fi
+  if [[ -e $unit_dir/spaceturtle-connector.service ]]; then
+    "$systemctl_" --user disable --now spaceturtle-connector.service || die "the unit that keeps the connector's zone running could not be stopped"
+  fi
   for z in "$agent_zone" "$zone"; do
     [[ $(zone_state "$z") == "not created" ]] || "$sbx" rm --force "$z" || die "the zone $z could not be removed"
   done
   if [[ -e $unit_dir/spaceturtle.timer ]]; then
     "$systemctl_" --user disable --now spaceturtle.timer || die "the timer could not be turned off"
   fi
-  rm -f "$unit_dir/spaceturtle.timer" "$unit_dir/spaceturtle.service"
+  rm -f "$unit_dir/spaceturtle.timer" "$unit_dir/spaceturtle.service" "$unit_dir/spaceturtle-connector.service"
   "$systemctl_" --user daemon-reload
   rm -rf "$marks"
   rm -f "$state_dir/last-unattended" "$conf" "$conf.new" "$key_file"
-  rmdir "$state_dir" "$config_dir" "$(dirname "$key_file")" 2>/dev/null
+  rm -rf "$session_dir"
+  rmdir "$state_dir/agent-workspace" "$state_dir" "$config_dir" "$(dirname "$key_file")" 2>/dev/null
   if (( delete )); then
     [[ -n $data_dir && $data_dir != / ]] || die "will not delete '$data_dir'"
     rm -rf "$data_dir" || die "cannot delete $data_dir"
@@ -798,6 +949,7 @@ case ${1:-} in
   start) start ;;
   mainnet) shift; mainnet "$@" ;;
   session) shift; session "$@" ;;
+  supervise) supervise ;;
   timer) shift; timer "$@" ;;
   set) shift; set_ "$@" ;;
   key) key ;;

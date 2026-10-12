@@ -1,9 +1,10 @@
 #!/bin/bash
-# The connector's zone's entrypoint. Starts the container engine if it is not running, then
-# runs the supervisor in this process, so nothing needs `systemd --user` (`toon up` without
-# --foreground installs a unit). The passphrase file is the one the launcher made in this zone.
-# Until `toon init` has written the passphrase file there is nothing to supervise, so it waits
-# for that file with the engine up, then starts the supervisor.
+# The connector's zone's entrypoint, and what the launcher runs in the session that keeps the
+# zone up. Starts the container engine if it is not running, the two forwarders an agent key
+# is used through, then the supervisor in this process, so nothing needs `systemd --user`
+# (`toon up` without --foreground installs a unit). The passphrase file is the one the
+# launcher made in this zone. Until `toon init` has written the passphrase file there is
+# nothing to supervise, so it waits for that file with the engine up, then starts the supervisor.
 set -euo pipefail
 
 if ! docker info >/dev/null 2>&1; then
@@ -20,4 +21,26 @@ if [[ ! -r $TOON_PASSPHRASE_FILE ]]; then
   echo "connector-start: no passphrase file at $TOON_PASSPHRASE_FILE; the container engine is up, waiting for toon init" >&2
   until [[ -r $TOON_PASSPHRASE_FILE ]]; do sleep 5; done
 fi
+
+home=$HOME/.toon/agent-node
+# A zone that was stopped leaves the supervisor's socket behind, and on a mounted directory a
+# connection to it is accepted although nothing listens, so `toon up` takes the node for running.
+pgrep -f "[t]oon up" >/dev/null || rm -f "$home/supervisor.sock"
+
+# The supervisor's orders and the relay TOON app's connector listen on loopback, which a
+# published port does not reach. A forwarder on every address leads to each: 17100 to the
+# orders, 17101 to the connector. The launcher publishes those two to the machine's loopback.
+forward() { # listening port, the loopback port it leads to
+  [[ $2 =~ ^[0-9]+$ ]] || return 0
+  pgrep -f "socat TCP-LISTEN:$1," >/dev/null && return 0
+  setsid nohup socat "TCP-LISTEN:$1,fork,reuseaddr" "TCP:127.0.0.1:$2" >/dev/null 2>&1 < /dev/null &
+}
+forward 17100 "$(jq -r '.supervisor // "" | sub(".*:"; "")' "$home/agent-keys.json" 2>/dev/null)"
+forward 17101 "$(jq -r '.toon_apps[0].listen // "" | sub(".*:"; "")' "$home/state.json" 2>/dev/null)"
+
+# An app is reached at its container's own address, and the sandbox's proxy, which every
+# program here is pointed at, cannot reach in there: the engine's networks go direct.
+export NO_PROXY="${NO_PROXY:+$NO_PROXY,}172.16.0.0/12,192.168.0.0/16"
+export no_proxy=$NO_PROXY
+
 exec toon up --foreground
