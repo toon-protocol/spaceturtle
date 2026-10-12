@@ -1,8 +1,8 @@
 #!/bin/bash
 # Names everything a release publishes: the agent definition and the two zone images, in
 # GitHub's registry and, when DOCKERHUB_NAMESPACE names the account or organisation that
-# holds the mirror, on Docker Hub too, all under the one version of the tag. Nothing is
-# published as `latest`, which could name a definition and images of different releases.
+# holds the mirror, on Docker Hub too, all under the one version of the tag.
+# release/mark-latest moves `latest` to them afterwards.
 # Usage: release/references <tag or version> [definition|agent|connector]
 # Prints "<artifact> <reference>" lines, or only the references of the artifact named.
 set -euo pipefail

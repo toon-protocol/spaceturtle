@@ -940,10 +940,34 @@ release_env; publish not-a-version; rc=$?
 release_env; SPACETURTLE_DOCKER_AGENT=$tmp/bin/missing publish v1.2.3; rc=$?
 [[ $rc -ne 0 ]] && grep -q 'docker-agent' "$tmp/out"; published_check "without docker-agent it stops and says so" $?
 
-unset SPACETURTLE_DOCKER_AGENT DOCKERHUB_NAMESPACE
+# latest: a docker that records its calls, beside the docker-agent above.
+latest_env() {
+  release_env
+  export SPACETURTLE_DOCKER=$tmp/bin/docker
+  printf '#!/bin/bash\necho "$*" >> "$STUB_DIR/docker-calls"\n[[ -r $STUB_DIR/docker-fails ]] && exit 1\nexit 0\n' > "$SPACETURTLE_DOCKER"; chmod +x "$SPACETURTLE_DOCKER"
+}
+mark_latest() { (cd "$tmp" && "$root/release/mark-latest" "$@") > "$tmp/out" 2>&1; }
+
+latest_env; mark_latest v1.2.3; rc=$?
+[[ $rc -eq 0 && $(sort "$STUB_DIR/docker-calls") == 'buildx imagetools create --tag docker.io/toonhub/spaceturtle-agent-zone:latest docker.io/toonhub/spaceturtle-agent-zone:1.2.3
+buildx imagetools create --tag docker.io/toonhub/spaceturtle-connector-zone:latest docker.io/toonhub/spaceturtle-connector-zone:1.2.3
+buildx imagetools create --tag ghcr.io/toon-protocol/spaceturtle-agent-zone:latest ghcr.io/toon-protocol/spaceturtle-agent-zone:1.2.3
+buildx imagetools create --tag ghcr.io/toon-protocol/spaceturtle-connector-zone:latest ghcr.io/toon-protocol/spaceturtle-connector-zone:1.2.3' ]]
+published_check "latest names the very images the version names, in each registry" $?
+[[ $(ls "$STUB_DIR/registry") == 'docker.io_toonhub_spaceturtle:latest
+ghcr.io_toon-protocol_spaceturtle:latest' ]] && cmp -s "$STUB_DIR/registry/ghcr.io_toon-protocol_spaceturtle:latest" "$def"
+published_check "latest holds the definition byte for byte, in each registry" $?
+
+latest_env; mark_latest v1.2.3-rc.1; rc=$?
+[[ $rc -eq 0 && ! -e $STUB_DIR/docker-calls && ! -e $STUB_DIR/calls ]] && grep -q 'pre-release' "$tmp/out"; published_check "a pre-release moves no latest, and says so" $?
+
+latest_env; touch "$STUB_DIR/docker-fails"; mark_latest v1.2.3; rc=$?
+[[ $rc -ne 0 ]] && grep -q ':latest could not be moved' "$tmp/out"; published_check "a latest that cannot be moved fails and is named" $?
+
+unset SPACETURTLE_DOCKER_AGENT SPACETURTLE_DOCKER DOCKERHUB_NAMESPACE
 notes=$(DOCKERHUB_NAMESPACE=toonhub "$root/release/notes" v1.2.3 2>&1); lacking=$?
 pin() { sed -n "s/^$1=//p" "$root/images/versions.env"; }
-for v in 'docker agent run ghcr.io/toon-protocol/spaceturtle:1.2.3' $(refs v1.2.3 | cut -d' ' -f2) \
+for v in 'docker agent run ghcr.io/toon-protocol/spaceturtle:1.2.3 --template ghcr.io/toon-protocol/spaceturtle-agent-zone:1.2.3' $(refs v1.2.3 | cut -d' ' -f2) \
   "toon                        $(pin TOON_VERSION)" "$(pin DOCKER_AGENT_VERSION)" "gVisor (runsc)              $(pin GVISOR_VERSION)"; do
   grep -qF -- "$v" <<<"$notes" || { lacking=1; echo "       the notes lack: $v"; }
 done
@@ -1071,7 +1095,7 @@ session_env() {
 run_cmd() { "$root/spaceturtle" "$@" > "$tmp/out" 2>&1; }
 session_env; run_cmd session; rc=$?
 run=$(grep '^run ' "$STUB_DIR/calls")
-[[ $rc -eq 0 && $run == *"--image ghcr.io/toon-protocol/spaceturtle-agent:latest"* && $run == *"agent/spaceturtle.yaml"* ]]; launcher_check "a session passes the zone image and the definition" $?
+[[ $rc -eq 0 && $run == *"--image ghcr.io/toon-protocol/spaceturtle-agent-zone:latest"* && $run == *"agent/spaceturtle.yaml"* ]]; launcher_check "a session passes the zone image and the definition" $?
 [[ $(grep -o -- '--allow-host [^ ]*' <<<"$run" | tr '\n' ' ') == "--allow-host api.anthropic.com --allow-host localhost:7123 " ]]; launcher_check "the allow-list is exactly the provider and one loopback port" $?
 ! grep -q secret-key-123 "$STUB_DIR/calls"; launcher_check "the model key is not an argument" $?
 [[ $run != *--max-cost* ]]; launcher_check "a session by hand has no unattended ceiling" $?

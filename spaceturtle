@@ -78,7 +78,7 @@
 #   SPACETURTLE_MODEL_KEY_FILE  the model key (default: ~/.config/spaceturtle-launcher/model-key)
 #   SPACETURTLE_MODEL_HOST  the model provider's host, for a provider the launcher does not know
 #   SPACETURTLE_AGENT_ZONE  the agent's zone's name (default: st-agent)
-#   SPACETURTLE_AGENT_IMAGE the agent's zone image (default: ghcr.io/toon-protocol/spaceturtle-agent:latest)
+#   SPACETURTLE_AGENT_IMAGE the agent's zone image (default: ghcr.io/toon-protocol/spaceturtle-agent-zone:latest)
 #   SPACETURTLE_AGENT_DEF   the agent definition (default: agent/spaceturtle.yaml beside this file)
 #   SPACETURTLE_CONNECTOR_PORT  the loopback port that leads to the connector's zone (default: 7100)
 #   SPACETURTLE_SYSTEMCTL   the systemctl program (default: systemctl)
@@ -96,7 +96,7 @@ config_dir=${SPACETURTLE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/spaceturt
 conf=$config_dir/launcher.conf
 key_file=${SPACETURTLE_MODEL_KEY_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/spaceturtle-launcher/model-key}
 agent_zone=${SPACETURTLE_AGENT_ZONE:-st-agent}
-agent_image=${SPACETURTLE_AGENT_IMAGE:-ghcr.io/toon-protocol/spaceturtle-agent:latest}
+agent_image=${SPACETURTLE_AGENT_IMAGE:-ghcr.io/toon-protocol/spaceturtle-agent-zone:latest}
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 agent_def=${SPACETURTLE_AGENT_DEF:-$here/agent/spaceturtle.yaml}
 connector_port=${SPACETURTLE_CONNECTOR_PORT:-7100}

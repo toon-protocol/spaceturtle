@@ -1,0 +1,22 @@
+#!/bin/bash
+# Moves `latest` to a release, once everything under its version is published: each zone
+# image's `latest` becomes the very image the version names, and the definition goes to
+# `latest` as release/publish-definition publishes it. A pre-release moves nothing.
+# Usage: release/mark-latest <tag or version>
+# Needs docker with buildx and docker-agent, signed in to each registry.
+#   SPACETURTLE_DOCKER         the docker program (default: docker)
+#   SPACETURTLE_DOCKER_AGENT, DOCKERHUB_NAMESPACE   as release/publish-definition reads them
+set -euo pipefail
+root=$(cd "$(dirname "$0")/.." && pwd)
+die() { echo "release/mark-latest: $*" >&2; exit 1; }
+
+docker=${SPACETURTLE_DOCKER:-docker}
+images=$("$root/release/references" "${1-}" | awk '$1 != "definition" { print $2 }')
+if [[ ${1#v} == *-* ]]; then echo "$1 is a pre-release, so latest stays where it is"; exit 0; fi
+
+while IFS= read -r ref; do
+  latest=${ref%:*}:latest
+  "$docker" buildx imagetools create --tag "$latest" "$ref" || die "$latest could not be moved to $ref"
+  echo "latest: $latest is $ref"
+done <<<"$images"
+"$root/release/publish-definition" "$1" --as-latest
