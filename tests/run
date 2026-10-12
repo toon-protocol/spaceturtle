@@ -978,9 +978,9 @@ notes=$("$root/release/notes" v1.2.3 2>&1); rc=$?
 # --- the launcher: spaceturtle start, against a stub sbx in a temporary home ---
 launcher_env() {
   new_env
-  export SPACETURTLE_SBX=$tmp/bin/sbx SPACETURTLE_KVM=$tmp/kvm SPACETURTLE_TOON_BIN=$tmp/bin/toon
+  export SPACETURTLE_SBX=$tmp/bin/sbx SPACETURTLE_KVM=$tmp/kvm
   export SPACETURTLE_ZONE=zone-x SPACETURTLE_DATA_DIR=$tmp/wallet SPACETURTLE_BACKUP_DIR=$tmp/backup
-  : > "$SPACETURTLE_KVM"; : > "$SPACETURTLE_TOON_BIN"
+  : > "$SPACETURTLE_KVM"
   export SPACETURTLE_SYSTEMCTL=$tmp/bin/systemctl SPACETURTLE_UNIT_DIR=$tmp/units SPACETURTLE_MODEL_KEY_FILE=$tmp/model-key
   export SPACETURTLE_AGENT_ZONE=agent-x SPACETURTLE_CONNECTOR_PORT=7123
   printf '#!/bin/bash\necho "$*" >> "$STUB_DIR/systemctl-calls"\n' > "$SPACETURTLE_SYSTEMCTL"; chmod +x "$SPACETURTLE_SYSTEMCTL"
@@ -995,7 +995,7 @@ echo "$*" >> "$STUB_DIR/calls"
 [[ -r $STUB_DIR/fail-on && $* == *"$(cat "$STUB_DIR/fail-on")"* ]] && exit 1
 [[ $* == *pgrep* ]] && { [[ -e $STUB_DIR/up ]]; exit; }
 [[ $* == *"toon status --json"* ]] && { cat "$STUB_DIR/status" 2>/dev/null || echo "{\"network\":\"$(cat "$STUB_DIR/network" 2>/dev/null || echo devnet)\"}"; exit 0; }
-[[ $* == *"toon up"* ]] && : > "$STUB_DIR/up"
+[[ $* == *connector-start* ]] && : > "$STUB_DIR/up"
 [[ $* == *"toon wallet addresses"* ]] && { echo "evm 0xAAA111"; echo "solana SoLBBB222"; exit 0; }
 [[ $* == *"toon network set mainnet"* ]] && echo mainnet > "$STUB_DIR/network"
 [[ $1 == create ]] && echo "zone-x running" > "$STUB_DIR/zones"
@@ -1013,7 +1013,7 @@ line_no() { grep -n -m1 -- "$1" "$STUB_DIR/calls" | cut -d: -f1; }
 
 launcher_env; run_launcher; rc=$?
 launcher_check "a first run succeeds" $rc
-a=$(line_no '^create '); b=$(line_no 'toon init'); c=$(line_no 'toon wallet fund'); d=$(line_no 'toon up'); e=$(line_no 'toon wallet backup')
+a=$(line_no '^create '); b=$(line_no 'toon init'); c=$(line_no 'toon wallet fund'); d=$(line_no 'connector-start'); e=$(line_no 'toon wallet backup')
 [[ -n $a && -n $b && -n $c && -n $d && -n $e && $a -lt $b && $b -lt $c && $c -lt $d && $d -lt $e ]]
 launcher_check "a first run issues zone, node, faucet, supervisor, backup in order" $?
 grep -q 'toon init --accept-anyone-terms --network devnet' "$STUB_DIR/calls"; launcher_check "the node is initialised on devnet" $?
@@ -1034,7 +1034,18 @@ launcher_check "a second run succeeds" $rc
 ! grep -E '^create |^cp [^z]|toon init|toon wallet fund|toon wallet backup|^policy' "$STUB_DIR/calls" | grep -q .
 launcher_check "a second run issues nothing that creates, initialises or funds" $?
 
-for step in "anonrc" "toon wallet fund" "toon up" "toon wallet backup" "toon init"; do
+# The zone comes from the connector's zone image, nothing is copied in, and the supervisor is connector-start.
+grep '^create ' "$STUB_DIR/calls" >/dev/null; launcher_env; run_launcher
+grep '^create ' "$STUB_DIR/calls" | grep -q -- '--template ghcr.io/toon-protocol/spaceturtle-connector-zone:latest '; launcher_check "the zone is made from the connector's zone image" $?
+launcher_env; SPACETURTLE_CONNECTOR_IMAGE=example.test/zone:1 run_launcher
+grep '^create ' "$STUB_DIR/calls" | grep -q -- '--template example.test/zone:1 '; launcher_check "SPACETURTLE_CONNECTOR_IMAGE changes the image" $?
+! grep -q '^cp [^z]' "$STUB_DIR/calls" && ! grep -qE '^cp .*:/' <(grep -v 'wallet-backup' "$STUB_DIR/calls"); launcher_check "nothing is copied into the zone" $?
+grep connector-start "$STUB_DIR/calls" | grep -q 'TOON_PASSPHRASE_FILE=\$HOME/.config/toon-passphrase' && ! grep -q 'toon up' "$STUB_DIR/calls"
+launcher_check "the supervisor starts through connector-start with the passphrase file outside the wallet's storage" $?
+[[ $(grep -c connector-start "$STUB_DIR/calls") -eq 1 ]]; launcher_check "connector-start is started once" $?
+: > "$STUB_DIR/calls"; run_launcher; ! grep -q connector-start "$STUB_DIR/calls"; launcher_check "it is not started again while it runs" $?
+
+for step in "ln -sfn" "toon wallet fund" "connector-start" "toon wallet backup" "toon init"; do
   launcher_env; echo "$step" > "$STUB_DIR/fail-on"; run_launcher; rc=$?
   [[ $rc -ne 0 ]]; launcher_check "a run failing at '$step' stops" $?
   rm "$STUB_DIR/fail-on"; : > "$STUB_DIR/calls"; run_launcher; rc=$?
@@ -1049,7 +1060,7 @@ launcher_env; echo "zone-x-old running" > "$STUB_DIR/zones"; run_launcher
 grep -q '^create ' "$STUB_DIR/calls"; launcher_check "a zone whose name only starts with the zone's is not taken for it" $?
 # The zone is lost: a new one gets every step again, not only the create.
 rm "$STUB_DIR/zones"; : > "$STUB_DIR/calls"; rm "$STUB_DIR/up"; run_launcher
-grep -q '^policy allow network --sandbox zone-x' "$STUB_DIR/calls" && grep -q anonrc "$STUB_DIR/calls" && grep -q 'toon init' "$STUB_DIR/calls" \
+grep -q '^policy allow network --sandbox zone-x' "$STUB_DIR/calls" && grep -q -- "ln -sfn" "$STUB_DIR/calls" && grep -q 'toon init' "$STUB_DIR/calls" \
   && grep -q 'toon wallet fund' "$STUB_DIR/calls" && grep -q 'toon wallet backup' "$STUB_DIR/calls"
 launcher_check "a zone made again gets every step again" $?
 

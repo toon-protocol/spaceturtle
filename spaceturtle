@@ -5,11 +5,13 @@
 #       Brings the connector's zone up, step by step, and does only the steps
 #       not yet done, so a run that was interrupted finishes the rest when run
 #       again and a second run creates, initialises and funds nothing:
-#         1. zone        a detached Docker Sandboxes virtual machine, with an
-#                        any-address rule scoped to that zone alone
+#         1. zone        a detached Docker Sandboxes virtual machine made from the
+#                        connector's zone image, with an any-address rule scoped to
+#                        that zone alone; nothing is copied into it from the machine
 #         2. node        the agent node, initialised on devnet inside it
 #         3. faucet      the wallet funded from the devnet faucet
-#         4. supervisor  `toon up`, started again whenever it is not running
+#         4. supervisor  the image's `connector-start` (the container engine, then
+#                        `toon up`), started again whenever it is not running
 #         5. backup      a sealed backup of the wallet, handed to the Observer
 #       The passphrase is made inside the zone and stays there: it is never
 #       printed and never written on the machine.
@@ -64,7 +66,6 @@
 #
 # Environment, so that tests can run against a temporary home:
 #   SPACETURTLE_SBX         the sbx program (default: sbx)
-#   SPACETURTLE_TOON_BIN    the toon binary copied into the zone (default: toon on PATH)
 #   SPACETURTLE_KVM         the KVM device (default: /dev/kvm)
 #   SPACETURTLE_ZONE        the zone's name (default: st-connector)
 #   SPACETURTLE_STATE_DIR   the state directory (default: ~/.local/state/spaceturtle);
@@ -77,6 +78,7 @@
 #                           (default: ~/.config/spaceturtle)
 #   SPACETURTLE_MODEL_KEY_FILE  the model key (default: ~/.config/spaceturtle-launcher/model-key)
 #   SPACETURTLE_MODEL_HOST  the model provider's host, for a provider the launcher does not know
+#   SPACETURTLE_CONNECTOR_IMAGE  the connector's zone image (default: ghcr.io/toon-protocol/spaceturtle-connector-zone:latest)
 #   SPACETURTLE_AGENT_ZONE  the agent's zone's name (default: st-agent)
 #   SPACETURTLE_AGENT_IMAGE the agent's zone image (default: ghcr.io/toon-protocol/spaceturtle-agent-zone:latest)
 #   SPACETURTLE_AGENT_DEF   the agent definition (default: agent/spaceturtle.yaml beside this file)
@@ -95,6 +97,7 @@ backup_dir=${SPACETURTLE_BACKUP_DIR:-$HOME/spaceturtle-backup}
 config_dir=${SPACETURTLE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/spaceturtle}
 conf=$config_dir/launcher.conf
 key_file=${SPACETURTLE_MODEL_KEY_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/spaceturtle-launcher/model-key}
+connector_image=${SPACETURTLE_CONNECTOR_IMAGE:-ghcr.io/toon-protocol/spaceturtle-connector-zone:latest}
 agent_zone=${SPACETURTLE_AGENT_ZONE:-st-agent}
 agent_image=${SPACETURTLE_AGENT_IMAGE:-ghcr.io/toon-protocol/spaceturtle-agent-zone:latest}
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -127,7 +130,7 @@ step_zone() {
     say "creating the connector's zone ($zone)"
     mkdir -p "$data_dir" || die "cannot create $data_dir"
     "$sbx" policy init balanced || die "sbx policy init failed"
-    "$sbx" create --name "$zone" --cpus 4 --memory 4g shell "$data_dir" || die "sbx create failed"
+    "$sbx" create --name "$zone" --cpus 4 --memory 4g --template "$connector_image" shell "$data_dir" || die "sbx create failed"
     # A new zone has none of the steps done in it, whatever an earlier zone had.
     rm -rf "$marks"
   fi
@@ -137,11 +140,9 @@ step_zone() {
     mark rule
   fi
   if ! done_ zone; then
-    # The overlay client must use the forward proxy, and the wallet lives in the
+    # The image holds the overlay client's proxy setting. The wallet lives in the
     # mounted directory while the passphrase stays on the zone's own disk.
-    in_zone 'sudo mkdir -p /usr/local/etc/anon &&
-      echo "HTTPSProxy gateway.docker.internal:3128" | sudo tee /usr/local/etc/anon/anonrc-defaults >/dev/null &&
-      mkdir -p ~/.config && ln -sfn '"$(sh_quote "$data_dir")"' ~/.config/toon' || die "the zone could not be set up"
+    in_zone 'mkdir -p ~/.config && ln -sfn '"$(sh_quote "$data_dir")"' ~/.config/toon' || die "the zone could not be set up"
     mark zone
   fi
 }
@@ -149,9 +150,7 @@ step_zone() {
 step_node() {
   done_ node && return
   say "initialising the agent node on devnet"
-  "$sbx" cp "${SPACETURTLE_TOON_BIN:-$(command -v toon || true)}" "$zone:/tmp/toon" || die "toon could not be copied into the zone (set SPACETURTLE_TOON_BIN)"
-  in_zone 'sudo install -m 755 /tmp/toon /usr/local/bin/toon &&
-    { [ -s "$TOON_PASSPHRASE_FILE" ] || { umask 077 && head -c 32 /dev/urandom | base64 > "$TOON_PASSPHRASE_FILE"; }; } &&
+  in_zone '{ [ -s "$TOON_PASSPHRASE_FILE" ] || { umask 077 && head -c 32 /dev/urandom | base64 > "$TOON_PASSPHRASE_FILE"; }; } &&
     toon init --accept-anyone-terms --network devnet --json >/dev/null' || die "toon init failed in the zone"
   mark node
 }
@@ -163,13 +162,14 @@ step_faucet() {
   mark faucet
 }
 
-# The pattern does not match itself, so the shell running pgrep is not taken for toon up.
+# The pattern does not match itself, so the shell running pgrep is not taken for the supervisor.
 supervisor_running() { in_zone 'pgrep -f "[t]oon up" >/dev/null'; }
 
 step_supervisor() {
   supervisor_running && return
   say "starting the supervisor"
-  in_zone 'setsid nohup toon up --foreground > ~/up.log 2>&1 < /dev/null &' || die "toon up failed in the zone"
+  # The image's entrypoint may not have run, so the launcher starts it; it reads the passphrase file in_zone names.
+  in_zone 'setsid nohup connector-start > ~/up.log 2>&1 < /dev/null &' || die "connector-start failed in the zone"
 }
 
 step_backup() {
