@@ -22,7 +22,44 @@
 #       unless --keep-limit is given. On an Install already on mainnet it says so
 #       and changes nothing.
 #
-# Stops before doing anything when the machine has no KVM, `sbx` is missing or
+#   spaceturtle session [--unattended]
+#       Starts a `docker-agent` session in the agent's zone, from the agent's zone
+#       image and the published agent definition. The session command carries an
+#       allow-list of exactly two things: the model provider's host and one loopback
+#       port, the one that leads to the connector's zone. By hand it is a
+#       conversation; --unattended is what the timer runs: no one is present, and
+#       the session has a ceiling on model cost. Nothing starts while the
+#       connector's zone is not running.
+#   spaceturtle timer on|off|interval <N>m|h|d
+#       The timer starts an unattended session. `start` turns it on, every 6h,
+#       unless it was turned off. It is a systemd user timer.
+#   spaceturtle set model <provider/model>
+#   spaceturtle set ceiling <dollars>
+#       The model, and the ceiling on model cost of one unattended session (default 1).
+#   spaceturtle key
+#       Reads the model key from the terminal into the key file (mode 600).
+#   spaceturtle waiting
+#       Lists the apps the agent node holds until the Observer approves them: each
+#       one's name, image and how long it has waited.
+#   spaceturtle approve <app>
+#       Approves a waiting app: `toon approve` starts it, and an image that is not
+#       TOON's own runs under the sandboxed runtime (toon_cli#209).
+#   spaceturtle refuse <app> [reason]
+#       Refuses a waiting app and discards it.
+#   spaceturtle status
+#       The timer's state and interval, when the last unattended session started,
+#       the model and the ceiling; then whether the zone and the supervisor are
+#       running and how many apps wait.
+#   Approving or refusing an app that is not waiting says so and changes nothing.
+#   `waiting`, `approve`, `refuse` and `status` run `toon` with the home, in the
+#   connector's zone. The agent has no tool for them (tests/check-agent).
+#
+# The model key is the Observer's: it lives in a file outside every zone, is given
+# to the session as an environment variable of the sbx process (never an argument)
+# and is not in any directory the agent's file tool may read.
+#
+# Every command that uses a zone stops before doing anything when the machine has no
+# KVM, `sbx` is missing or
 # `sbx` is signed out, and says the cause and the remedy.
 #
 # Environment, so that tests can run against a temporary home:
@@ -36,6 +73,16 @@
 #                           (default: ~/.local/share/spaceturtle/wallet)
 #   SPACETURTLE_BACKUP_DIR  where the backup is written for the Observer
 #                           (default: ~/spaceturtle-backup)
+#   SPACETURTLE_CONFIG_DIR  the launcher's settings, in `launcher.conf`
+#                           (default: ~/.config/spaceturtle)
+#   SPACETURTLE_MODEL_KEY_FILE  the model key (default: ~/.config/spaceturtle-launcher/model-key)
+#   SPACETURTLE_MODEL_HOST  the model provider's host, for a provider the launcher does not know
+#   SPACETURTLE_AGENT_ZONE  the agent's zone's name (default: st-agent)
+#   SPACETURTLE_AGENT_IMAGE the agent's zone image (default: ghcr.io/toon-protocol/spaceturtle-agent:latest)
+#   SPACETURTLE_AGENT_DEF   the agent definition (default: agent/spaceturtle.yaml beside this file)
+#   SPACETURTLE_CONNECTOR_PORT  the loopback port that leads to the connector's zone (default: 7100)
+#   SPACETURTLE_SYSTEMCTL   the systemctl program (default: systemctl)
+#   SPACETURTLE_UNIT_DIR    where the timer's units are written (default: ~/.config/systemd/user)
 set -uo pipefail
 
 sbx=${SPACETURTLE_SBX:-sbx}
@@ -45,6 +92,16 @@ state_dir=${SPACETURTLE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/spacetu
 marks=$state_dir/launcher
 data_dir=${SPACETURTLE_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/spaceturtle/wallet}
 backup_dir=${SPACETURTLE_BACKUP_DIR:-$HOME/spaceturtle-backup}
+config_dir=${SPACETURTLE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/spaceturtle}
+conf=$config_dir/launcher.conf
+key_file=${SPACETURTLE_MODEL_KEY_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/spaceturtle-launcher/model-key}
+agent_zone=${SPACETURTLE_AGENT_ZONE:-st-agent}
+agent_image=${SPACETURTLE_AGENT_IMAGE:-ghcr.io/toon-protocol/spaceturtle-agent:latest}
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+agent_def=${SPACETURTLE_AGENT_DEF:-$here/agent/spaceturtle.yaml}
+connector_port=${SPACETURTLE_CONNECTOR_PORT:-7100}
+systemctl_=${SPACETURTLE_SYSTEMCTL:-systemctl}
+unit_dir=${SPACETURTLE_UNIT_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}
 
 die() { echo "spaceturtle: $*" >&2; exit 1; }
 say() { echo "spaceturtle: $*"; }
@@ -106,9 +163,11 @@ step_faucet() {
   mark faucet
 }
 
+# The pattern does not match itself, so the shell running pgrep is not taken for toon up.
+supervisor_running() { in_zone 'pgrep -f "[t]oon up" >/dev/null'; }
+
 step_supervisor() {
-  # The pattern does not match itself, so the shell running pgrep is not taken for toon up.
-  in_zone 'pgrep -f "[t]oon up" >/dev/null' && return
+  supervisor_running && return
   say "starting the supervisor"
   in_zone 'setsid nohup toon up --foreground > ~/up.log 2>&1 < /dev/null &' || die "toon up failed in the zone"
 }
@@ -176,6 +235,149 @@ EOF2
   say "the Install is on mainnet. Fund the addresses above."
 }
 
+# --- settings: `name=value` lines in launcher.conf ---
+conf_get() { # name, default
+  local v
+  v=$(sed -n "s/^$1=//p" "$conf" 2>/dev/null | tail -n 1)
+  echo "${v:-$2}"
+}
+conf_set() { # name, value
+  mkdir -p "$config_dir" || die "cannot create $config_dir"
+  { grep -v "^$1=" "$conf" 2>/dev/null; echo "$1=$2"; } > "$conf.new" && mv "$conf.new" "$conf" || die "cannot write $conf"
+}
+
+valid_interval() { [[ $1 =~ ^[1-9][0-9]*[mhd]$ ]]; }
+valid_ceiling() { [[ $1 =~ ^([0-9]+(\.[0-9]+)?)$ ]] && [[ $1 =~ [1-9] ]]; }
+
+# The provider's host and the variable its key goes in, from the model's name.
+provider_of() {
+  model=$(conf_get model anthropic/claude-sonnet-5-5)
+  case ${model%%/*} in
+    anthropic) host=api.anthropic.com key_var=ANTHROPIC_API_KEY ;;
+    openai)    host=api.openai.com key_var=OPENAI_API_KEY ;;
+    google)    host=generativelanguage.googleapis.com key_var=GOOGLE_API_KEY ;;
+    mistral)   host=api.mistral.ai key_var=MISTRAL_API_KEY ;;
+    *) host=${SPACETURTLE_MODEL_HOST:-}; key_var=MODEL_API_KEY
+       [[ -n $host ]] || die "the launcher does not know the host of '${model%%/*}'. Set SPACETURTLE_MODEL_HOST to it." ;;
+  esac
+  [[ -n ${SPACETURTLE_MODEL_HOST:-} ]] && host=$SPACETURTLE_MODEL_HOST
+  return 0
+}
+
+need_model_key() {
+  [[ -s $key_file ]] || die "no model key. Put it in $key_file (mode 600), or run 'spaceturtle key' and paste it. The agent cannot read that file."
+}
+
+# The connector's zone must be running, with the supervisor in it.
+need_connector() {
+  zone_exists && "$sbx" ls 2>/dev/null | awk -v z="$zone" '$1 == z { ok = ($0 ~ /running/) } END { exit !ok }' \
+    && in_zone 'pgrep -f "[t]oon up" >/dev/null' \
+    || die "the connector's zone ($zone) is not running, so no session is started. Run 'spaceturtle start' first."
+}
+
+session() {
+  local unattended=0
+  case ${1:-} in
+    "") ;;
+    --unattended) unattended=1 ;;
+    *) die "usage: spaceturtle session [--unattended]" ;;
+  esac
+  preflight
+  need_model_key
+  provider_of
+  need_connector
+  local args=(run --name "$agent_zone" --image "$agent_image"
+    --allow-host "$host" --allow-host "localhost:$connector_port"
+    -e "$key_var" -- docker-agent run --model "$model")
+  if (( unattended )); then
+    mkdir -p "$state_dir" && date -u +%Y-%m-%dT%H:%M:%SZ > "$state_dir/last-unattended" || die "cannot write $state_dir/last-unattended"
+    args+=(--max-cost "$(conf_get ceiling 1)" --exec "Begin a session: read the waiting Requests and answer them, then do your daily work.")
+  fi
+  args+=("$agent_def")
+  # The key reaches the process by name (-e), never as an argument.
+  env "$key_var=$(<"$key_file")" "$sbx" "${args[@]}"
+}
+
+# --- the timer: a systemd user timer that runs an unattended session ---
+write_timer() {
+  local interval; interval=$(conf_get interval 6h)
+  mkdir -p "$unit_dir" || die "cannot create $unit_dir"
+  cat > "$unit_dir/spaceturtle.service" <<UNIT
+[Unit]
+Description=A spaceturtle session with nobody present
+
+[Service]
+Type=oneshot
+ExecStart=$here/spaceturtle session --unattended
+UNIT
+  cat > "$unit_dir/spaceturtle.timer" <<UNIT
+[Unit]
+Description=Starts a spaceturtle session every $interval
+
+[Timer]
+OnBootSec=$interval
+OnUnitActiveSec=$interval
+
+[Install]
+WantedBy=timers.target
+UNIT
+  "$systemctl_" --user daemon-reload || die "systemctl --user daemon-reload failed"
+}
+
+timer_on() {
+  write_timer
+  "$systemctl_" --user enable --now spaceturtle.timer || die "the timer could not be turned on"
+  conf_set timer on
+  say "the timer is on, every $(conf_get interval 6h)"
+}
+
+timer_off() {
+  conf_set timer off
+  [[ -e $unit_dir/spaceturtle.timer ]] && { "$systemctl_" --user disable --now spaceturtle.timer || die "the timer could not be turned off"; }
+  say "the timer is off"
+}
+
+timer() {
+  case ${1:-} in
+    on) timer_on ;;
+    off) timer_off ;;
+    interval)
+      valid_interval "${2:-}" || die "usage: spaceturtle timer interval <N>m|h|d, such as 6h"
+      conf_set interval "$2"
+      # A timer that is on is written again with the new interval.
+      [[ $(conf_get timer on) == on ]] && timer_on || say "the interval is $2; the timer is off"
+      ;;
+    *) die "usage: spaceturtle timer on|off|interval <N>m|h|d" ;;
+  esac
+}
+
+# `start` turns the timer on, unless the Observer turned it off.
+step_timer() {
+  [[ $(conf_get timer on) == on ]] && timer_on
+  return 0
+}
+
+set_() {
+  case ${1:-} in
+    model)
+      [[ ${2:-} =~ ^[A-Za-z0-9._:/-]+$ ]] || die "usage: spaceturtle set model <provider/model>"
+      conf_set model "$2" ;;
+    ceiling)
+      valid_ceiling "${2:-}" || die "usage: spaceturtle set ceiling <dollars>, such as 1.50"
+      conf_set ceiling "$2" ;;
+    *) die "usage: spaceturtle set model|ceiling <value>" ;;
+  esac
+}
+
+key() {
+  local k
+  [[ -t 0 ]] && printf 'Model key: ' >&2
+  IFS= read -rs k; [[ -t 0 ]] && echo >&2
+  [[ -n $k ]] || die "no key was given"
+  mkdir -p "$(dirname "$key_file")" && (umask 077 && printf '%s\n' "$k" > "$key_file") || die "cannot write $key_file"
+  say "the model key is saved in $key_file"
+}
+
 start() {
   preflight
   step_zone
@@ -183,11 +385,89 @@ start() {
   step_faucet
   step_supervisor
   step_backup
+  step_timer
   say "the connector's zone is running"
+}
+
+# The apps waiting, one JSON object per line: {name, image, since}. `toon status --json`
+# lists an app, in an `apps` array, in the `pending` state with the image and the time it
+# was asked for (seconds since the epoch or RFC 3339); a field it does not carry is left
+# empty. Only objects in an `apps` array are apps, so nothing else that is pending counts.
+# Dies when toon status fails, so callers must not run it in a pipeline or substitution
+# whose failure they ignore.
+waiting_apps() {
+  local doc
+  doc=$(in_zone 'toon status --json') || die "toon status failed in the zone"
+  jq -c '[.. | objects | .apps? | arrays | .[] | objects
+    | select((.state // .status // "") == "pending" and (.name // "") != "")
+    | {name, image: (.image // ""), since: (.requested_at // .asked_at // .since // .created_at // null)}]
+    | unique_by(.name) | .[]' <<<"$doc" || die "toon status gave a document that is not JSON"
+}
+
+age() { # a time as seconds or RFC 3339 -> "3d", "5h", "12m", "40s", or "unknown"
+  local t=$1 now secs
+  [[ -n $t && $t != null ]] || { echo unknown; return; }
+  [[ $t =~ ^[0-9]+$ ]] || t=$(date -d "$t" +%s 2>/dev/null) || { echo unknown; return; }
+  now=$(date +%s); secs=$((now - t)); ((secs < 0)) && secs=0
+  if ((secs >= 86400)); then echo "$((secs / 86400))d"
+  elif ((secs >= 3600)); then echo "$((secs / 3600))h"
+  elif ((secs >= 60)); then echo "$((secs / 60))m"
+  else echo "${secs}s"; fi
+}
+
+cmd_waiting() {
+  preflight
+  local lines l name image since n=0
+  lines=$(waiting_apps) || exit 1
+  while IFS= read -r l; do
+    [[ -n $l ]] || continue
+    name=$(jq -r .name <<<"$l"); image=$(jq -r .image <<<"$l"); since=$(jq -r .since <<<"$l")
+    printf '%s\t%s\t%s\n' "$name" "$image" "$(age "$since")"; n=$((n + 1))
+  done <<<"$lines"
+  ((n > 0)) || say "no app is waiting"
+}
+
+# approve|refuse <app> [reason]: only an app that is waiting is touched.
+decide() {
+  local verb=$1 app=${2:-} reason=${3:-} lines
+  [[ -n $app && $app != -* ]] || die "usage: spaceturtle $verb <app>$([[ $verb == refuse ]] && echo ' [reason]')"
+  preflight
+  lines=$(waiting_apps) || exit 1
+  jq -e --arg n "$app" 'select(.name == $n)' <<<"$lines" >/dev/null || die "$app is not waiting, so nothing was changed. 'spaceturtle waiting' lists what is."
+  if [[ $verb == approve ]]; then
+    in_zone "toon approve -- $(sh_quote "$app")" || die "toon approve failed in the zone"
+    say "approved $app: it starts now, and an image that is not TOON's own runs under the sandboxed runtime"
+  else
+    in_zone "toon refuse ${reason:+--reason $(sh_quote "$reason") }-- $(sh_quote "$app")" || die "toon refuse failed in the zone"
+    say "refused $app: it is discarded"
+  fi
+}
+
+cmd_status() {
+  preflight
+  local lines last=never
+  [[ -s $state_dir/last-unattended ]] && last=$(<"$state_dir/last-unattended")
+  echo "timer: $(conf_get timer on), every $(conf_get interval 6h)"
+  echo "last unattended session: $last"
+  echo "model: $(conf_get model anthropic/claude-sonnet-5-5)"
+  echo "ceiling: $(conf_get ceiling 1) per unattended session"
+  zone_exists || die "the connector's zone ($zone) does not exist. Run 'spaceturtle start'."
+  if supervisor_running; then say "the supervisor is running"
+  else say "the supervisor is not running. Run 'spaceturtle start'."; fi
+  lines=$(waiting_apps) || exit 1
+  say "$(grep -c . <<<"$lines") app(s) waiting for approval"
 }
 
 case ${1:-} in
   start) start ;;
   mainnet) shift; mainnet "$@" ;;
-  *) die "usage: spaceturtle start | mainnet [--keep-limit]" ;;
+  session) shift; session "$@" ;;
+  timer) shift; timer "$@" ;;
+  set) shift; set_ "$@" ;;
+  key) key ;;
+  waiting) cmd_waiting ;;
+  approve) decide approve "${2:-}" ;;
+  refuse) decide refuse "${2:-}" "${3:-}" ;;
+  status) cmd_status ;;
+  *) die "usage: spaceturtle start | mainnet [--keep-limit] | session | timer | set | key | status | waiting | approve <app> | refuse <app> [reason]" ;;
 esac

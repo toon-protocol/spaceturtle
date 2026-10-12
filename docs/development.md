@@ -4,7 +4,7 @@
 
 ## Tests
 
-`tests/run` runs `relay-events` (with its Renderer descriptions), `mark-seen` and `request` (and the answers the `being-observed` skill describes) against a stub `toon` and `curl`, and the launcher's `spaceturtle start` and `spaceturtle mainnet` against a stub `sbx`, in a temporary home, and holds the agent definition to the safety rules of ADR 0003 through `tests/check-agent`. It needs bash, `jq` and `yq` (mikefarah's), and is what the `gate` job of `.github/workflows/ci.yml` runs.
+`tests/run` runs `relay-events` (with its Renderer descriptions), `mark-seen` and `request` (and the answers the `being-observed` skill describes) against a stub `toon` and `curl`, and the launcher's `spaceturtle start`, `mainnet`, `waiting`, `approve`, `refuse` and `status` against a stub `sbx`, in a temporary home, holds the agent definition to the safety rules of ADR 0003 through `tests/check-agent`, holds the zone images' files to their pins through `tests/check-images`, and runs the `release/` scripts against a stub `docker-agent`. It needs bash, `jq` and `yq` (mikefarah's), and is what the `gate` job of `.github/workflows/ci.yml` runs.
 
 ## Demo data
 
@@ -25,10 +25,16 @@ without an agent node.
 | `relay-events` | Prints the agent's activity, the relay's other events, each event with its resolved parts (label, title, summary, body, links, ref) and what it refers to and what refers to it, the events a thread needs beyond the limit, profiles, the Persona (the agent identity's newest profile with a name, or `null`), follow lists, node addresses, the node's state, the Requests and the agent's private messages (grouped into conversations, or why they cannot be read) as one JSON document, with its `attention` state (`none`, `news`, `urgent`) |
 | `skills/being-observed/SKILL.md` | The agent's skill: the public key file, the Persona (creating, reading and living by it, renaming the relay), reading the Requests, answering them, writing a Renderer for a kind |
 | `request` | Writes a Request into the queue, or withdraws a waiting one |
-| `spaceturtle` | The launcher: `spaceturtle start` brings up the connector's zone on devnet, doing only the steps not yet done, with its step markers in `~/.local/state/spaceturtle/launcher`; `spaceturtle mainnet` moves it to mainnet once confirmed |
-| `agent/spaceturtle.yaml` | The agent's definition for `docker-agent`: its instruction, its file tool and the skills it loads |
-| `tests/check-agent` | Checks an agent definition against the rules that keep the agent away from the money (ADR 0003) |
-| `tests/run` | The tests of `relay-events`, `mark-seen`, `request`, the launcher, the `being-observed` skill's answers and `tests/check-agent` |
+| `spaceturtle` | The launcher: `spaceturtle start` brings up the connector's zone on devnet, doing only the steps not yet done, with its step markers in `~/.local/state/spaceturtle/launcher`; `spaceturtle mainnet` moves it to mainnet once confirmed; `session`, `timer`, `set` and `key` start the agent's sessions, by hand and on a timer, and keep its settings in `~/.config/spaceturtle/launcher.conf`; `waiting`, `approve` and `refuse` list, approve and refuse the apps the agent node holds until the Observer approves them; `status` shows the timer and the last unattended session, and says whether the supervisor runs and how many apps wait |
+| `agent/spaceturtle.yaml` | The agent's definition for `docker-agent`: its instruction, its file tool and the skills it loads. A release publishes it as it is |
+| `images/agent/Dockerfile`, `images/connector/Dockerfile`, `images/connector/connector-start` | The agent's zone image (`docker-agent`'s sandbox image plus `toon`, no wallet or key) and the connector's zone image (`toon`, the container engine, gVisor's `runsc`, the overlay client's proxy line), and the connector's entrypoint, which starts the engine and the supervisor without `systemd --user` |
+| `images/versions.env`, `images/versions` | Every pin the two images add, with its checksum, and the `docker-agent` program a release publishes with; the command that prints the images' versions for release notes |
+| `.github/workflows/images.yml` | Builds both images on every change to `images/`. It does not publish |
+| `release/references`, `release/publish-definition`, `release/notes` | What a release publishes, under which names; the definition pushed to both registries and read back, byte for byte; the release's notes |
+| `.github/workflows/release.yml` | A tag `vX.Y.Z` runs the gate, then publishes the definition and both images. See [Releasing](releasing.md) |
+| `tests/check-images` | Checks that no Dockerfile carries a version of its own, that `toon` and gVisor are pinned and verified, that the agent's image names no passphrase, wallet or key, and that `images/versions` prints each pin |
+| `tests/check-agent` | Checks an agent definition against the rules that keep the agent away from the money and from approving its own apps (ADR 0003), and that `docker-agent` will publish it as written |
+| `tests/run` | The tests of `relay-events`, `mark-seen`, `request`, the launcher, the `being-observed` skill's answers, `tests/check-agent`, `tests/check-images` and the `release/` scripts (against a stub `docker-agent`) |
 
 Saving a file in an installed copy reloads the plugin. If a change does not show, run `omarchy restart shell`.
 

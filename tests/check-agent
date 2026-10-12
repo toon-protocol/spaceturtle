@@ -1,6 +1,7 @@
 #!/bin/bash
 # Checks an agent definition for docker-agent against the rules that keep the agent away
-# from the money (ADR 0003). Needs bash, jq and yq (mikefarah's).
+# from the money (ADR 0003), and the one that keeps the published file the checked one.
+# Needs bash, jq and yq (mikefarah's).
 # Usage: tests/check-agent [definition.yaml]   (default: agent/spaceturtle.yaml)
 # Prints one line per broken rule, "FAIL <rule>: <agent>[/<tool>]: <why>", and exits 1.
 set -uo pipefail
@@ -29,7 +30,7 @@ unquoted_vars() {
   done
 }
 
-forbidden='(^|[^[:alnum:]_.-])["'"'"']?toon["'"'"']?([[:space:]]+-[^[:space:]]+)*[[:space:]]+(limit[[:space:]]+set|wallet|channel[[:space:]]+withdraw|channel[[:space:]]+open|create|init)([^[:alnum:]_-]|$)'
+forbidden='(^|[^[:alnum:]_.-])["'"'"']?toon["'"'"']?([[:space:]]+-[^[:space:]]+)*[[:space:]]+(limit[[:space:]]+set|wallet|channel[[:space:]]+withdraw|channel[[:space:]]+open|create|init|approve|refuse)([^[:alnum:]_-]|$)'
 
 while IFS= read -r agent; do
   jqa() { jq -r --arg a "$agent" --arg n "${2-}" ".agents[\$a] | $1" <<<"$json"; }
@@ -77,5 +78,14 @@ while IFS= read -r agent; do
 done < <(jq -r '.agents // {} | keys[]' <<<"$json")
 
 [[ $(jq '.agents // {} | length' <<<"$json") -gt 0 ]] || fail agent "no agent is defined"
+
+# docker-agent publishes the file as written only when it names its version and no agent
+# has an instruction_file; otherwise it publishes its own rewriting of the definition,
+# which is not the file these rules were checked on.
+[[ $(jq '.version | type == "string" and . != ""' <<<"$json") == true ]] ||
+  fail published-as-written "the definition: no version as a string (version: \"16\"), so docker-agent would publish a rewritten file"
+while IFS= read -r agent; do
+  fail published-as-written "$agent: instruction_file is inlined when published, so docker-agent would publish a rewritten file"
+done < <(jq -r '.agents // {} | to_entries[] | select(.value.instruction_file | . != null and . != "" and . != []) | .key' <<<"$json")
 [[ $fails -eq 0 ]] && echo "ok   agent definition: every rule holds"
 [[ $fails -eq 0 ]]

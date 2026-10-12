@@ -1,0 +1,48 @@
+#!/bin/bash
+# Checks the two zone images' files, which CI builds (.github/workflows/images.yml) but the
+# gate cannot: every build argument is named in images/versions.env and has no default in a
+# Dockerfile, toon is pinned and its checksum verified in both, the agent's zone image
+# carries no passphrase, wallet or key, and images/versions prints each pin.
+# Prints one "problem: ..." line per failure; exits 1 if there is any. Usage: tests/check-images [root]
+set -uo pipefail
+root=${1:-$(cd "$(dirname "$0")/.." && pwd)}
+cd "$root/images" || exit 1
+bad=0
+problem() { echo "problem: $*"; bad=1; }
+
+# shellcheck source=/dev/null
+. ./versions.env
+declare -A named
+while IFS== read -r k _; do [[ $k =~ ^[A-Z0-9_]+$ ]] && named[$k]=1; done < versions.env
+
+for df in agent/Dockerfile connector/Dockerfile; do
+  while read -r arg; do
+    name=${arg%%=*}
+    [[ $name == TARGETARCH ]] && continue
+    [[ -n ${named[$name]:-} ]] || problem "$df: ARG $name is not in versions.env"
+    [[ $arg == *=* ]] && problem "$df: ARG $name has a default; the version lives in versions.env"
+  done < <(sed -n 's/^ARG \([A-Za-z0-9_=.:-]*\).*/\1/p' "$df")
+  grep -q 'sha256sum -c' "$df" || problem "$df: toon's checksum is not verified"
+  grep -q 'TOON_VERSION' "$df" || problem "$df: toon is not pinned"
+  grep -q -E '^FROM .*@\$\{[A-Z_]+DIGEST\}' "$df" || problem "$df: the base is not pinned by digest"
+  grep -q -E ':latest|\blatest/' "$df" && problem "$df: names latest"
+done
+grep -q 'sha512sum -c' connector/Dockerfile || problem "connector/Dockerfile: gVisor's checksum is not verified"
+
+# A version or a checksum that is not what it should look like.
+[[ $TOON_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || problem "TOON_VERSION is not a release"
+for v in TOON_SHA256_AMD64 TOON_SHA256_ARM64 DOCKER_AGENT_SHA256_AMD64; do [[ ${!v} =~ ^[0-9a-f]{64}$ ]] || problem "$v is not a sha256"; done
+for v in GVISOR_SHA512_AMD64 GVISOR_SHA512_ARM64; do [[ ${!v} =~ ^[0-9a-f]{128}$ ]] || problem "$v is not a sha512"; done
+for v in DOCKER_AGENT_BASE_DIGEST CONNECTOR_BASE_DIGEST; do [[ ${!v} =~ ^sha256:[0-9a-f]{64}$ ]] || problem "$v is not a digest"; done
+
+# The agent's zone holds no wallet, passphrase or key.
+if grep -n -i -E 'passphrase|mnemonic|secret|agent_key|toon (init|wallet)|\.toon|config/toon|^(ENV|COPY|ADD|VOLUME)\b.*(key|wallet)' agent/Dockerfile | grep -v '^[0-9]*:#' | grep .; then
+  problem "agent/Dockerfile: mentions a passphrase, wallet or key"
+fi
+
+# One command prints every version.
+out=$(./versions 2>&1) || problem "versions failed"
+for v in "$TOON_VERSION" "$DOCKER_AGENT_VERSION" "$GVISOR_VERSION" "$DOCKER_AGENT_BASE_DIGEST" "$CONNECTOR_BASE_DIGEST"; do
+  grep -qF -- "$v" <<<"$out" || problem "versions does not print $v"
+done
+exit $bad
