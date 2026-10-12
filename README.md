@@ -70,6 +70,13 @@ KVM and a signed-in `sbx`, and says what is missing and how to fix it before it 
 anything. The wallet's storage is `~/.local/share/spaceturtle/wallet` (`SPACETURTLE_DATA_DIR`),
 mounted into the zone and outside its image.
 
+`spaceturtle mainnet [--keep-limit]` moves a devnet Install to mainnet. It says that real
+funds are now at stake, that there is no faucet, and which wallet addresses to fund, then
+asks you to type `mainnet`; anything else changes nothing. It lowers the spending limit to
+the mainnet default unless you pass `--keep-limit`. On an Install already on mainnet it says
+so and changes nothing. It runs `toon status --json`, `toon wallet addresses`,
+`toon network set mainnet` and `toon limit set --network-default` in the zone.
+
 ## Install
 
 You need Omarchy 4.0.4, a running agent node (`toon up`), and `jq`, `curl` and
