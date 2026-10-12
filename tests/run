@@ -842,5 +842,74 @@ done
 agent_check "a script running toon limit show" "$(with_cmd 'toon limit show')" ""
 agent_check "a script whose toon subcommand is an argument" "$(with_cmd 'toon \"$who\"')" "forbidden-command: spaceturtle/probe"
 
+
+# --- the launcher: spaceturtle start, against a stub sbx in a temporary home ---
+launcher_env() {
+  new_env
+  export SPACETURTLE_SBX=$tmp/bin/sbx SPACETURTLE_KVM=$tmp/kvm SPACETURTLE_TOON_BIN=$tmp/bin/toon
+  export SPACETURTLE_ZONE=zone-x SPACETURTLE_DATA_DIR=$tmp/wallet SPACETURTLE_BACKUP_DIR=$tmp/backup
+  : > "$SPACETURTLE_KVM"; : > "$SPACETURTLE_TOON_BIN"
+  # An sbx that records its calls. `ls` lists the zones in $STUB_DIR/zones and fails
+  # when $STUB_DIR/signed-out exists; a call whose arguments contain the text in
+  # $STUB_DIR/fail-on fails, and `cp` out of the zone writes a file.
+  cat > "$SPACETURTLE_SBX" <<'STUB'
+#!/bin/bash
+echo "$*" >> "$STUB_DIR/calls"
+[[ $1 == ls ]] && { [[ -e $STUB_DIR/signed-out ]] && exit 1; cat "$STUB_DIR/zones" 2>/dev/null; exit 0; }
+[[ -r $STUB_DIR/fail-on && $* == *"$(cat "$STUB_DIR/fail-on")"* ]] && exit 1
+[[ $* == *pgrep* ]] && { [[ -e $STUB_DIR/up ]]; exit; }
+[[ $* == *"toon up"* ]] && : > "$STUB_DIR/up"
+[[ $1 == create ]] && echo "zone-x running" > "$STUB_DIR/zones"
+[[ $1 == cp && $2 == zone-x:* ]] && echo sealed > "$3"
+exit 0
+STUB
+  chmod +x "$SPACETURTLE_SBX"
+}
+launcher() { "$root/spaceturtle" start > "$tmp/out" 2>&1; }
+check() { # name, condition result (0 = pass)
+  count=$((count + 1))
+  if [[ $2 -eq 0 ]]; then echo "ok   launcher: $1"; else echo "FAIL launcher: $1"; sed 's/^/     /' "$tmp/out" 2>/dev/null; fails=$((fails + 1)); fi
+}
+line_no() { grep -n -m1 -- "$1" "$STUB_DIR/calls" | cut -d: -f1; }
+
+launcher_env; launcher; rc=$?
+check "a first run succeeds" $rc
+a=$(line_no '^create '); b=$(line_no 'toon init'); c=$(line_no 'toon wallet fund'); d=$(line_no 'toon up'); e=$(line_no 'toon wallet backup')
+[[ -n $a && -n $b && -n $c && -n $d && -n $e && $a -lt $b && $b -lt $c && $c -lt $d && $d -lt $e ]]
+check "a first run issues zone, node, faucet, supervisor, backup in order" $?
+grep -q 'toon init --accept-anyone-terms --network devnet' "$STUB_DIR/calls"; check "the node is initialised on devnet" $?
+grep -q -- "^policy allow network --sandbox zone-x .*\*\*" "$STUB_DIR/calls" && ! grep -E '^policy allow' "$STUB_DIR/calls" | grep -qv -- '--sandbox zone-x'
+check "the any-address rule names the zone and is never machine-wide" $?
+[[ -s $SPACETURTLE_BACKUP_DIR/wallet-backup ]] && grep -q "$SPACETURTLE_BACKUP_DIR/wallet-backup" "$tmp/out" && grep -qi keep "$tmp/out"
+check "the backup is written where the Observer is told, with a word to keep it" $?
+! grep -rq -i passphrase "$tmp/out" "$SPACETURTLE_STATE_DIR" "$SPACETURTLE_BACKUP_DIR" "$SPACETURTLE_DATA_DIR" 2>/dev/null \
+  && ! grep -E 'cat .*passphrase|echo .*passphrase' "$STUB_DIR/calls" | grep -q .
+check "the passphrase is not printed or written outside the zone" $?
+# The supervisor is running now; a second run changes nothing.
+: > "$STUB_DIR/calls"
+launcher; rc=$?
+check "a second run succeeds" $rc
+! grep -E '^create |^cp [^z]|toon init|toon wallet fund|toon wallet backup|^policy' "$STUB_DIR/calls" | grep -q .
+check "a second run issues nothing that creates, initialises or funds" $?
+
+for step in "toon wallet fund" "toon up" "toon wallet backup" "toon init"; do
+  launcher_env; echo "$step" > "$STUB_DIR/fail-on"; launcher; rc=$?
+  [[ $rc -ne 0 ]]; check "a run failing at '$step' stops" $?
+  rm "$STUB_DIR/fail-on"; : > "$STUB_DIR/calls"; launcher; rc=$?
+  check "a run after one that failed at '$step' succeeds" $rc
+  [[ -s $SPACETURTLE_BACKUP_DIR/wallet-backup ]]; check "  and finishes the backup" $?
+  ! grep -E '^create ' "$STUB_DIR/calls" | grep -q .; check "  without creating the zone again" $?
+done
+launcher_env; echo "zone-x" > "$STUB_DIR/fail-on"; launcher
+rm "$STUB_DIR/fail-on"; echo "zone-x running" > "$STUB_DIR/zones"; : > "$STUB_DIR/calls"; launcher
+! grep -E '^create ' "$STUB_DIR/calls" | grep -q .; check "a zone that exists is not created again" $?
+
+launcher_env; rm "$SPACETURTLE_KVM"; launcher; rc=$?
+[[ $rc -ne 0 ]] && grep -qi kvm "$tmp/out" && grep -qi firmware "$tmp/out" && [[ ! -e $STUB_DIR/calls ]]; check "with no KVM it stops before doing anything, with cause and remedy" $?
+launcher_env; touch "$STUB_DIR/signed-out"; launcher; rc=$?
+[[ $rc -ne 0 ]] && grep -q 'sbx login' "$tmp/out" && ! grep -qE '^(create|policy|exec|cp)' "$STUB_DIR/calls"; check "signed out, it stops before doing anything, with cause and remedy" $?
+launcher_env; SPACETURTLE_SBX=$tmp/bin/missing launcher; rc=$?
+[[ $rc -ne 0 ]] && grep -qi 'not installed' "$tmp/out" && grep -q 'github.com/docker/sbx-releases' "$tmp/out"; check "with sbx missing it stops before doing anything, with cause and remedy" $?
+
 echo; echo "$count checks, $fails failed"
 [[ $fails -eq 0 ]]
