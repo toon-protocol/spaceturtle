@@ -22,6 +22,9 @@
 //
 // The file is read from the BASE branch (see `loadGate`), not the branch under test, so
 // an agent cannot edit its own gate.
+//
+// A red gate is handed back to an agent for a fix. How one fix attempt is run and when
+// it ends is here too (`runGateFix`, `gateFixRun`, `fixPrompt`).
 
 import { parse } from 'yaml';
 
@@ -181,21 +184,33 @@ export async function runGate(sandbox: Sandbox, steps: readonly GateStep[]): Pro
 }
 
 /**
- * What a gate-fix session prints to say it is finished: the first when the failing
- * command passes (fixed, or already green), the second when it cannot fix it. Either
+ * What a gate-fix session prints to say it is finished: `complete` when the failing
+ * command passes (fixed, or already green), `blocked` when it cannot fix it. Either
  * one ends the fix attempt. `sandbox.run` has no completion signal unless it is given
  * one, and without one a session runs every iteration it is allowed (#70).
  */
-export const GATE_FIX_SIGNALS = [
-  '<promise>COMPLETE</promise>',
-  '<promise>BLOCKED</promise>',
-] as const;
+export const GATE_FIX_SIGNALS = {
+  complete: '<promise>COMPLETE</promise>',
+  blocked: '<promise>BLOCKED</promise>',
+} as const;
 
 /**
  * How many sessions one fix attempt may take. More than one only because a session
  * can end early with its context full; the caller's loop already bounds the attempts.
  */
 export const MAX_GATE_FIX_SESSIONS = 3;
+
+/**
+ * What `sandbox.run` is given for session `n` of fix attempt `attempt`, except the agent.
+ * One iteration, so `runGateFix` pushes between sessions and decides whether another
+ * follows; the engine's own loop would do neither.
+ */
+export const gateFixRun = (attempt: number, n: number, prompt: string) => ({
+  name: `gate-fix-${attempt}.${n}`,
+  completionSignal: Object.values(GATE_FIX_SIGNALS),
+  maxIterations: 1,
+  prompt,
+});
 
 export interface GateFix {
   /** Run fix session `n` (from 1) to its end, and return the signal it printed, if any. */
@@ -207,8 +222,9 @@ export interface GateFix {
 
 /**
  * One fix attempt: sessions until one signals that it is finished, or `maxSessions`
- * have run. The branch is pushed after every session, so a fix that is committed
- * survives a run that is killed later. Returns how many sessions ran.
+ * have run. The branch is pushed after every session, also one that throws, so a fix
+ * that is committed survives a run that fails or is killed later. Returns how many
+ * sessions ran.
  *
  * Whether the fix worked is not decided here. The caller runs the gate again.
  */
@@ -218,8 +234,12 @@ export async function runGateFix({
   maxSessions = MAX_GATE_FIX_SESSIONS,
 }: GateFix): Promise<number> {
   for (let n = 1; n <= maxSessions; n++) {
-    const { completionSignal } = await session(n);
-    await push(n);
+    let completionSignal: string | undefined;
+    try {
+      ({ completionSignal } = await session(n));
+    } finally {
+      await push(n);
+    }
     if (completionSignal !== undefined) return n;
   }
   return maxSessions;
@@ -227,7 +247,7 @@ export async function runGateFix({
 
 /** The prompt handed to a fix session. Concrete failure, no room to reinterpret the task. */
 export function fixPrompt(failure: GateFailure, attempt: number, maxAttempts: number): string {
-  const [complete, blocked] = GATE_FIX_SIGNALS;
+  const { complete, blocked } = GATE_FIX_SIGNALS;
   return [
     `The repository gate is RED. This is fix attempt ${attempt} of ${maxAttempts}.`,
     '',
