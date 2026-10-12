@@ -66,7 +66,8 @@ virtual machine made from the connector's zone image
 which holds the pinned `toon`; nothing is copied into it from your machine. It has an any-address rule scoped to that zone alone, the agent node
 initialised inside it, the wallet funded from the faucet, the supervisor started (the image's `connector-start`, which also starts the container engine for the apps), and a
 sealed backup of the wallet written to `~/spaceturtle-backup` (`SPACETURTLE_BACKUP_DIR`).
-Keep that backup. The passphrase is made inside the zone and never leaves it. A second run
+Keep that backup. The passphrase is made inside the zone; it is never printed and never written to your
+machine's disk, and `upgrade` carries it in memory to the new zone. A second run
 creates, initialises and funds nothing, and an interrupted run finishes the rest. It needs
 KVM and a signed-in `sbx`, and says what is missing and how to fix it before it does
 anything. The wallet's storage is `~/.local/share/spaceturtle/wallet` (`SPACETURTLE_DATA_DIR`),
@@ -95,7 +96,30 @@ and says so.
   unless you turned it off.
 - `spaceturtle set ceiling <dollars>` sets the ceiling on model cost of one unattended
   session (default 1).
-- `spaceturtle status` shows the timer, its interval and the last unattended session's time.
+- `spaceturtle status` shows the timer, its interval and the last unattended session's time,
+  and for each of the connector's zone (`running`, `stopped` or `not created`), the agent's
+  zone (`in a session` or `idle`) and every app the node has, whether it runs; then the
+  node's network and whether its relay answers from inside the connector's zone. While the
+  connector's zone is stopped or not created it says those cannot be read, and still exits 0.
+- `spaceturtle stop` stops the timer's unit (its on/off setting stays), a session in the
+  agent's zone and then the connector's zone, and loses nothing; `start` brings it back
+  without creating, initialising or funding anything. With no zone it says there is nothing
+  to stop.
+- `spaceturtle upgrade` replaces the connector's zone with one from the newest connector's
+  zone image and leaves the wallet's storage as it was. It makes a fresh backup first and
+  stops, changing nothing, if that fails or if the passphrase cannot be read out of the old
+  zone. The passphrase goes from the old zone to the new one through the standard input and
+  output of `sbx exec`, in the launcher's memory only. `toon init` and the faucet do not run
+  again. The agent's zone is removed too, so the next `session` uses the newest agent's zone
+  image.
+- `spaceturtle backup` writes a fresh sealed backup to `~/spaceturtle-backup` and says where;
+  the backup already there is replaced only once the new one has arrived whole. It needs the
+  connector's zone running.
+- `spaceturtle remove [--delete-wallet]` offers a fresh backup (the passphrase goes with the
+  zone), then removes both zones, the timer's units, the step markers, the settings and the
+  model key. It keeps the wallet's storage and the backup directory and says where they are.
+  `--delete-wallet` also deletes the wallet's storage, and only after you type `delete`;
+  anything else, or no input, changes nothing. Nothing ever deletes the backup directory.
 
 The agent may ask to add an app whose image is not TOON's own, and the agent node holds it
 until you approve it. Four more commands, which run `toon` with the home in the zone and
