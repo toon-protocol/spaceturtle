@@ -850,6 +850,9 @@ launcher_env() {
   export SPACETURTLE_SBX=$tmp/bin/sbx SPACETURTLE_KVM=$tmp/kvm SPACETURTLE_TOON_BIN=$tmp/bin/toon
   export SPACETURTLE_ZONE=zone-x SPACETURTLE_DATA_DIR=$tmp/wallet SPACETURTLE_BACKUP_DIR=$tmp/backup
   : > "$SPACETURTLE_KVM"; : > "$SPACETURTLE_TOON_BIN"
+  export SPACETURTLE_SYSTEMCTL=$tmp/bin/systemctl SPACETURTLE_UNIT_DIR=$tmp/units SPACETURTLE_MODEL_KEY_FILE=$tmp/model-key
+  export SPACETURTLE_AGENT_ZONE=agent-x SPACETURTLE_CONNECTOR_PORT=7123
+  printf '#!/bin/bash\necho "$*" >> "$STUB_DIR/systemctl-calls"\n' > "$SPACETURTLE_SYSTEMCTL"; chmod +x "$SPACETURTLE_SYSTEMCTL"
   # An sbx that records its calls. `ls` lists the zones in $STUB_DIR/zones and fails
   # when $STUB_DIR/signed-out exists; a call whose arguments contain the text in
   # $STUB_DIR/fail-on fails, and `cp` out of the zone writes a file.
@@ -922,6 +925,47 @@ launcher_env; touch "$STUB_DIR/signed-out"; run_launcher; rc=$?
 launcher_env; SPACETURTLE_SBX=$tmp/bin/missing run_launcher; rc=$?
 [[ $rc -ne 0 ]] && grep -qi 'not installed' "$tmp/out" && grep -q 'github.com/docker/sbx-releases' "$tmp/out" \
   && [[ ! -e $SPACETURTLE_STATE_DIR/launcher && ! -e $SPACETURTLE_DATA_DIR && ! -e $SPACETURTLE_BACKUP_DIR ]]; launcher_check "with sbx missing it stops before doing anything, with cause and remedy" $?
+
+# --- sessions and the timer ---
+# A launcher whose connector's zone is running, with a model key.
+session_env() {
+  launcher_env; run_launcher
+  echo secret-key-123 > "$SPACETURTLE_MODEL_KEY_FILE"; : > "$STUB_DIR/calls"
+}
+run_cmd() { "$root/spaceturtle" "$@" > "$tmp/out" 2>&1; }
+session_env; run_cmd session; rc=$?
+run=$(grep '^run ' "$STUB_DIR/calls")
+[[ $rc -eq 0 && $run == *"--image ghcr.io/toon-protocol/spaceturtle-agent:latest"* && $run == *"agent/spaceturtle.yaml"* ]]; launcher_check "a session passes the zone image and the definition" $?
+[[ $(grep -o -- '--allow-host [^ ]*' <<<"$run" | tr '\n' ' ') == "--allow-host api.anthropic.com --allow-host localhost:7123 " ]]; launcher_check "the allow-list is exactly the provider and one loopback port" $?
+! grep -q secret-key-123 "$STUB_DIR/calls"; launcher_check "the model key is not an argument" $?
+[[ $run != *--max-cost* ]]; launcher_check "a session by hand has no unattended ceiling" $?
+run_cmd set model openai/gpt-x; : > "$STUB_DIR/calls"; run_cmd session
+[[ $(grep -o -- '--allow-host [^ ]*' "$STUB_DIR/calls" | head -1) == "--allow-host api.openai.com" && $(grep '^run ' "$STUB_DIR/calls") == *"--model openai/gpt-x"* ]]; launcher_check "one setting changes the model, and the provider follows" $?
+: > "$STUB_DIR/calls"; run_cmd session --unattended; rc=$?
+grep '^run ' "$STUB_DIR/calls" | grep -q -- '--max-cost 1 '; launcher_check "an unattended session has a cost ceiling by default" $?
+run_cmd set ceiling 0.25; : > "$STUB_DIR/calls"; run_cmd session --unattended
+grep '^run ' "$STUB_DIR/calls" | grep -q -- '--max-cost 0.25 '; launcher_check "the ceiling can be changed" $?
+run_cmd set ceiling 0; [[ $? -ne 0 ]]; launcher_check "a ceiling of zero is refused" $?
+run_cmd status; grep -q '^last unattended session: 20' "$tmp/out"; launcher_check "status shows the last unattended session's time" $?
+session_env; rm "$SPACETURTLE_MODEL_KEY_FILE"; run_cmd session; rc=$?
+[[ $rc -ne 0 ]] && grep -q 'no model key' "$tmp/out" && grep -q "$SPACETURTLE_MODEL_KEY_FILE" "$tmp/out" && ! grep -q '^run ' "$STUB_DIR/calls"; launcher_check "with no model key it stops and says how to supply one" $?
+session_env; : > "$STUB_DIR/calls"; rm "$STUB_DIR/up"; run_cmd session; rc=$?
+[[ $rc -ne 0 ]] && grep -q "connector's zone" "$tmp/out" && ! grep -q '^run ' "$STUB_DIR/calls"; launcher_check "with the supervisor not running no session starts, and it says so" $?
+session_env; rm "$STUB_DIR/zones"; : > "$STUB_DIR/calls"; run_cmd session; rc=$?
+[[ $rc -ne 0 ]] && grep -q "connector's zone" "$tmp/out" && ! grep -q '^run ' "$STUB_DIR/calls"; launcher_check "with no connector zone no session starts, and it says so" $?
+session_env; echo "zone-x stopped" > "$STUB_DIR/zones"; run_cmd session; rc=$?
+[[ $rc -ne 0 ]] && ! grep -q '^run ' "$STUB_DIR/calls"; launcher_check "with the connector's zone stopped no session starts" $?
+
+launcher_env; run_launcher
+grep -q 'enable --now spaceturtle.timer' "$STUB_DIR/systemctl-calls" && grep -q 'OnUnitActiveSec=6h' "$SPACETURTLE_UNIT_DIR/spaceturtle.timer"   && grep -q 'session --unattended' "$SPACETURTLE_UNIT_DIR/spaceturtle.service"; launcher_check "start turns the timer on at a conservative interval" $?
+run_cmd status; grep -q '^timer: on, every 6h' "$tmp/out" && grep -q '^last unattended session: never' "$tmp/out"; launcher_check "status shows the timer on and no session yet" $?
+run_cmd timer interval 2h; grep -q 'OnUnitActiveSec=2h' "$SPACETURTLE_UNIT_DIR/spaceturtle.timer"; launcher_check "the interval can be set" $?
+run_cmd timer interval soon; [[ $? -ne 0 ]]; launcher_check "a bad interval is refused" $?
+run_cmd timer off; grep -q 'disable --now spaceturtle.timer' "$STUB_DIR/systemctl-calls"; launcher_check "the timer can be turned off" $?
+run_cmd status; grep -q '^timer: off, every 2h' "$tmp/out"; launcher_check "status shows it off" $?
+: > "$STUB_DIR/systemctl-calls"; run_launcher; ! grep -q enable "$STUB_DIR/systemctl-calls"; launcher_check "start does not turn a timer off by the Observer back on" $?
+run_cmd timer interval 3h; ! grep -q enable "$STUB_DIR/systemctl-calls"; launcher_check "an interval set while it is off leaves it off" $?
+run_cmd timer on; grep -q 'enable --now' "$STUB_DIR/systemctl-calls" && grep -q 'OnUnitActiveSec=3h' "$SPACETURTLE_UNIT_DIR/spaceturtle.timer"; launcher_check "the timer can be turned on again" $?
 
 echo; echo "$count checks, $fails failed"
 [[ $fails -eq 0 ]]

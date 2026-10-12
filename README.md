@@ -70,6 +70,24 @@ KVM and a signed-in `sbx`, and says what is missing and how to fix it before it 
 anything. The wallet's storage is `~/.local/share/spaceturtle/wallet` (`SPACETURTLE_DATA_DIR`),
 mounted into the zone and outside its image.
 
+`spaceturtle session` starts a `docker-agent` session in the agent's zone, from the agent's
+zone image (`SPACETURTLE_AGENT_IMAGE`) and `agent/spaceturtle.yaml`. The zone may reach the
+model provider and one loopback port, the one that leads to the connector's zone
+(`SPACETURTLE_CONNECTOR_PORT`), and nothing else. No session starts while the connector's
+zone is not running. The model key is yours: put it in
+`~/.config/spaceturtle-launcher/model-key` (`SPACETURTLE_MODEL_KEY_FILE`) or run
+`spaceturtle key`. It is given to the session as an environment variable, never as an
+argument, and sits outside every directory the agent may read. Without it the launcher stops
+and says so.
+
+- `spaceturtle set model <provider/model>` changes the model.
+- `spaceturtle timer on|off|interval <N>m|h|d` controls the timer, which starts a session
+  with nobody present (`spaceturtle session --unattended`). `start` turns it on, every 6h,
+  unless you turned it off.
+- `spaceturtle set ceiling <dollars>` sets the ceiling on model cost of one unattended
+  session (default 1).
+- `spaceturtle status` shows the timer, its interval and the last unattended session's time.
+
 ## Install
 
 You need Omarchy 4.0.4, a running agent node (`toon up`), and `jq`, `curl` and
