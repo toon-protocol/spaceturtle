@@ -61,8 +61,10 @@ plugin that shows it to you, in a panel that follows your theme.
 ## The launcher
 
 `spaceturtle start` brings up the connector's zone on devnet: a detached Docker Sandboxes
-virtual machine, with an any-address rule scoped to that zone alone, the agent node
-initialised inside it, the wallet funded from the faucet, the supervisor started, and a
+virtual machine made from the connector's zone image
+(`ghcr.io/toon-protocol/spaceturtle-connector-zone:latest`, or `SPACETURTLE_CONNECTOR_IMAGE`),
+which holds the pinned `toon`; nothing is copied into it from your machine. It has an any-address rule scoped to that zone alone, the agent node
+initialised inside it, the wallet funded from the faucet, the supervisor started (the image's `connector-start`, which also starts the container engine for the apps), and a
 sealed backup of the wallet written to `~/spaceturtle-backup` (`SPACETURTLE_BACKUP_DIR`).
 Keep that backup. The passphrase is made inside the zone and never leaves it. A second run
 creates, initialises and funds nothing, and an interrupted run finishes the rest. It needs
