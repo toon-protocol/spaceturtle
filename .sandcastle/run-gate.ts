@@ -180,8 +180,54 @@ export async function runGate(sandbox: Sandbox, steps: readonly GateStep[]): Pro
   return { passed: true, ran, failure: null };
 }
 
-/** The prompt handed to a fix iteration. Concrete failure, no room to reinterpret the task. */
+/**
+ * What a gate-fix session prints to say it is finished: the first when the failing
+ * command passes (fixed, or already green), the second when it cannot fix it. Either
+ * one ends the fix attempt. `sandbox.run` has no completion signal unless it is given
+ * one, and without one a session runs every iteration it is allowed (#70).
+ */
+export const GATE_FIX_SIGNALS = [
+  '<promise>COMPLETE</promise>',
+  '<promise>BLOCKED</promise>',
+] as const;
+
+/**
+ * How many sessions one fix attempt may take. More than one only because a session
+ * can end early with its context full; the caller's loop already bounds the attempts.
+ */
+export const MAX_GATE_FIX_SESSIONS = 3;
+
+export interface GateFix {
+  /** Run fix session `n` (from 1) to its end, and return the signal it printed, if any. */
+  readonly session: (n: number) => Promise<{ readonly completionSignal?: string }>;
+  /** Publish the branch after session `n`. */
+  readonly push: (n: number) => Promise<unknown>;
+  readonly maxSessions?: number;
+}
+
+/**
+ * One fix attempt: sessions until one signals that it is finished, or `maxSessions`
+ * have run. The branch is pushed after every session, so a fix that is committed
+ * survives a run that is killed later. Returns how many sessions ran.
+ *
+ * Whether the fix worked is not decided here. The caller runs the gate again.
+ */
+export async function runGateFix({
+  session,
+  push,
+  maxSessions = MAX_GATE_FIX_SESSIONS,
+}: GateFix): Promise<number> {
+  for (let n = 1; n <= maxSessions; n++) {
+    const { completionSignal } = await session(n);
+    await push(n);
+    if (completionSignal !== undefined) return n;
+  }
+  return maxSessions;
+}
+
+/** The prompt handed to a fix session. Concrete failure, no room to reinterpret the task. */
 export function fixPrompt(failure: GateFailure, attempt: number, maxAttempts: number): string {
+  const [complete, blocked] = GATE_FIX_SIGNALS;
   return [
     `The repository gate is RED. This is fix attempt ${attempt} of ${maxAttempts}.`,
     '',
@@ -200,6 +246,12 @@ export function fixPrompt(failure: GateFailure, attempt: number, maxAttempts: nu
     '  loosen a lint to make this pass — if the test is genuinely wrong, say so',
     '  explicitly in the commit message and explain why.',
     '- Change only what this failure requires. Do not refactor beyond it.',
-    '- If you cannot fix it, commit nothing and explain what is blocking you.',
+    '- Do not push. The runner pushes and runs the gate again once you finish.',
+    '',
+    `When the command passes and your fix is committed, output ${complete}.`,
+    'If the command already passes on this checkout, an earlier session has fixed it:',
+    `change nothing, commit nothing, and output ${complete}.`,
+    `If you cannot fix it, commit nothing, explain what is blocking you and output ${blocked}.`,
+    'The runner starts another session on the same failure unless you output one of the two.',
   ].join('\n');
 }
