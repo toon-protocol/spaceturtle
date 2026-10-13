@@ -6,7 +6,7 @@
 # It checks the machine first and changes nothing if something is missing. Then it puts the
 # launcher and the agent definition of one release in ~/.local/share/spaceturtle/launcher,
 # links `spaceturtle` into ~/.local/bin, and puts microsandbox (`msb`), which the zones run
-# in, in ~/.local/share/spaceturtle/microsandbox: a copy that is spaceturtle's alone, at the
+# in, in ~/.local/share/spaceturtle/msb: a copy that is spaceturtle's alone, at the
 # version the launcher is tested with. The launcher it installs pulls the zone images of that
 # same release. It needs no account, asks for none and starts nothing: it ends by saying
 # what to run next.
@@ -24,7 +24,9 @@ repo=toon-protocol/spaceturtle
 dir=${SPACETURTLE_INSTALL_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/spaceturtle/launcher}
 bin=${SPACETURTLE_BIN_DIR:-$HOME/.local/bin}
 kvm=${SPACETURTLE_KVM:-/dev/kvm}
-msb_home=${SPACETURTLE_MSB_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/spaceturtle/microsandbox}
+# As the launcher finds it: microsandbox refuses a home of more than 54 characters.
+msb_home=${SPACETURTLE_MSB_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/spaceturtle/msb}
+(( ${#msb_home} <= 54 )) || [[ -n ${SPACETURTLE_MSB_HOME:-} ]] || msb_home=$HOME/.spaceturtle-msb
 systemctl_=${SPACETURTLE_SYSTEMCTL:-systemctl}
 curl_=${SPACETURTLE_CURL:-curl}
 # microsandbox, pinned: the release the launcher is tested with. The checksum is the one the
@@ -41,6 +43,7 @@ lacking=()
 if [[ ! -e $kvm ]]; then lacking+=("KVM ($kvm): turn on virtualisation in the firmware (VT-x or AMD-V) and load the kvm module")
 elif [[ ! -r $kvm || ! -w $kvm ]]; then lacking+=("the right to use KVM ($kvm): run 'sudo usermod -aG kvm \$USER', then sign out and in again")
 fi
+(( ${#msb_home} <= 54 )) || lacking+=("a shorter home for microsandbox than $msb_home: set SPACETURTLE_MSB_HOME to a directory of 54 characters or fewer")
 # microsandbox is built against the GNU C library.
 getconf GNU_LIBC_VERSION >/dev/null 2>&1 || lacking+=("the GNU C library (glibc 2.28 or newer), which microsandbox needs")
 command -v "$systemctl_" >/dev/null 2>&1 || lacking+=("systemd, for the user units that keep the Install running")

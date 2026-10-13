@@ -1137,6 +1137,11 @@ if [[ $EUID -ne 0 ]]; then
 fi
 launcher_env; touch "$STUB_DIR/broken"; run_launcher; rc=$?
 [[ $rc -ne 0 ]] && grep -q 'doctor' "$tmp/out" && ! grep -qE '^(create|exec|copy|start)' "$STUB_DIR/calls"; launcher_check "with a microsandbox that does not run it stops before doing anything, and says how to learn why" $?
+launcher_env; SPACETURTLE_MSB_HOME=$tmp/$(printf 'h%.0s' {1..60}) run_launcher; rc=$?
+[[ $rc -ne 0 ]] && grep -q '54 characters' "$tmp/out" && [[ ! -e $STUB_DIR/calls ]]; launcher_check "with a home microsandbox would refuse as too long it stops before doing anything, and says the limit" $?
+launcher_env; (unset SPACETURTLE_MSB SPACETURTLE_MSB_HOME; HOME=/home/u XDG_DATA_HOME=/$(printf 'd%.0s' {1..50}) "$root/spaceturtle" status > "$tmp/out" 2>&1)
+grep -q 'not installed at /home/u/.spaceturtle-msb/bin/msb' "$tmp/out"
+launcher_check "a data directory too long for microsandbox gives way to a home for it in the home directory" $?
 launcher_env; SPACETURTLE_MSB=$tmp/bin/missing run_launcher; rc=$?
 [[ $rc -ne 0 ]] && grep -qi 'not installed' "$tmp/out" && grep -q 'install.sh' "$tmp/out" \
   && [[ ! -e $SPACETURTLE_STATE_DIR/launcher && ! -e $SPACETURTLE_DATA_DIR && ! -e $SPACETURTLE_BACKUP_DIR ]]; launcher_check "with microsandbox missing it stops before doing anything, with cause and remedy" $?

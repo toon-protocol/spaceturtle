@@ -35,7 +35,7 @@ nothing if something is missing. Then it:
 - puts the launcher and the agent definition of the latest release in
   `~/.local/share/spaceturtle/launcher`, and links `spaceturtle` into `~/.local/bin`;
 - puts [microsandbox](https://github.com/superradcompany/microsandbox), which the zones run
-  in, in `~/.local/share/spaceturtle/microsandbox`, at the version the launcher is tested
+  in, in `~/.local/share/spaceturtle/msb`, at the version the launcher is tested
   with and checked against its checksum. It is a program and a library in that directory,
   and nothing else of your machine is changed;
 - says what to run next. It starts nothing.

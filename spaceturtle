@@ -122,7 +122,8 @@
 #
 # Environment, so that tests can run against a temporary home:
 #   SPACETURTLE_MSB_HOME    microsandbox's home, which holds the zones and their images and
-#                           is spaceturtle's alone (default: ~/.local/share/spaceturtle/microsandbox)
+#                           is spaceturtle's alone (default: ~/.local/share/spaceturtle/msb, or
+#                           ~/.spaceturtle-msb when that is more than 54 characters long)
 #   SPACETURTLE_MSB         the msb program (default: bin/msb in that home, where install.sh puts it)
 #   SPACETURTLE_PULL        when a zone image is pulled: always, if-missing or never (default:
 #                           if-missing for `start`, always for `upgrade`)
@@ -151,7 +152,10 @@
 #   SPACETURTLE_UNIT_DIR    where the timer's units are written (default: ~/.config/systemd/user)
 set -uo pipefail
 
-msb_home=${SPACETURTLE_MSB_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/spaceturtle/microsandbox}
+# microsandbox keeps a socket for each zone under its home, and a socket's path is short: a
+# home of more than 54 characters is refused, so a long data directory gives way to one in $HOME.
+msb_home=${SPACETURTLE_MSB_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/spaceturtle/msb}
+(( ${#msb_home} <= 54 )) || [[ -n ${SPACETURTLE_MSB_HOME:-} ]] || msb_home=$HOME/.spaceturtle-msb
 msb=${SPACETURTLE_MSB:-$msb_home/bin/msb}
 # The zones and their images are kept apart from any microsandbox the person uses themselves.
 export MSB_HOME=$msb_home
@@ -215,6 +219,7 @@ in_zone() { zexec --no-stdin "$zone" -- sh -c "export TOON_PASSPHRASE_FILE=\$HOM
 preflight() {
   [[ -e $kvm ]] || die "this machine has no KVM ($kvm), and a zone is a virtual machine. Turn on virtualisation in the firmware (VT-x or AMD-V) and load the kvm module, or use a machine that has it."
   [[ -r $kvm && -w $kvm ]] || die "you may not use KVM ($kvm). Run 'sudo usermod -aG kvm \$USER', sign out and in again, then run it again."
+  (( ${#msb_home} <= 54 )) || die "microsandbox's home, $msb_home, is ${#msb_home} characters long, and it keeps sockets there whose paths must be short. Set SPACETURTLE_MSB_HOME to a directory of 54 characters or fewer."
   command -v "$msb" >/dev/null 2>&1 || die "microsandbox is not installed at $msb. Run spaceturtle's install.sh, which puts it there, then run it again."
   "$msb" ls >/dev/null 2>&1 || die "microsandbox does not run on this machine. '$msb doctor' says why."
 }

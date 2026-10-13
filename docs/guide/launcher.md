@@ -5,8 +5,9 @@ and says why, when the machine has no KVM, you may not use it, or microsandbox i
 
 A zone is a virtual machine under [microsandbox](https://github.com/superradcompany/microsandbox)
 (`msb`), which needs KVM and nothing else: no account, no root and no service of its own.
-`install.sh` puts a copy of it in `~/.local/share/spaceturtle/microsandbox`
-(`SPACETURTLE_MSB_HOME`), at the version the launcher is tested with. That directory holds
+`install.sh` puts a copy of it in `~/.local/share/spaceturtle/msb`
+(`SPACETURTLE_MSB_HOME`; `~/.spaceturtle-msb` when that path is more than 54 characters
+long, which microsandbox refuses), at the version the launcher is tested with. That directory holds
 the zones and their images too, and is spaceturtle's alone: a microsandbox you use yourself
 does not see them.
 
@@ -179,7 +180,7 @@ a channel, land vouchers or query a relay with one, so the agent has no tool for
 you do them, in the connector's zone:
 
 ```sh
-MSB_HOME=~/.local/share/spaceturtle/microsandbox ~/.local/share/spaceturtle/microsandbox/bin/msb \
+MSB_HOME=~/.local/share/spaceturtle/msb ~/.local/share/spaceturtle/msb/bin/msb \
   exec -e TOON_PASSPHRASE_FILE=/home/agent/.config/toon-passphrase st-connector -- toon route add ...
 ```
 
