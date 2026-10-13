@@ -40,8 +40,9 @@ spaceturtle status      # the timer, the zones, the apps, and whether the relay 
 ```
 
 [`install.sh`](install.sh) checks the machine, puts the launcher of the latest release in
-`~/.local/share/spaceturtle/launcher` with a link in `~/.local/bin`, and installs Docker
-Sandboxes if the machine has none. It needs no root and starts nothing.
+`~/.local/share/spaceturtle/launcher` with a link in `~/.local/bin`, and puts
+[microsandbox](https://github.com/superradcompany/microsandbox), which the zones run in,
+beside it. It needs no root and no account, and starts nothing.
 [The first run](docs/guide/first-run.md) lists what to have ready.
 
 ## Why it exists

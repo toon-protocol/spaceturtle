@@ -18,6 +18,6 @@ The scope lets the agent do a provider's daily work: send packets, add and remov
 - This cannot ship until the connector gives each write key a scope and a spending limit, and `toon` can be operated from another zone and runs apps hardened. Those are changes to `connector` and `toon_cli`, not to this repository.
 - The spending limit moves from a file `toon` checks to the connector, which holds the money.
 - Only the connector's zone must stay running. The agent runs in sessions and on a timer, so `docker-agent`'s own sandbox serves it unchanged.
-- The connector's zone is a Docker Sandboxes virtual machine, which needs KVM and a Docker account on every machine that runs spaceturtle. A machine without KVM needs another form of that zone.
+- The connector's zone is a virtual machine, which needs KVM on every machine that runs spaceturtle. A machine without KVM needs another form of that zone. It was first a Docker Sandboxes virtual machine, which also needed a Docker account; ADR 0004 replaces that.
 - Whoever breaks into the connector's zone holds everything in the settlement addresses and channels. The wallet is funded with little, on devnet first.
 - ADR 0001 stands: the panel still never acts. The panel reading an agent node inside a zone is not designed yet.
