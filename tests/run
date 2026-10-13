@@ -837,6 +837,25 @@ agent_check "an argument in single quotes is not expanded, so it is not used" "$
 agent_check "an unquoted argument" "$(with_cmd 'toon peer list --who $who')" "quoted-args: spaceturtle/probe"
 agent_check "an unquoted argument in braces" "$(with_cmd 'toon peer list --who ${who}')" "quoted-args: spaceturtle/probe"
 agent_check "an argument quoted only in part" "$(with_cmd 'toon peer list --who \"a\"$who')" "quoted-args: spaceturtle/probe"
+agent_check "a variable of the shell's own, for which docker-agent drops every tool" "$(with_cmd 'for v in \"$who\"; do toon peer list --who \"$v\"; done')" "declared-args: spaceturtle/probe"
+agent_check "the shell's own arguments, for which docker-agent drops every tool" "$(with_cmd 'set -- \"$who\"; toon peer list --who \"$@\"')" "declared-args: spaceturtle/probe"
+# What the agent's app_add hands to toon: one flag for each thing asked, and nothing for a word of the wrong shape.
+app_add() { # variable assignments for the tool's arguments
+  mkdir -p "$tmp/add-bin"; printf '#!/bin/sh\nprintf "<%%s>" "$@"; echo\n' > "$tmp/add-bin/toon"; chmod +x "$tmp/add-bin/toon"
+  yq '.agents.spaceturtle.toolsets[] | select(.type == "script") | .shell.app_add.cmd' "$root/agent/spaceturtle.yaml" > "$tmp/app-add.sh"
+  env -i PATH="$tmp/add-bin:/usr/bin:/bin" "$@" sh "$tmp/app-add.sh" 2>&1
+}
+tmp=$(mktemp -d); tmps+=("$tmp"); count=$((count + 4))
+[[ $(app_add name=store image=img:1 price=1000 variables="PORT=3100 A=b" secrets=NODE_KEY network=yes) == "<add><--json><--yes><--to><relay><--image><img:1><--env><PORT=3100><--env><A=b><--secret><NODE_KEY><--allow-egress><--price><1000><--><store>" ]] \
+  && echo "ok   agent: app_add asks for a price, variables, a secret's name and the network" || { echo "FAIL agent: app_add asks for a price, variables, a secret's name and the network"; fails=$((fails+1)); }
+[[ $(app_add name=x image=i) == "<add><--json><--yes><--to><relay><--image><i><--><x>" ]] \
+  && echo "ok   agent: app_add with only a name and an image asks for nothing more" || { echo "FAIL agent: app_add with only a name and an image asks for nothing more"; fails=$((fails+1)); }
+ok=1; for bad in 'variables=--allow-egress' 'variables=A=1 --runtime=x' 'secrets=A=b' 'secrets=--secret-file' 'network=maybe' 'price=1e3' 'price=-5'; do
+  out=$(app_add name=x image=i "$bad"); [[ $? -ne 0 && $out != *"<add>"* ]] || { ok=0; echo "     ran toon for: $bad"; }
+done
+(( ok )) && echo "ok   agent: app_add runs nothing when a word could be a flag or has the wrong shape" || { echo "FAIL agent: app_add runs nothing when a word could be a flag or has the wrong shape"; fails=$((fails+1)); }
+[[ $(app_add name=x image=i variables='A=* B=$(id)') == "<add><--json><--yes><--to><relay><--image><i><--env><A=*><--env><B=\$(id)><--><x>" ]] \
+  && echo "ok   agent: app_add hands a value over as written, expanding nothing" || { echo "FAIL agent: app_add hands a value over as written, expanding nothing"; fails=$((fails+1)); }
 for c in "toon approve app" "toon refuse app --reason x" "toon limit set 5" "toon wallet show" "toon wallet backup" "toon channel withdraw x" "toon channel open x" "toon create app" "toon init" "cd /tmp && toon  init" "toon --json wallet show" "'toon' wallet"; do
   agent_check "a script running '$c'" "$(with_cmd "$c")" "forbidden-command: spaceturtle/probe"
 done
@@ -1023,6 +1042,7 @@ name=${@: -1}
 [[ $* == *pgrep* ]] && { [[ -e $STUB_DIR/up ]]; exit; }
 [[ $* == *eth_chainId* ]] && { [[ -r $STUB_DIR/chain-id ]] && echo "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"$(cat "$STUB_DIR/chain-id")\"}"; exit 0; }
 [[ $* == *"toon status --json"* ]] && { cat "$STUB_DIR/status" 2>/dev/null || echo "{}"; exit 0; }
+[[ $* == *"cat > "*"spaceturtle-approve"* ]] && { cat > "$STUB_DIR/secret-in"; exit 0; }
 [[ $* == *"toon channel list --json"* ]] && { cat "$STUB_DIR/channels" 2>/dev/null; exit; }
 [[ $* == *"toon packet count --json"* ]] && { cat "$STUB_DIR/packets" 2>/dev/null; exit; }
 [[ $* == *"state.json"* ]] && { echo "{\"network\":\"$(cat "$STUB_DIR/network" 2>/dev/null || echo devnet)\",\"connector_url\":\"$(cat "$STUB_DIR/connector-url" 2>/dev/null)\"}"; exit 0; }
@@ -1382,12 +1402,28 @@ waiting_env() {
   echo "{\"peers\":[{\"name\":\"bob\",\"state\":\"pending\"}],\"agent_node\":{\"pending_apps\":[{\"name\":\"oracle\",\"status\":\"pending\",\"image\":\"docker.io/x/oracle:1\",\"requested_at\":$((now - 7300))},{\"name\":\"gone\",\"status\":\"refused\",\"image\":\"x/gone:1\"}],\"toon_apps\":[{\"apps\":[{\"name\":\"relay\",\"running\":true}]}]}}" > "$STUB_DIR/status"
 }
 waiting_env; run_cmd waiting; rc=$?
-launcher_check "waiting lists the name, image and age of each waiting app" $(( rc == 0 && $(grep -cP '^oracle\tdocker.io/x/oracle:1\t2h$' "$tmp/out") == 1 ? 0 : 1 ))
+launcher_check "waiting lists the name, image and age of each waiting app" $(( rc == 0 && $(grep -cP '^oracle\tdocker.io/x/oracle:1\t2h\tasks for nothing more$' "$tmp/out") == 1 ? 0 : 1 ))
 ! grep -qE 'relay|bob|gone' "$tmp/out"; launcher_check "waiting does not list an app that is running or was refused, or anything pending that is not an app" $?
 waiting_env; echo '{"agent_node":{"pending_apps":[{"name":"oracle","status":"pending","image":null,"url":"https://x.example/app"}]}}' > "$STUB_DIR/status"; run_cmd waiting
-grep -qP '^oracle\thttps://x.example/app\tunknown$' "$tmp/out"; launcher_check "waiting names the URL of an app that has no image, and says when the time is not known" $?
+grep -qP '^oracle\thttps://x.example/app\tunknown\tasks for nothing more$' "$tmp/out"; launcher_check "waiting names the URL of an app that has no image, and says when the time is not known" $?
 waiting_env; echo '{"agent_node":{"pending_apps":[]}}' > "$STUB_DIR/status"; run_cmd waiting; rc=$?
 [[ $rc -eq 0 ]] && grep -q 'no app is waiting' "$tmp/out"; launcher_check "waiting with nothing waiting says so" $?
+# An app the agent asked for with a price, a variable, the network and a secret it only names.
+asking_env() { waiting_env
+  echo '{"agent_node":{"pending_apps":[{"name":"store","status":"pending","image":"ghcr.io/x/store:1","price":1000,"variables":["HANDLER_PORT=3100"],"allowances":{"allow_egress":true},"secrets":{"variables":["NODE_KEY"],"files":[]}}]}}' > "$STUB_DIR/status"
+  : > "$STUB_DIR/calls"; }
+asking_env; run_cmd waiting
+grep -qP '^store\tghcr.io/x/store:1\tunknown\tasks for price 1000; variables HANDLER_PORT=3100; the network; secrets NODE_KEY$' "$tmp/out"
+launcher_check "waiting says what the agent asked for beside the image" $?
+asking_env; run_cmd approve store < /dev/null; rc=$?
+[[ $rc -ne 0 ]] && grep -q 'needs the secret NODE_KEY' "$tmp/out" && ! grep -q 'toon approve' "$STUB_DIR/calls"
+launcher_check "an app that names a secret is not approved without it" $?
+asking_env; echo hunter2-secret > "$tmp/node-key"; run_cmd approve store --secret NODE_KEY="$tmp/node-key" < /dev/null; rc=$?
+[[ $rc -eq 0 && $(<"$STUB_DIR/secret-in") == hunter2-secret ]] && grep -qF 'toon approve --secret "NODE_KEY=$HOME/.cache/spaceturtle-approve/v-NODE_KEY" -- '"'store'" "$STUB_DIR/calls" && ! grep -q hunter2 "$STUB_DIR/calls" "$tmp/out"
+launcher_check "approve gives the secret the app names, on a pipe and as no program's argument" $?
+grep -q 'asks for price 1000; variables HANDLER_PORT=3100; the network; secrets NODE_KEY' "$tmp/out"; launcher_check "approve says first what the app asks for" $?
+asking_env; sed -i 's/"NODE_KEY"/"NODE_KEY; id"/' "$STUB_DIR/status"; run_cmd approve store --secret NODE_KEY="$tmp/node-key" < /dev/null; rc=$?
+[[ $rc -ne 0 ]] && ! grep -q 'toon approve' "$STUB_DIR/calls"; launcher_check "a secret's name that is not a variable's name is refused" $?
 waiting_env; : > "$STUB_DIR/calls"; run_cmd approve oracle; rc=$?
 launcher_check "approve runs toon approve on a waiting app" $(( rc == 0 && $(grep -c "toon approve -- 'oracle'" "$STUB_DIR/calls") == 1 ? 0 : 1 ))
 waiting_env; : > "$STUB_DIR/calls"; run_cmd refuse oracle "not mine"; rc=$?

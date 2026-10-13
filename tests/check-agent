@@ -68,6 +68,11 @@ while IFS= read -r agent; do
           flat=$(tr '\n' ' ' <<<"$cmd")
           [[ $flat =~ $forbidden ]] && fail forbidden-command "$agent/$name: runs 'toon ${BASH_REMATCH[4]}', which the agent key's scope does not allow"
           [[ $flat =~ (^|[^[:alnum:]_.-])[\"\']?toon[\"\']?([[:space:]]+-[^[:space:]]+)*[[:space:]]+[\"\'\$] ]] && fail forbidden-command "$agent/$name: the toon subcommand is not fixed, so it could be any command"
+          # docker-agent drops the whole toolset, without a word to the person, when a
+          # command holds a $name that is not one of the tool's arguments.
+          while IFS= read -r v; do
+            [[ -n $v ]] && ! grep -qx -- "$v" <<<"$args" && fail declared-args "$agent/$name: the command uses \$$v, which is not one of the tool's arguments, so docker-agent would drop every tool beside it"
+          done < <(grep -oE '\$(\{[^}]*\}?|[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?!$-])' <<<"$cmd" | sed -E 's/^\$\{?//; s/[}:#%/].*$//' | sort -u)
           used=$(unquoted_vars "$cmd" | sort -u)
           while IFS= read -r a; do
             [[ -n $a ]] && grep -qx "$a" <<<"$args" && fail quoted-args "$agent/$name: argument '$a' is used unquoted, so it could add a flag"

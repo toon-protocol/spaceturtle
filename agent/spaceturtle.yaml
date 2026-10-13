@@ -113,8 +113,34 @@ agents:
                 description: "New price per packet, in the token's base units, as a whole number."
             required: [prefix, price]
           app_add:
-            description: "Add an app from a container image, behind the relay TOON app's connector. An image that is not TOON's own waits for the Observer to approve it; the answer says so, and the app is not running."
-            cmd: "toon add --json --yes --to relay --image \"$image\" -- \"$name\""
+            description: "Add an app from a container image, behind the relay TOON app's connector, with what it needs to run: a price, variables, the names of secrets, and whether it may open connections out. An image that is not TOON's own, and any app that is given a variable, a secret's name or the network, waits for the Observer to approve it; the answer says so, and the app is not running. You never hold a secret: you name it, and the Observer gives it when approving."
+            # docker-agent takes a tool only if every $name in its command is one of its
+            # arguments, so the flags are made by awk, which is given the arguments by name and
+            # prints one word to a line: each word of `variables` and of `secrets` after its
+            # own flag, so that no word can be a flag, and a word of the wrong shape ends the
+            # command before toon runs.
+            # An app that waits is what toon answers most adds with, and it says so in its own
+            # answer, so toon's exit code is not passed on as the tool's failure.
+            cmd: |
+              awk -v variables="$variables" -v secrets="$secrets" -v network="$network" -v price="$price" -v name="$name" 'BEGIN {
+                n = split(variables, word, " ")
+                for (i = 1; i <= n; i++) {
+                  if (word[i] !~ /^[A-Za-z_][A-Za-z0-9_]*=/) { print "a variable is written NAME=value, not: " word[i] > "/dev/stderr"; exit 2 }
+                  print "--env"; print word[i]
+                }
+                n = split(secrets, word, " ")
+                for (i = 1; i <= n; i++) {
+                  if (word[i] !~ /^[A-Za-z_][A-Za-z0-9_]*[A-Za-z0-9_]?/ || word[i] ~ /[^A-Za-z0-9_]/) { print "a secret is named like a variable, not: " word[i] > "/dev/stderr"; exit 2 }
+                  print "--secret"; print word[i]
+                }
+                if (network == "yes") print "--allow-egress"
+                else if (network != "" && network != "no") { print "network is yes or no" > "/dev/stderr"; exit 2 }
+                if (price != "") {
+                  if (price ~ /[^0-9]/) { print "a price is a whole number" > "/dev/stderr"; exit 2 }
+                  print "--price"; print price
+                }
+                print "--"; print name
+              }' > /tmp/spaceturtle-app-add.words && { xargs -d '\n' -a /tmp/spaceturtle-app-add.words toon add --json --yes --to relay --image "$image" || true; }
             args:
               name:
                 type: string
@@ -122,6 +148,18 @@ agents:
               image:
                 type: string
                 description: "Image reference of the app."
+              price:
+                type: string
+                description: "What a client pays for one request to the app, in the token's base units, as a whole number. Leave out for a free app."
+              variables:
+                type: string
+                description: "Variables the app is started with, each as NAME=value, separated by spaces. A value holds no space. Leave out for none."
+              secrets:
+                type: string
+                description: "Names of the secrets the app needs as variables, separated by spaces, such as API_KEY. Only the names: the Observer gives each one's contents when approving. Leave out for none."
+              network:
+                type: string
+                description: "yes if the app must open connections out, such as to another service's API; no, or left out, if it only answers requests."
             required: [name, image]
           app_remove:
             description: "Remove an app, and its route. This restarts the connector."
