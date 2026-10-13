@@ -2,10 +2,10 @@ name: images
 # Builds the two zone images on every change to them. A release publishes them (release.yml).
 on:
   pull_request:
-    paths: ['images/**', '.github/workflows/images.yml']
+    paths: ['images/**', 'docs/assets/spaceturtle-banner-dark.svg', '.github/workflows/images.yml']
   push:
     branches: [main]
-    paths: ['images/**', '.github/workflows/images.yml']
+    paths: ['images/**', 'docs/assets/spaceturtle-banner-dark.svg', '.github/workflows/images.yml']
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -28,6 +28,8 @@ jobs:
         with:
           context: images/${{ matrix.image }}
           file: images/${{ matrix.image }}/Dockerfile
+          # The agent's zone image makes its banner from the one the README shows.
+          build-contexts: assets=docs/assets
           build-args: ${{ steps.args.outputs.list }}
           platforms: linux/amd64
           push: false
@@ -41,7 +43,17 @@ jobs:
           docker run --rm --entrypoint sh spaceturtle-agent-zone:ci -c '
             ! env | grep -i -E "passphrase|mnemonic|secret|agent_key" &&
             ! ls -d "$HOME/.toon" "$HOME/.config/toon" "$HOME/.local/share/toon" 2>/dev/null | grep .'
-      - name: gVisor and the overlay client's proxy line are in the connector's zone
+      - name: docker-agent in the agent's zone plays a banner and takes a sidebar section, and both are there
+        if: matrix.image == 'agent'
+        run: |
+          docker run --rm --entrypoint sh spaceturtle-agent-zone:ci -c '
+            docker-agent run --help | grep -q -- --banner-file &&
+            docker-agent run --help | grep -q -- --sidebar-section && [ -x /usr/local/bin/spaceturtle-apps ] && [ -x /usr/local/bin/spaceturtle-limit ] &&
+            [ "$(grep -c "$(printf "\\f")" /usr/local/share/spaceturtle/banner.txt)" = 239 ]'
+      - name: jq is in the agent's zone, where the launcher rewrites the key file's addresses
+        if: matrix.image == 'agent'
+        run: docker run --rm --entrypoint jq spaceturtle-agent-zone:ci --version
+      - name: gVisor is in the connector's zone, and no proxy line for the overlay client
         if: matrix.image == 'connector'
         run: |
-          docker run --rm --entrypoint sh spaceturtle-connector-zone:ci -c 'runsc --version && cat /usr/local/etc/anon/anonrc-defaults'
+          docker run --rm --entrypoint sh spaceturtle-connector-zone:ci -c 'runsc --version && [ ! -e /usr/local/etc/anon/anonrc-defaults ]'

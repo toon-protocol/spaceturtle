@@ -59,6 +59,7 @@ jobs:
         with:
           context: images/agent
           file: images/agent/Dockerfile
+          build-contexts: assets=docs/assets
           build-args: ${{ steps.args.outputs.list }}
           platforms: linux/amd64
           push: true

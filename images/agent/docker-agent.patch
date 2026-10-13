@@ -1,0 +1,950 @@
+diff --git a/cmd/root/run.go b/cmd/root/run.go
+index b5efa8b..0cfb6ce 100644
+--- a/cmd/root/run.go
++++ b/cmd/root/run.go
+@@ -41,6 +41,8 @@ import (
+ 	"github.com/docker/docker-agent/pkg/telemetry"
+ 	"github.com/docker/docker-agent/pkg/tour"
+ 	"github.com/docker/docker-agent/pkg/tui"
++	tuibanner "github.com/docker/docker-agent/pkg/tui/banner"
++	"github.com/docker/docker-agent/pkg/tui/components/sidebar"
+ 	tuiimage "github.com/docker/docker-agent/pkg/tui/image"
+ 	"github.com/docker/docker-agent/pkg/tui/recorder"
+ 	"github.com/docker/docker-agent/pkg/tui/styles"
+@@ -117,6 +119,8 @@ type runExecFlags struct {
+ 	lean            bool
+ 	leanChanged     bool
+ 	appName         string
++	bannerFile      string
++	sidebarSections []string
+ 	sidebar         bool
+ 	listenAddr      string
+ 	// sessionWorkingDirRoot confines the working_dir of sessions created
+@@ -211,6 +215,8 @@ func addRunOrExecFlags(cmd *cobra.Command, flags *runExecFlags) {
+ 	_ = cmd.PersistentFlags().MarkHidden("tour")
+ 	cmd.PersistentFlags().BoolVar(&flags.lean, "lean", false, "Use a simplified TUI with minimal chrome")
+ 	cmd.PersistentFlags().StringVar(&flags.appName, "app-name", "", "Application name shown in the TUI in place of \"docker agent\"")
++	cmd.PersistentFlags().StringArrayVar(&flags.sidebarSections, "sidebar-section", nil, "Add a sidebar section that shows a shell command's output, refreshed every few seconds: \"Title=command\" (repeatable)")
++	cmd.PersistentFlags().StringVar(&flags.bannerFile, "banner-file", "", "Text file drawn in the TUI in place of the startup banner; frames separated by a form-feed line play as an animation")
+ 	cmd.PersistentFlags().StringSliceVar(&flags.disabledCommands, "disable-commands", nil, "Comma-separated list of slash commands to hide and disable in the TUI (e.g. /cost,/eval,/model)")
+ 	cmd.PersistentFlags().BoolVar(&flags.sidebar, "sidebar", true, "Show the sidebar in the TUI (set --sidebar=false to hide it)")
+ 	cmd.PersistentFlags().StringVar(&flags.theme, "theme", "", "Preselect a TUI theme by name, or \"auto\" to match the terminal's light/dark background (overrides the theme from user config; ignored outside the interactive TUI)")
+@@ -591,6 +597,24 @@ func (f *runExecFlags) runOrExec(ctx context.Context, out *cli.Printer, args []s
+ 
+ 	var rec *recorder.Recorder
+ 	tuiOptions := f.tuiOpts(args)
++	if len(f.sidebarSections) > 0 {
++		sections := make([]sidebar.CommandSection, 0, len(f.sidebarSections))
++		for _, spec := range f.sidebarSections {
++			section, err := sidebar.ParseCommandSection(spec)
++			if err != nil {
++				return fmt.Errorf("--sidebar-section %q: %w", spec, err)
++			}
++			sections = append(sections, section)
++		}
++		tuiOptions = append(tuiOptions, tui.WithSidebarSections(sections))
++	}
++	if f.bannerFile != "" {
++		b, err := tuibanner.Load(f.bannerFile)
++		if err != nil {
++			return err
++		}
++		tuiOptions = append(tuiOptions, tui.WithBanner(b))
++	}
+ 	if dir := f.explicitDefaultWorkingDir(sess); dir != "" {
+ 		tuiOptions = append(tuiOptions, tui.WithDefaultWorkingDir(dir))
+ 	}
+diff --git a/docs/features/cli/index.md b/docs/features/cli/index.md
+index a41b354..932c7ab 100644
+--- a/docs/features/cli/index.md
++++ b/docs/features/cli/index.md
+@@ -42,6 +42,8 @@ $ docker agent run [config] [message...] [flags]
+ | `--session-workingdir-root <path>`      | Confine the `working_dir` of sessions created through the `--listen` control plane to this directory and its descendants (default: no restriction — any clean host directory is accepted, though raw values containing `..` are rejected). Recommended when the control plane is reachable by other users. Hidden from `--help`, like `--listen`. |
+ | `--lean`                                | Use a simplified, non-alternate-screen TUI. Unlike the default full-screen TUI, this renders inline in the normal terminal buffer — useful in environments where an alternate screen is unwanted (e.g. inside tmux panes, CI with a tty, or log-friendly pipelines). Like the full TUI, displays an ASCII art banner on startup when the chat is empty (configurable via `show_banner` in [user settings](../../configuration/user-settings/index.md)). |
+ | `--app-name <name>`                     | Override the application name label shown in the TUI (status bar, window title, "/exit" notifications).                                   |
++| `--banner-file <path>`                  | Draw the art in this text file in the TUI in place of the startup banner; frames separated by a form-feed line play as an animation.      |
++| `--sidebar-section "Title=cmd"`         | Add a sidebar section that shows a shell command's output, refreshed every few seconds. Repeatable.                                       |
+ | `--sidebar`                             | Control sidebar visibility. Set to `--sidebar=false` to hide the sidebar and disable the Ctrl+B toggle (default: `true`).                 |
+ | `--disable-commands <list>`             | Hide and disable specific slash commands in the TUI. Accepts a comma-separated list of command names (leading slash optional, case-insensitive). E.g. `--disable-commands="/cost,/eval,/model"`. |
+ | `--theme <name>`                        | Preselect a TUI theme by name, or `auto` to follow the terminal's light/dark background (overrides the theme from user config; ignored outside the interactive TUI) |
+@@ -98,6 +100,8 @@ $ docker agent run agent.yaml "question 1" "question 2" "question 3"
+ 
+ # Customize TUI display
+ $ docker agent run agent.yaml --app-name "My Project"
++$ docker agent run agent.yaml --banner-file ./banner.txt
++$ docker agent run agent.yaml --sidebar-section "Services=docker compose ps --format '{{.Name}} {{.State}}'"
+ $ docker agent run agent.yaml --sidebar=false
+ $ docker agent run agent.yaml --disable-commands="/cost,/eval,/model"
+ 
+diff --git a/docs/features/tui/index.md b/docs/features/tui/index.md
+index 831f91a..0b98c60 100644
+--- a/docs/features/tui/index.md
++++ b/docs/features/tui/index.md
+@@ -15,6 +15,8 @@ _Docker Agent's default interface is a rich, interactive terminal UI with file a
+ 
+ Both the full TUI and the lean TUI display a centered ASCII art Docker Agent banner on startup when the chat is empty. The banner is automatically hidden once the agent starts responding or when a custom welcome message is configured. You can disable the banner entirely from the **Appearance** tab of `/settings`, or by setting `show_banner: false` in your [user settings](../../configuration/user-settings/index.md).
+ 
++To draw your own art in the full TUI instead, pass `--banner-file <path>` with a text file. A line holding only a form feed (`\f`) separates frames; a file with several frames plays them in a loop, one every 100ms, until the conversation starts. Lines may carry ANSI color sequences. Art larger than the chat area is cropped around its center, so a backdrop sized for a large terminal fills a small one. The lean TUI keeps the default banner.
++
+ ```bash
+ # Launch with a config
+ $ docker agent run agent.yaml
+@@ -31,6 +33,9 @@ $ docker agent run agent.yaml --debug
+ # Override the application name shown in the status bar and window title
+ $ docker agent run agent.yaml --app-name "My Project"
+ 
++# Replace the startup banner with your own art (several frames play as an animation)
++$ docker agent run agent.yaml --banner-file ./banner.txt
++
+ # Preselect a color theme
+ $ docker agent run agent.yaml --theme dracula
+ 
+@@ -147,6 +152,14 @@ Plans are shared documents from the same store used by `/plans`, the [plan tools
+ 
+ Editing changes only the plan document. It does not approve a plan, execute its steps, or authorize tool writes.
+ 
++### Custom Sidebar Sections
++
++Pass `--sidebar-section "Title=command"` to add a section below Tools that shows a shell command's output. The command runs when the TUI starts and again every 5 seconds, with a 5 second timeout. Its output is shown as plain text: color sequences are stripped, long lines are cut to the sidebar's width, and at most 12 lines are kept. A section with no output is hidden. The flag is repeatable.
++
++```bash
++$ docker agent run agent.yaml --sidebar-section "Services=docker compose ps --format '{{.Name}} {{.State}}'"
++```
++
+ ### Agents Panel
+ 
+ The sidebar's **Agents** section lists every agent in the team and has two display modes selectable via **Sidebar info mode** in `/settings`:
+diff --git a/pkg/tui/banner/banner.go b/pkg/tui/banner/banner.go
+index b6f28e1..491f96e 100644
+--- a/pkg/tui/banner/banner.go
++++ b/pkg/tui/banner/banner.go
+@@ -1,10 +1,30 @@
++// Package banner holds the art drawn on an empty conversation.
+ package banner
+ 
++import (
++	"errors"
++	"fmt"
++	"os"
++	"strings"
++	"time"
++
++	"github.com/charmbracelet/x/ansi"
++)
++
+ const (
+ 	Width  = 56
+ 	Height = 13
+ )
+ 
++// FrameDuration is how long each frame of an animated banner is shown.
++const FrameDuration = 100 * time.Millisecond
++
++// FrameSeparator is the line that separates the frames of a banner file.
++const FrameSeparator = "\f"
++
++// maxFileSize bounds a banner file; the art is redrawn on every frame change.
++const maxFileSize = 16 << 20
++
+ // Lines is the Docker Agent ASCII-art startup banner.
+ var Lines = []string{
+ 	`██████╗  ██████╗  ██████╗██╗  ██╗███████╗██████╗ `,
+@@ -21,3 +41,123 @@ var Lines = []string{
+ 	`    ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   `,
+ 	`    ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   `,
+ }
++
++// Banner is one or more frames of art. Every frame is padded to the same
++// size, so the banner does not move as it plays.
++type Banner struct {
++	frames []string
++	width  int
++	height int
++	// crops marks art that is cut down to an area smaller than itself
++	// rather than left out.
++	crops bool
++}
++
++// Default returns the Docker Agent banner.
++func Default() Banner {
++	return Banner{frames: []string{strings.Join(Lines, "\n")}, width: Width, height: Height}
++}
++
++// Load reads a banner from a text file. See Parse for the format.
++func Load(path string) (Banner, error) {
++	info, err := os.Stat(path)
++	if err != nil {
++		return Banner{}, fmt.Errorf("reading banner file: %w", err)
++	}
++	if info.Size() > maxFileSize {
++		return Banner{}, fmt.Errorf("banner file %s is larger than %d bytes", path, maxFileSize)
++	}
++	data, err := os.ReadFile(path)
++	if err != nil {
++		return Banner{}, fmt.Errorf("reading banner file: %w", err)
++	}
++	b, err := Parse(string(data))
++	if err != nil {
++		return Banner{}, fmt.Errorf("banner file %s: %w", path, err)
++	}
++	return b, nil
++}
++
++// Parse builds a banner from text. A line holding only a form feed separates
++// frames; a banner with several frames plays them in a loop. Lines may carry
++// ANSI color sequences.
++func Parse(text string) (Banner, error) {
++	text = strings.ReplaceAll(text, "\r\n", "\n")
++	var frames [][]string
++	var width, height int
++	for chunk := range strings.SplitSeq(text, "\n"+FrameSeparator+"\n") {
++		lines := strings.Split(strings.Trim(chunk, "\n"), "\n")
++		if len(lines) == 1 && strings.TrimSpace(ansi.Strip(lines[0])) == "" {
++			continue
++		}
++		height = max(height, len(lines))
++		for _, line := range lines {
++			width = max(width, ansi.StringWidth(line))
++		}
++		frames = append(frames, lines)
++	}
++	if len(frames) == 0 {
++		return Banner{}, errors.New("no banner art found")
++	}
++
++	b := Banner{width: width, height: height, crops: true, frames: make([]string, 0, len(frames))}
++	for _, lines := range frames {
++		for i, line := range lines {
++			lines[i] = line + strings.Repeat(" ", width-ansi.StringWidth(line))
++		}
++		for len(lines) < height {
++			lines = append(lines, strings.Repeat(" ", width))
++		}
++		b.frames = append(b.frames, strings.Join(lines, "\n"))
++	}
++	return b, nil
++}
++
++func (b Banner) Width() int  { return b.width }
++func (b Banner) Height() int { return b.height }
++
++// Fits reports whether the banner can be drawn in the given area. Art read
++// from a file always can: it is cut down around its center, so a backdrop
++// larger than any terminal fills the area whatever its size.
++func (b Banner) Fits(width, height int) bool {
++	if width <= 0 || height <= 0 {
++		return false
++	}
++	return b.crops || (width >= b.width && height >= b.height)
++}
++
++// Crop cuts a frame down around its center to at most the given area.
++func (b Banner) Crop(frame string, width, height int) string {
++	if width >= b.width && height >= b.height {
++		return frame
++	}
++	lines := strings.Split(frame, "\n")
++	if extra := len(lines) - height; extra > 0 {
++		lines = lines[extra/2 : extra/2+height]
++	}
++	if extra := b.width - width; extra > 0 {
++		for i, line := range lines {
++			lines[i] = ansi.Cut(line, extra/2, extra/2+width)
++		}
++	}
++	return strings.Join(lines, "\n")
++}
++
++// Animated reports whether the banner has more than one frame.
++func (b Banner) Animated() bool { return len(b.frames) > 1 }
++
++// FrameIndexAt returns the frame shown after the given elapsed time.
++func (b Banner) FrameIndexAt(elapsed time.Duration) int {
++	if len(b.frames) < 2 || elapsed <= 0 {
++		return 0
++	}
++	return int(elapsed/FrameDuration) % len(b.frames)
++}
++
++// FrameAt returns the art shown after the given elapsed time.
++func (b Banner) FrameAt(elapsed time.Duration) string {
++	if len(b.frames) == 0 {
++		return ""
++	}
++	return b.frames[b.FrameIndexAt(elapsed)]
++}
+diff --git a/pkg/tui/banner/banner_test.go b/pkg/tui/banner/banner_test.go
+new file mode 100644
+index 0000000..6fa8bee
+--- /dev/null
++++ b/pkg/tui/banner/banner_test.go
+@@ -0,0 +1,98 @@
++package banner
++
++import (
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/charmbracelet/x/ansi"
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++)
++
++func TestDefaultIsTheDockerAgentArt(t *testing.T) {
++	t.Parallel()
++
++	b := Default()
++	assert.False(t, b.Animated())
++	assert.Equal(t, Width, b.Width())
++	assert.Equal(t, Height, b.Height())
++	assert.Equal(t, strings.Join(Lines, "\n"), b.FrameAt(time.Hour))
++}
++
++func TestParseSingleFrame(t *testing.T) {
++	t.Parallel()
++
++	b, err := Parse("\n ab\nabcd\n\n")
++	require.NoError(t, err)
++	assert.False(t, b.Animated())
++	assert.Equal(t, 4, b.Width())
++	assert.Equal(t, 2, b.Height())
++	assert.Equal(t, " ab \nabcd", b.FrameAt(0))
++}
++
++func TestParseFramesShareOneSize(t *testing.T) {
++	t.Parallel()
++
++	b, err := Parse("ab\ncd\n\f\nxyz\n\f\n\x1b[31mq\x1b[39m\n")
++	require.NoError(t, err)
++	assert.True(t, b.Animated())
++	assert.Equal(t, 3, b.Width(), "color sequences take no width")
++	assert.Equal(t, 2, b.Height())
++	assert.Equal(t, "ab \ncd ", b.FrameAt(0))
++	assert.Equal(t, "xyz\n   ", b.FrameAt(FrameDuration))
++	assert.Equal(t, "\x1b[31mq\x1b[39m  \n   ", b.FrameAt(2*FrameDuration))
++	assert.Equal(t, "ab \ncd ", b.FrameAt(3*FrameDuration), "the frames loop")
++}
++
++func TestDefaultIsLeftOutOfAnAreaTooSmallForIt(t *testing.T) {
++	t.Parallel()
++
++	b := Default()
++	assert.True(t, b.Fits(Width, Height))
++	assert.False(t, b.Fits(Width-1, Height))
++	assert.False(t, b.Fits(Width, Height-1))
++}
++
++func TestArtFromAFileIsCroppedAroundItsCenter(t *testing.T) {
++	t.Parallel()
++
++	b, err := Parse("abcdef\n\x1b[31mghijkl\x1b[39m\nmnopqr\nstuvwx")
++	require.NoError(t, err)
++	require.True(t, b.Fits(2, 2))
++	assert.False(t, b.Fits(0, 2))
++
++	frame := b.FrameAt(0)
++	assert.Equal(t, frame, b.Crop(frame, 6, 4), "an area large enough leaves the art whole")
++	assert.Equal(t, "hijk\nnopq", ansi.Strip(b.Crop(frame, 4, 2)))
++	assert.Contains(t, b.Crop(frame, 4, 2), "\x1b[31m", "colors survive the cut")
++}
++
++func TestParseRejectsEmptyArt(t *testing.T) {
++	t.Parallel()
++
++	for _, text := range []string{"", "\n\n", "  \n\f\n\n"} {
++		_, err := Parse(text)
++		require.Error(t, err)
++	}
++}
++
++func TestLoad(t *testing.T) {
++	t.Parallel()
++
++	path := filepath.Join(t.TempDir(), "banner.txt")
++	require.NoError(t, os.WriteFile(path, []byte("one\r\n\f\r\ntwo\r\n"), 0o600))
++	b, err := Load(path)
++	require.NoError(t, err)
++	assert.Equal(t, "one", b.FrameAt(0))
++	assert.Equal(t, "two", b.FrameAt(FrameDuration))
++
++	_, err = Load(filepath.Join(t.TempDir(), "missing.txt"))
++	require.Error(t, err)
++
++	require.NoError(t, os.WriteFile(path, nil, 0o600))
++	_, err = Load(path)
++	require.ErrorContains(t, err, path)
++}
+diff --git a/pkg/tui/components/sidebar/command_sections.go b/pkg/tui/components/sidebar/command_sections.go
+new file mode 100644
+index 0000000..1bd2cff
+--- /dev/null
++++ b/pkg/tui/components/sidebar/command_sections.go
+@@ -0,0 +1,136 @@
++package sidebar
++
++import (
++	"context"
++	"errors"
++	"os/exec"
++	"slices"
++	"strings"
++	"time"
++
++	tea "charm.land/bubbletea/v2"
++	"github.com/charmbracelet/x/ansi"
++
++	"github.com/docker/docker-agent/pkg/shellpath"
++	"github.com/docker/docker-agent/pkg/tui/styles"
++)
++
++const (
++	// commandSectionInterval is how long a command section waits between runs.
++	commandSectionInterval = 5 * time.Second
++	// commandSectionTimeout bounds one run, so a hung command cannot stall the next.
++	commandSectionTimeout = 5 * time.Second
++	// commandSectionMaxLines keeps a chatty command from pushing the other sections away.
++	commandSectionMaxLines = 12
++)
++
++// CommandSection is a sidebar section whose body is the output of a shell
++// command, run again every few seconds.
++type CommandSection struct {
++	Title   string
++	Command string
++}
++
++// ParseCommandSection reads a "Title=command" flag value.
++func ParseCommandSection(spec string) (CommandSection, error) {
++	title, command, ok := strings.Cut(spec, "=")
++	title, command = strings.TrimSpace(title), strings.TrimSpace(command)
++	if !ok || title == "" || command == "" {
++		return CommandSection{}, errors.New(`a sidebar section is written "Title=command"`)
++	}
++	return CommandSection{Title: title, Command: command}, nil
++}
++
++type commandSectionState struct {
++	CommandSection
++
++	lines []string
++}
++
++type commandSectionResultMsg struct {
++	index int
++	lines []string
++}
++
++type commandSectionDueMsg struct{ index int }
++
++func (m *model) SetCommandSections(sections []CommandSection) {
++	m.commandSections = make([]commandSectionState, len(sections))
++	for i, section := range sections {
++		m.commandSections[i].CommandSection = section
++	}
++	m.invalidateCache()
++}
++
++// pollCommandSections starts every command section's first run. Init runs
++// on every tab switch, so only the first call starts the chain.
++func (m *model) pollCommandSections() tea.Cmd {
++	if m.commandSectionsPolling || len(m.commandSections) == 0 {
++		return nil
++	}
++	m.commandSectionsPolling = true
++	cmds := make([]tea.Cmd, len(m.commandSections))
++	for i := range m.commandSections {
++		cmds[i] = m.runCommandSection(i)
++	}
++	return tea.Batch(cmds...)
++}
++
++func (m *model) runCommandSection(index int) tea.Cmd {
++	if index < 0 || index >= len(m.commandSections) {
++		return nil
++	}
++	command, parent := m.commandSections[index].Command, m.ctx()
++	return func() tea.Msg {
++		ctx, cancel := context.WithTimeout(parent, commandSectionTimeout)
++		defer cancel()
++		shell, args := shellpath.DetectShell()
++		// A failing command still reports what it printed; none means no section.
++		out, _ := exec.CommandContext(ctx, shell, append(args, command)...).Output()
++		return commandSectionResultMsg{index: index, lines: commandSectionLines(string(out))}
++	}
++}
++
++// commandSectionLines keeps the printable text of a command's output.
++func commandSectionLines(out string) []string {
++	var lines []string
++	for line := range strings.SplitSeq(strings.ReplaceAll(out, "\r\n", "\n"), "\n") {
++		line = strings.TrimRight(strings.ReplaceAll(ansi.Strip(line), "\t", " "), " ")
++		if line == "" {
++			continue
++		}
++		if len(lines) == commandSectionMaxLines {
++			lines[len(lines)-1] = "…"
++			break
++		}
++		lines = append(lines, line)
++	}
++	return lines
++}
++
++// handleCommandSection applies a finished run and schedules the next one.
++func (m *model) handleCommandSection(msg commandSectionResultMsg) tea.Cmd {
++	if msg.index < 0 || msg.index >= len(m.commandSections) {
++		return nil
++	}
++	if state := &m.commandSections[msg.index]; !slices.Equal(state.lines, msg.lines) {
++		state.lines = msg.lines
++		m.invalidateCache()
++	}
++	index := msg.index
++	return tea.Tick(commandSectionInterval, func(time.Time) tea.Msg {
++		return commandSectionDueMsg{index: index}
++	})
++}
++
++// commandSection renders one command section, or "" while it has no output.
++func (m *model) commandSection(state commandSectionState, contentWidth int) string {
++	if len(state.lines) == 0 {
++		return ""
++	}
++	lines := make([]string, len(state.lines))
++	for i, line := range state.lines {
++		lines[i] = styles.BaseStyle.Render(ansi.Truncate(line, contentWidth, "…"))
++	}
++	return m.renderTab(state.Title, strings.Join(lines, "\n"), contentWidth)
++}
+diff --git a/pkg/tui/components/sidebar/command_sections_test.go b/pkg/tui/components/sidebar/command_sections_test.go
+new file mode 100644
+index 0000000..55fca99
+--- /dev/null
++++ b/pkg/tui/components/sidebar/command_sections_test.go
+@@ -0,0 +1,81 @@
++package sidebar
++
++import (
++	"runtime"
++	"strings"
++	"testing"
++
++	"github.com/charmbracelet/x/ansi"
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++
++	"github.com/docker/docker-agent/pkg/tui/animation"
++	"github.com/docker/docker-agent/pkg/tui/service"
++)
++
++func newCommandSectionModel(t *testing.T, sections ...CommandSection) *model {
++	t.Helper()
++	m := New(animation.NewRuntime(), t.Context(), &service.SessionState{}).(*model)
++	m.SetCommandSections(sections)
++	return m
++}
++
++func sectionsText(m *model) string {
++	return ansi.Strip(strings.Join(m.renderSections(40), "\n"))
++}
++
++func TestParseCommandSection(t *testing.T) {
++	t.Parallel()
++
++	section, err := ParseCommandSection(" Apps = status --short | grep a=b ")
++	require.NoError(t, err)
++	assert.Equal(t, CommandSection{Title: "Apps", Command: "status --short | grep a=b"}, section)
++
++	for _, spec := range []string{"", "Apps", "=status", "Apps= "} {
++		_, err := ParseCommandSection(spec)
++		require.Error(t, err, spec)
++	}
++}
++
++func TestCommandSectionShowsItsOutputAndHidesWhileEmpty(t *testing.T) {
++	t.Parallel()
++
++	m := newCommandSectionModel(t, CommandSection{Title: "Apps", Command: "unused"})
++	assert.NotContains(t, sectionsText(m), "Apps")
++
++	next := m.handleCommandSection(commandSectionResultMsg{lines: []string{"relay running", strings.Repeat("x", 80)}})
++	require.NotNil(t, next, "a result schedules the next run")
++	text := sectionsText(m)
++	assert.Contains(t, text, "Apps")
++	assert.Contains(t, text, "relay running")
++	assert.NotContains(t, text, strings.Repeat("x", 41), "a long line is cut to the sidebar")
++
++	m.handleCommandSection(commandSectionResultMsg{})
++	assert.NotContains(t, sectionsText(m), "relay running")
++}
++
++func TestCommandSectionLinesKeepsPrintableTextAndBoundsIt(t *testing.T) {
++	t.Parallel()
++
++	assert.Equal(t, []string{"a b", "c"}, commandSectionLines("\x1b[31ma\tb\x1b[0m  \r\n\n\nc\n"))
++
++	lines := commandSectionLines(strings.Repeat("line\n", commandSectionMaxLines+5))
++	require.Len(t, lines, commandSectionMaxLines)
++	assert.Equal(t, "…", lines[len(lines)-1])
++}
++
++func TestCommandSectionRunsItsCommandOnce(t *testing.T) {
++	t.Parallel()
++	if runtime.GOOS == "windows" {
++		t.Skip("the command is written for a POSIX shell")
++	}
++
++	m := newCommandSectionModel(t, CommandSection{Title: "Apps", Command: "echo relay; echo whoami; exit 3"})
++	cmd := m.pollCommandSections()
++	require.NotNil(t, cmd)
++	assert.Nil(t, m.pollCommandSections(), "Init runs again on a tab switch and must not start a second chain")
++
++	msg := m.runCommandSection(0)().(commandSectionResultMsg)
++	assert.Equal(t, []string{"relay", "whoami"}, msg.lines, "a failing command still shows what it printed")
++	assert.Nil(t, m.runCommandSection(7))
++}
+diff --git a/pkg/tui/components/sidebar/sidebar.go b/pkg/tui/components/sidebar/sidebar.go
+index ec2e134..0c24641 100644
+--- a/pkg/tui/components/sidebar/sidebar.go
++++ b/pkg/tui/components/sidebar/sidebar.go
+@@ -78,6 +78,8 @@ type Model interface {
+ 	SetTokenUsage(event *runtime.TokenUsageEvent)
+ 	SetTodos(result *tools.ToolCallResult) error
+ 	SetMode(mode Mode)
++	// SetCommandSections adds sections that show a shell command's output.
++	SetCommandSections(sections []CommandSection)
+ 	// SetMirroredPadding swaps the horizontal edge padding so the sidebar hugs
+ 	// the terminal edge when rendered on the left of the chat.
+ 	SetMirroredPadding(mirrored bool)
+@@ -418,8 +420,11 @@ type model struct {
+ 	// from blank-line heuristics.
+ 	agentLineOwners []string
+ 	planData        messages.PlanSidebarDataMsg
+-	recentPlans     []plans.Plan
+-	planClickZones  map[int]planClickZone
++	commandSections []commandSectionState
++	// commandSectionsPolling is set once the sections' refresh chain has started.
++	commandSectionsPolling bool
++	recentPlans            []plans.Plan
++	planClickZones         map[int]planClickZone
+ }
+ 
+ // New creates a new sidebar bound to the given session state.
+@@ -464,7 +469,7 @@ func New(ar *animation.Runtime, ctx context.Context, sessionState *service.Sessi
+ }
+ 
+ func (m *model) Init() tea.Cmd {
+-	return waitForGitBranch(m.gitBranchWatcher)
++	return tea.Batch(waitForGitBranch(m.gitBranchWatcher), m.pollCommandSections())
+ }
+ 
+ // needsSpinner returns true if any spinner-driving state is active.
+@@ -1234,6 +1239,12 @@ func (m *model) Update(msg tea.Msg) (layout.Model, tea.Cmd) {
+ 	case messages.PlanSidebarDataMsg:
+ 		m.setPlans(msg)
+ 		return m, nil
++	case commandSectionResultMsg:
++		cmd := m.handleCommandSection(msg)
++		return m, cmd
++	case commandSectionDueMsg:
++		cmd := m.runCommandSection(msg.index)
++		return m, cmd
+ 	case gitBranchChangedMsg:
+ 		m.gitBranchName = string(msg)
+ 		m.invalidateCache()
+@@ -1821,6 +1832,9 @@ func (m *model) renderSections(contentWidth int) []string {
+ 	if !m.sectionVisibility.HideTools {
+ 		appendSection(m.toolsetInfo(contentWidth))
+ 	}
++	for _, section := range m.commandSections {
++		appendSection(m.commandSection(section, contentWidth))
++	}
+ 
+ 	if !m.sectionVisibility.HideTodos {
+ 		m.todoComp.SetSize(contentWidth)
+diff --git a/pkg/tui/page/chat/banner_test.go b/pkg/tui/page/chat/banner_test.go
+new file mode 100644
+index 0000000..f7ffacf
+--- /dev/null
++++ b/pkg/tui/page/chat/banner_test.go
+@@ -0,0 +1,91 @@
++package chat
++
++import (
++	"testing"
++	"time"
++
++	tea "charm.land/bubbletea/v2"
++	"github.com/charmbracelet/x/ansi"
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++
++	"github.com/docker/docker-agent/pkg/tui/animation"
++	tuibanner "github.com/docker/docker-agent/pkg/tui/banner"
++	"github.com/docker/docker-agent/pkg/tui/service"
++)
++
++type bannerScheduler struct{ now time.Time }
++
++func (s *bannerScheduler) Now() time.Time { return s.now }
++func (s *bannerScheduler) Tick(d time.Duration, f func(time.Time) tea.Msg) tea.Cmd {
++	s.now = s.now.Add(d)
++	delivered := s.now
++	return func() tea.Msg { return f(delivered) }
++}
++
++func newBannerTestPage(t *testing.T, ar *animation.Runtime, art string) *chatPage {
++	t.Helper()
++	b, err := tuibanner.Parse(art)
++	require.NoError(t, err)
++	p := New(ar, t.Context(), nil, &service.SessionState{}, WithBanner(b)).(*chatPage)
++	p.SetSize(160, 40)
++	return p
++}
++
++func bannerText(p *chatPage) string {
++	return ansi.Strip(p.messagesView(p.computeSidebarLayout()))
++}
++
++func TestCustomBannerReplacesTheDefault(t *testing.T) {
++	t.Parallel()
++
++	p := newBannerTestPage(t, animation.NewRuntime(), "my project")
++
++	assert.False(t, p.bannerPlaying())
++	assert.Contains(t, bannerText(p), "my project")
++	assert.NotContains(t, bannerText(p), tuibanner.Lines[0])
++}
++
++func TestAnimatedBannerAdvancesWithTheAnimationClock(t *testing.T) {
++	t.Parallel()
++
++	ar := animation.NewRuntimeWithScheduler(&bannerScheduler{now: time.Unix(1, 0)})
++	p := newBannerTestPage(t, ar, "first\n\f\nsecond\n")
++	require.True(t, p.bannerPlaying())
++	assert.Contains(t, bannerText(p), "first")
++
++	cmd := p.bannerSub.Start()
++	require.NotNil(t, cmd)
++	redraws := 0
++	for ar.Now() < tuibanner.FrameDuration {
++		tick, ok := ar.Accept(cmd().(animation.TickMsg))
++		require.True(t, ok)
++		p.tickBanner(tick)
++		if tick.Dirty() {
++			redraws++
++		}
++		cmd = ar.Continue()
++		require.NotNil(t, cmd)
++	}
++
++	assert.Equal(t, 1, redraws, "only a frame change redraws")
++	assert.Contains(t, bannerText(p), "second")
++}
++
++func TestAnimatedBannerStopsTickingOnceTheConversationStarts(t *testing.T) {
++	t.Parallel()
++
++	ar := animation.NewRuntimeWithScheduler(&bannerScheduler{now: time.Unix(1, 0)})
++	p := newBannerTestPage(t, ar, "first\n\f\nsecond\n")
++	cmd := p.bannerSub.Start()
++	require.Equal(t, int32(1), ar.ActiveCount())
++
++	p.showStartupBanner = false
++	tick, ok := ar.Accept(cmd().(animation.TickMsg))
++	require.True(t, ok)
++	p.tickBanner(tick)
++
++	assert.False(t, tick.Dirty())
++	assert.Zero(t, ar.ActiveCount())
++	assert.Nil(t, ar.Continue())
++}
+diff --git a/pkg/tui/page/chat/chat.go b/pkg/tui/page/chat/chat.go
+index 76683bd..e34b40d 100644
+--- a/pkg/tui/page/chat/chat.go
++++ b/pkg/tui/page/chat/chat.go
+@@ -254,6 +254,8 @@ type chatPage struct {
+ 	// hideBanner mirrors the user's show_banner setting; the zero value
+ 	// keeps the banner so page literals stay banner-enabled.
+ 	hideBanner bool
++	banner     tuibanner.Banner
++	bannerSub  animation.Subscription
+ 
+ 	// Message queue for enqueuing messages while agent is working
+ 	messageQueue    []queuedMessage
+@@ -414,6 +416,8 @@ func New(ar *animation.Runtime, ctx context.Context, a *app.App, sessionState *s
+ 		commandParser:     commands.NewParser(),
+ 		sessionState:      sessionState,
+ 		showStartupBanner: true,
++		banner:            tuibanner.Default(),
++		bannerSub:         ar.Subscribe(),
+ 	}
+ 
+ 	for _, opt := range opts {
+@@ -470,6 +474,22 @@ func WithShowBanner(show bool) PageOption {
+ 	}
+ }
+ 
++// WithSidebarSections adds sidebar sections that show a shell command's
++// output, refreshed every few seconds.
++func WithSidebarSections(sections []sidebar.CommandSection) PageOption {
++	return func(p *chatPage) {
++		p.sidebar.SetCommandSections(sections)
++	}
++}
++
++// WithBanner replaces the startup banner. A banner with several frames plays
++// while the conversation is empty.
++func WithBanner(b tuibanner.Banner) PageOption {
++	return func(p *chatPage) {
++		p.banner = b
++	}
++}
++
+ // WithCommandParser injects a command parser for handling slash commands in the editor.
+ func WithCommandParser(p *commands.Parser) PageOption {
+ 	return func(cp *chatPage) {
+@@ -530,6 +550,9 @@ func (p *chatPage) Init() tea.Cmd {
+ 	var cmds []tea.Cmd
+ 
+ 	cmds = append(cmds, p.messages.Init())
++	if p.bannerPlaying() {
++		cmds = append(cmds, p.bannerSub.Start())
++	}
+ 
+ 	// Load state from existing session (for session restore and branching)
+ 	if sess := p.app.Session(); sess != nil {
+@@ -609,6 +632,10 @@ func (p *chatPage) update(msg tea.Msg) (layout.Model, tea.Cmd) {
+ 		}
+ 	}
+ 
++	if tick, ok := msg.(animation.TickMsg); ok {
++		p.tickBanner(tick)
++	}
++
+ 	switch msg := msg.(type) {
+ 	case msgtypes.PlanSidebarDataMsg:
+ 		updated, cmd := p.sidebar.Update(msg)
+@@ -844,11 +871,21 @@ func (p *chatPage) messagesView(sl sidebarLayout) string {
+ 	if messagesView != "" || !p.showStartupBanner || p.hideBanner {
+ 		return messagesView
+ 	}
+-	if sl.chatWidth < tuibanner.Width || sl.chatHeight < tuibanner.Height {
++	art := p.banner
++	if art.Height() == 0 {
++		// Page literals carry no banner; they get the default one.
++		art = tuibanner.Default()
++	}
++	if !art.Fits(sl.chatWidth, sl.chatHeight) {
+ 		return ""
+ 	}
+ 
+-	banner := styles.BaseStyle.Foreground(styles.Accent).Render(strings.Join(tuibanner.Lines, "\n"))
++	var elapsed time.Duration
++	if art.Animated() {
++		elapsed = p.ar.Now()
++	}
++	frame := art.Crop(art.FrameAt(elapsed), sl.chatWidth, sl.chatHeight)
++	banner := styles.BaseStyle.Foreground(styles.Accent).Render(frame)
+ 	return lipgloss.Place(
+ 		sl.chatWidth,
+ 		sl.chatHeight,
+@@ -858,6 +895,27 @@ func (p *chatPage) messagesView(sl sidebarLayout) string {
+ 	)
+ }
+ 
++// bannerPlaying reports whether an animated banner still has the screen.
++func (p *chatPage) bannerPlaying() bool {
++	return p.banner.Animated() && p.showStartupBanner && !p.hideBanner
++}
++
++// tickBanner redraws on a frame change and gives up the tick once the
++// conversation has replaced the banner.
++func (p *chatPage) tickBanner(tick animation.TickMsg) {
++	if !p.bannerSub.IsActive() {
++		return
++	}
++	if !p.bannerPlaying() {
++		p.bannerSub.Stop()
++		return
++	}
++	before, after := tick.ElapsedBounds()
++	if p.banner.FrameIndexAt(before) != p.banner.FrameIndexAt(after) {
++		tick.MarkDirty()
++	}
++}
++
+ // View renders the chat page (messages + sidebar only, no editor or resize handle)
+ func (p *chatPage) View() string {
+ 	sl := p.computeSidebarLayout()
+diff --git a/pkg/tui/tui.go b/pkg/tui/tui.go
+index 68e5f5c..9539902 100644
+--- a/pkg/tui/tui.go
++++ b/pkg/tui/tui.go
+@@ -27,12 +27,14 @@ import (
+ 	"github.com/docker/docker-agent/pkg/runtime"
+ 	"github.com/docker/docker-agent/pkg/session"
+ 	"github.com/docker/docker-agent/pkg/tui/animation"
++	tuibanner "github.com/docker/docker-agent/pkg/tui/banner"
+ 	"github.com/docker/docker-agent/pkg/tui/commands"
+ 	commanddefaults "github.com/docker/docker-agent/pkg/tui/commands/defaults"
+ 	"github.com/docker/docker-agent/pkg/tui/components/completion"
+ 	"github.com/docker/docker-agent/pkg/tui/components/editor"
+ 	"github.com/docker/docker-agent/pkg/tui/components/editor/completions"
+ 	"github.com/docker/docker-agent/pkg/tui/components/notification"
++	"github.com/docker/docker-agent/pkg/tui/components/sidebar"
+ 	"github.com/docker/docker-agent/pkg/tui/components/spinner"
+ 	"github.com/docker/docker-agent/pkg/tui/components/statusbar"
+ 	"github.com/docker/docker-agent/pkg/tui/components/tabbar"
+@@ -285,6 +287,9 @@ type appModel struct {
+ 	// showBanner displays the ASCII-art startup banner on an empty
+ 	// conversation. Shared by every tab and managed via /settings.
+ 	showBanner bool
++	banner     tuibanner.Banner
++	// sidebarSections are extra sidebar sections fed by shell commands.
++	sidebarSections []sidebar.CommandSection
+ 
+ 	// buildCommandCategories is a function that returns the list of command categories.
+ 	buildCommandCategories func(context.Context, tea.Model) []commands.Category
+@@ -390,6 +395,21 @@ func WithTourOffer(showTelemetryNotice bool) Option {
+ 	}
+ }
+ 
++// WithSidebarSections adds sidebar sections that show a shell command's
++// output, refreshed every few seconds.
++func WithSidebarSections(sections []sidebar.CommandSection) Option {
++	return func(m *appModel) {
++		m.sidebarSections = sections
++	}
++}
++
++// WithBanner replaces the startup banner drawn on an empty conversation.
++func WithBanner(b tuibanner.Banner) Option {
++	return func(m *appModel) {
++		m.banner = b
++	}
++}
++
+ // WithAppName sets the application name.
+ //
+ // If not provided, defaults to "docker agent".
+@@ -538,6 +558,7 @@ func New(ctx context.Context, spawner SessionSpawner, initialApp *app.App, initi
+ 		showBanner:                    userSettings.GetShowBanner(),
+ 		keyboardEnhancementsSupported: termfeatures.SupportsModifiedEnter(os.Getenv),
+ 		dockerDesktop:                 os.Getenv("TERM_PROGRAM") == "docker_desktop",
++		banner:                        tuibanner.Default(),
+ 		appName:                       "docker agent",
+ 		appVersion:                    version.Version,
+ 	}
+@@ -667,6 +688,8 @@ func (m *appModel) chatPageOpts() []chat.PageOption {
+ 		chat.WithSendMode(m.sendMode),
+ 		chat.WithInterruptMode(m.interruptMode),
+ 		chat.WithShowBanner(m.showBanner),
++		chat.WithBanner(m.banner),
++		chat.WithSidebarSections(m.sidebarSections),
+ 	}
+ 
+ 	if m.leanMode {

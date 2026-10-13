@@ -7,10 +7,6 @@ The panel reads an agent node through `toon` on your machine's `PATH`. Reading t
 of an Install, inside the connector's zone, is not designed yet
 ([ADR 0003](../adr/0003-the-agent-holds-no-key-that-pays.md)).
 
-<p align="center">
-  <img src="../assets/panel-activity.gif" alt="The turtle in the Omarchy bar has a dot, and the panel opens to show what the agent did" width="640">
-</p>
-
 ## Install
 
 You need Omarchy 4.0.4, a running agent node with `toon` on your `PATH` (`toon up`), and

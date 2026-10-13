@@ -1,6 +1,6 @@
 #!/bin/bash
 # Runs relay-events, mark-seen, request and the being-observed skill's answers against a stub `toon` and `curl`,
-# and the launcher's `spaceturtle start` against a stub `sbx`, in a temporary home,
+# and the launcher's `spaceturtle start` against a stub `msb`, in a temporary home,
 # and holds the agent definition to its safety rules through tests/check-agent.
 # Needs only bash, jq and yq (mikefarah's). Usage: tests/run
 set -uo pipefail
@@ -860,6 +860,15 @@ image_check "a default for a version" "sed -i 's/^ARG TOON_VERSION\$/ARG TOON_VE
 image_check "an unchecked toon" "sed -i '/sha256sum -c/d' connector/Dockerfile" "checksum is not verified"
 image_check "an unchecked gVisor" "sed -i '/sha512sum -c/d' connector/Dockerfile" "gVisor's checksum"
 image_check "an unpinned base" "sed -i 's/@\${DOCKER_AGENT_BASE_DIGEST}//' agent/Dockerfile" "not pinned by digest"
+image_check "an unpinned Go for docker-agent's build" "sed -i 's/@\${GO_IMAGE_DIGEST}//' agent/Dockerfile" "not pinned by digest"
+image_check "docker-agent's source not held to its commit" "sed -i '/rev-parse HEAD/d' agent/Dockerfile" "not held to a commit"
+# The film in the agent's zone image: 240 frames of 64 lines, the turtle's four widest rows in each,
+# and stars on the first and the last line of the field, since the stars are to fill the chat.
+film=$(awk -f "$root/images/agent/banner.awk" "$root/docs/assets/spaceturtle-banner-dark.svg")
+[[ $(grep -c $'^\f$' <<< "$film") -eq 239 && $(grep -c -v $'^\f$' <<< "$film") -eq $((240 * 64)) && $(grep -c '███' <<< "$film") -eq $((240 * 4)) ]] \
+  && [[ $(sed -n 1p <<< "$film") == *[▀▄█]* && $(sed -n 64p <<< "$film") == *[▀▄█]* ]] \
+  && echo "ok   the banner's film is whole, with stars to its edges" || { echo "FAIL the banner's film is whole, with stars to its edges"; fails=$((fails+1)); }
+count=$((count+1))
 image_check "a passphrase in the agent's zone" "echo 'ENV TOON_PASSPHRASE_FILE=/x' >> agent/Dockerfile" "passphrase, wallet or key"
 image_check "a toon init in the agent's zone" "echo 'RUN toon init' >> agent/Dockerfile" "passphrase, wallet or key"
 image_check "a pin that is no checksum" "sed -i 's/^TOON_SHA256_AMD64=.*/TOON_SHA256_AMD64=abc/' versions.env" "TOON_SHA256_AMD64 is not a sha256"
@@ -975,48 +984,80 @@ release_check "the notes name the command, every reference and the toon, docker-
 notes=$("$root/release/notes" v1.2.3 2>&1); rc=$?
 [[ $rc -eq 0 && $(grep -c 'ghcr.io/toon-protocol/' <<<"$notes") -eq 4 ]] && ! grep -q 'docker\.io' <<<"$notes"; release_check "without a Docker Hub namespace the notes name GitHub's registry alone" $?
 
-# --- the launcher: spaceturtle start, against a stub sbx in a temporary home ---
+# --- the launcher: spaceturtle start, against a stub msb in a temporary home ---
 launcher_env() {
   new_env
-  export SPACETURTLE_SBX=$tmp/bin/sbx SPACETURTLE_KVM=$tmp/kvm
+  export SPACETURTLE_MSB=$tmp/bin/msb SPACETURTLE_MSB_HOME=$tmp/msbhome SPACETURTLE_KVM=$tmp/kvm
   export SPACETURTLE_ZONE=zone-x SPACETURTLE_DATA_DIR=$tmp/wallet SPACETURTLE_BACKUP_DIR=$tmp/backup
   : > "$SPACETURTLE_KVM"
   export SPACETURTLE_SYSTEMCTL=$tmp/bin/systemctl SPACETURTLE_UNIT_DIR=$tmp/units SPACETURTLE_MODEL_KEY_FILE=$tmp/model-key
-  export SPACETURTLE_AGENT_ZONE=agent-x SPACETURTLE_CONNECTOR_PORT=7123
-  printf '#!/bin/bash\necho "$*" >> "$STUB_DIR/systemctl-calls"\n' > "$SPACETURTLE_SYSTEMCTL"; chmod +x "$SPACETURTLE_SYSTEMCTL"
-  # An sbx that records its calls. `ls` lists the zones in $STUB_DIR/zones and fails
-  # when $STUB_DIR/signed-out exists; a call whose arguments contain the text in
-  # $STUB_DIR/fail-on fails, `toon status --json` prints $STUB_DIR/status, and `cp` out
+  export SPACETURTLE_AGENT_ZONE=agent-x SPACETURTLE_CONNECTOR_PORT=7123 SPACETURTLE_SUPERVISOR_WAIT=0
+  # No zone is real here, so no port is: the launcher is told they are open, until a test says otherwise.
+  export SPACETURTLE_PORT_PROBE=true
+  # A systemctl that records its calls. Restarting the unit that keeps the connector's zone
+  # running runs what the unit runs, as systemd would, whatever comes of it.
+  cat > "$SPACETURTLE_SYSTEMCTL" <<STUB
+#!/bin/bash
+echo "\$*" >> "\$STUB_DIR/systemctl-calls"
+[[ \$* == *"restart spaceturtle-connector.service"* ]] && "$root/spaceturtle" supervise > /dev/null 2>&1
+exit 0
+STUB
+  chmod +x "$SPACETURTLE_SYSTEMCTL"
+  # An msb that records its calls. `ls` fails when $STUB_DIR/broken exists and lists the zones
+  # in $STUB_DIR/zones, the last line for a name being its state; a call whose arguments contain
+  # the text in $STUB_DIR/fail-on fails, `toon status --json` prints $STUB_DIR/status, the home's
+  # state.json names the network in $STUB_DIR/network, the RPC endpoint says its chain id is the
+  # one in $STUB_DIR/chain-id, `create` keeps the connector's zone's ports in $STUB_DIR/ports and
+  # the agent's zone's wall in $STUB_DIR/agent-wall, which `inspect` gives back, and `copy` out
   # of the zone writes a file.
-  cat > "$SPACETURTLE_SBX" <<'STUB'
+  cat > "$SPACETURTLE_MSB" <<'STUB'
 #!/bin/bash
 echo "$*" >> "$STUB_DIR/calls"
-[[ $1 == ls ]] && { [[ -e $STUB_DIR/signed-out ]] && exit 1; cat "$STUB_DIR/zones" 2>/dev/null; exit 0; }
+name=${@: -1}
+[[ $1 == ls ]] && { [[ -e $STUB_DIR/broken ]] && exit 1
+  jq -Rn '[reduce (inputs | split(" ")) as $l ({}; .[$l[0]] = $l[1]) | to_entries[] | {name: .key, status: ((.value[0:1] | ascii_upcase) + .value[1:])}]' "$STUB_DIR/zones" 2>/dev/null || echo '[]'; exit 0; }
 [[ -r $STUB_DIR/fail-on && $* == *"$(cat "$STUB_DIR/fail-on")"* ]] && exit 1
+[[ $1 == inspect && $2 == agent-x ]] && { jq -n --arg w "$(cat "$STUB_DIR/agent-wall" 2>/dev/null)" '{config: {labels: {"spaceturtle.wall": $w}}}'; exit 0; }
+[[ $1 == inspect ]] && { jq -Rn '{config: {network: {ports: [inputs | {host_port: tonumber}]}}}' "$STUB_DIR/ports" 2>/dev/null; exit 0; }
+[[ $* == *"exec connector-start"* ]] && { : > "$STUB_DIR/up"; exit 0; }
 [[ $* == *pgrep* ]] && { [[ -e $STUB_DIR/up ]]; exit; }
-[[ $* == *"toon status --json"* ]] && { cat "$STUB_DIR/status" 2>/dev/null || echo "{\"network\":\"$(cat "$STUB_DIR/network" 2>/dev/null || echo devnet)\"}"; exit 0; }
-[[ $* == *connector-start* ]] && : > "$STUB_DIR/up"
-[[ $* == *"toon wallet addresses"* ]] && { echo "evm 0xAAA111"; echo "solana SoLBBB222"; exit 0; }
-[[ $* == *"toon network set mainnet"* ]] && echo mainnet > "$STUB_DIR/network"
+[[ $* == *eth_chainId* ]] && { [[ -r $STUB_DIR/chain-id ]] && echo "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"$(cat "$STUB_DIR/chain-id")\"}"; exit 0; }
+[[ $* == *"toon status --json"* ]] && { cat "$STUB_DIR/status" 2>/dev/null || echo "{}"; exit 0; }
+[[ $* == *"toon channel list --json"* ]] && { cat "$STUB_DIR/channels" 2>/dev/null; exit; }
+[[ $* == *"toon packet count --json"* ]] && { cat "$STUB_DIR/packets" 2>/dev/null; exit; }
+[[ $* == *"state.json"* ]] && { echo "{\"network\":\"$(cat "$STUB_DIR/network" 2>/dev/null || echo devnet)\",\"connector_url\":\"$(cat "$STUB_DIR/connector-url" 2>/dev/null)\"}"; exit 0; }
+[[ $* == *"toon wallet show"* ]] && { echo "evm 0xAAA111"; echo "solana SoLBBB222"; exit 0; }
 [[ $* == *"toon agent-key create"* ]] && { touch "$STUB_DIR/keys"; n=$(( $(wc -l < "$STUB_DIR/keys") + 1 )); echo "key-$n" >> "$STUB_DIR/keys"; echo "PRIVATE-HALF-$n" > "$STUB_DIR/agentkeyfile"; exit 0; }
-[[ $* == *"toon agent-key list"* ]] && { touch "$STUB_DIR/keys"; jq -Rn '[inputs | {id: ., scope: ["send","peer"], limit: 5, private_key: "PRIVATE-LEAK"}]' "$STUB_DIR/keys"; exit 0; }
+[[ $* == *"toon agent-key list"* ]] && { touch "$STUB_DIR/keys"; jq -Rn '{agent_keys: [inputs | {public_key: ., scope: ["send","peer"], spending_limit: {per_command: 10, per_day: 100}, private_key: "PRIVATE-LEAK"}]}' "$STUB_DIR/keys"; exit 0; }
 [[ $* == *"toon agent-key revoke"* ]] && { [[ $* =~ revoke\ --\ \'([^\']*)\' ]]; id=${BASH_REMATCH[1]}; sed -i "/^$id$/d" "$STUB_DIR/keys"; exit 0; }
 [[ $* == *'cat /tmp/agent-key'* ]] && { cat "$STUB_DIR/agentkeyfile" 2>/dev/null; exit 0; }
 [[ $* == *'test -s /tmp/agent-key'* ]] && { [[ -s $STUB_DIR/agentkeyfile ]]; exit; }
 [[ $* == *"rm -f /tmp/agent-key"* ]] && { rm -f "$STUB_DIR/agentkeyfile"; exit 0; }
-[[ $1 == exec && $2 == -i && $3 == agent-x ]] && { cat >> "$STUB_DIR/agent-zone-key"; exit 0; }
-[[ $1 == exec && $2 == -i ]] && { cat > "$STUB_DIR/stdin"; exit 0; }
+[[ $* == *'cat $HOME/.config/toon-agent/key'* ]] && { cat "$STUB_DIR/agent-zone-key" 2>/dev/null; exit 0; }
+[[ $* == *'agent-x -- sh -c umask 077'* ]] && { cat >> "$STUB_DIR/agent-zone-key"; exit 0; }
+[[ $* == *'cat > "$HOME/.config/toon-passphrase"'* ]] && { cat > "$STUB_DIR/stdin"; exit 0; }
 [[ $* == *'cat "$HOME/.config/toon-passphrase"'* ]] && { cat "$STUB_DIR/zone-passphrase" 2>/dev/null; exit 0; }
 [[ $* == *"curl -s"* ]] && { [[ -e $STUB_DIR/relay-down ]] && exit 1; exit 0; }
-[[ $1 == rm ]] && { sed -i "/^${@: -1} /d" "$STUB_DIR/zones"; [[ ${@: -1} == zone-x ]] && rm -f "$STUB_DIR/up"; exit 0; }
-[[ $1 == stop ]] && { sed -i "s/^$2 running/$2 stopped/" "$STUB_DIR/zones"; [[ $2 == zone-x ]] && rm -f "$STUB_DIR/up"; exit 0; }
-[[ $1 == start ]] && { sed -i "s/^$2 stopped/$2 running/" "$STUB_DIR/zones"; exit 0; }
-[[ $1 == create && $* == *"--name agent-x"* ]] && { echo "agent-x running" >> "$STUB_DIR/zones"; exit 0; }
-[[ $1 == create ]] && echo "zone-x running" > "$STUB_DIR/zones"
-[[ $1 == cp && $2 == zone-x:* ]] && echo sealed > "$3"
+[[ $1 == remove ]] && { sed -i "/^$name /d" "$STUB_DIR/zones"; [[ $name == zone-x ]] && rm -f "$STUB_DIR/up" "$STUB_DIR/ports"; [[ $name == agent-x ]] && rm -f "$STUB_DIR/agent-wall" "$STUB_DIR/agent-zone-key"; exit 0; }
+[[ $1 == stop ]] && { sed -i "s/^$name running/$name stopped/" "$STUB_DIR/zones"; [[ $name == zone-x ]] && rm -f "$STUB_DIR/up"; exit 0; }
+[[ $1 == start ]] && { sed -i "s/^$name stopped/$name running/" "$STUB_DIR/zones"; exit 0; }
+if [[ $1 == create ]]; then
+  while (($#)); do
+    case $1 in
+      --name) zone_made=$2 ;;
+      --port) ports+="${2#127.0.0.1:}"$'\n' ;;
+      --net-rule) wall=$2 ;;
+    esac
+    shift
+  done
+  if [[ $zone_made == agent-x ]]; then echo "agent-x running" >> "$STUB_DIR/zones"; echo "$wall" > "$STUB_DIR/agent-wall"
+  else echo "zone-x running" > "$STUB_DIR/zones"; printf '%s' "$ports" | cut -d: -f1 > "$STUB_DIR/ports"; fi
+  exit 0
+fi
+[[ $1 == copy && $3 == zone-x:* ]] && echo sealed > "$4"
 exit 0
 STUB
-  chmod +x "$SPACETURTLE_SBX"
+  chmod +x "$SPACETURTLE_MSB"
 }
 run_launcher() { "$root/spaceturtle" start > "$tmp/out" 2>&1; }
 launcher_check() { # name, condition result (0 = pass)
@@ -1031,8 +1072,8 @@ a=$(line_no '^create '); b=$(line_no 'toon init'); c=$(line_no 'toon wallet fund
 [[ -n $a && -n $b && -n $c && -n $d && -n $e && $a -lt $b && $b -lt $c && $c -lt $d && $d -lt $e ]]
 launcher_check "a first run issues zone, node, faucet, supervisor, backup in order" $?
 grep -q 'toon init --accept-anyone-terms --network devnet' "$STUB_DIR/calls"; launcher_check "the node is initialised on devnet" $?
-grep -q -- "^policy allow network --sandbox zone-x .*\*\*" "$STUB_DIR/calls" && ! grep -E '^policy allow' "$STUB_DIR/calls" | grep -qv -- '--sandbox zone-x'
-launcher_check "the any-address rule names the zone and is never machine-wide" $?
+grep '^create .*--name zone-x ' "$STUB_DIR/calls" | grep -q -- '--net public ' && ! grep '^create .*--name zone-x ' "$STUB_DIR/calls" | grep -qE -- '--net (all|host|private)|--net-default|allow@'
+launcher_check "the connector's zone reaches the public internet, and nothing of the machine or its network" $?
 [[ -s $SPACETURTLE_BACKUP_DIR/wallet-backup ]] && grep -q "$SPACETURTLE_BACKUP_DIR/wallet-backup" "$tmp/out" && grep -qi keep "$tmp/out"
 launcher_check "the backup is written where the Observer is told, with a word to keep it" $?
 ! grep -rq -i passphrase "$tmp/out" "$SPACETURTLE_STATE_DIR" "$SPACETURTLE_BACKUP_DIR" "$SPACETURTLE_DATA_DIR" 2>/dev/null \
@@ -1045,71 +1086,185 @@ launcher_check "the supervisor check does not find its own shell" $?
 : > "$STUB_DIR/calls"
 run_launcher; rc=$?
 launcher_check "a second run succeeds" $rc
-! grep -E '^create |^cp [^z]|toon init|toon wallet fund|toon wallet backup|^policy' "$STUB_DIR/calls" | grep -q .
-launcher_check "a second run issues nothing that creates, initialises or funds" $?
+! grep -E '^create |^remove |^start |^copy |toon init|toon wallet fund|toon wallet backup|untrusted-runtime' "$STUB_DIR/calls" | grep -q .
+launcher_check "a second run issues nothing that creates, starts, initialises, funds or backs up" $?
+
+# toon's home is the wallet's storage, the two ports that lead to the zone are published on
+# the machine's loopback, and an image that is not trusted gets the sandboxed runtime.
+launcher_env; run_launcher
+made=$(grep '^create .*--name zone-x ' "$STUB_DIR/calls")
+[[ $made == *" --mount-dir $SPACETURTLE_DATA_DIR:/home/agent/.toon/agent-node:uid=1000,gid=1000 "* ]]; launcher_check "toon's home in the zone is the wallet's storage, mounted as the zone's user's own" $?
+[[ $made == *" --port 127.0.0.1:7123:17100 --port 127.0.0.1:7124:17101"* && $(grep -o -- '--port ' <<<"$made" | wc -l) -eq 2 ]]
+launcher_check "the orders and the connector are published on the machine's loopback, and nowhere else" $?
+[[ $made == *" --mount-owned /var/lib/docker:kind=disk,"* && $made == *" --tmpfs /run "* ]]; launcher_check "the container engine has a disk of the zone's own, and finds /run empty when the zone starts" $?
+grep 'untrusted-runtime' "$STUB_DIR/calls" | grep -q 'echo runsc > $HOME/.toon/agent-node/untrusted-runtime'; launcher_check "an image that is not trusted is given the sandboxed runtime" $?
+u=$SPACETURTLE_UNIT_DIR/spaceturtle-connector.service
+grep -q "^ExecStart=$root/spaceturtle supervise$" "$u" && grep -q '^Restart=always$' "$u" && grep -q '^WantedBy=default.target$' "$u" && ! grep -q '^ExecStartPre' "$u" && grep -q '^KillMode=process$' "$u" \
+  && grep -q '^--user enable spaceturtle-connector.service$' "$STUB_DIR/systemctl-calls"
+launcher_check "a unit keeps the supervisor running: it is started again when it ends, leaves the zone when stopped, and is enabled for the next start of the machine" $?
+: > "$STUB_DIR/calls"; SPACETURTLE_CONNECTOR_PORT=9000 run_launcher; rc=$?
+[[ $rc -ne 0 ]] && grep -q '7123 and 7124' "$tmp/out" && grep -q 'spaceturtle upgrade' "$tmp/out" && ! grep -qE '^create |toon ' "$STUB_DIR/calls"
+launcher_check "a zone made with other ports is not used with new ones, and the run says how to change them" $?
+launcher_env; SPACETURTLE_CONNECTOR_PORT=9000 run_launcher; echo secret-key-123 > "$SPACETURTLE_MODEL_KEY_FILE"; (unset SPACETURTLE_CONNECTOR_PORT; "$root/spaceturtle" session --unattended > "$tmp/out" 2>&1); rc=$?
+[[ $rc -eq 0 && $(<"$STUB_DIR/agent-wall") == "allow@dns,allow@host:tcp:9000,allow@host:tcp:9001,"* ]] && ! grep -qE '^remove ' "$STUB_DIR/calls"; launcher_check "the ports an Install was made with are kept with it, for the units, which have no environment" $?
+SPACETURTLE_CONNECTOR_PORT=65535 run_launcher; [[ $? -ne 0 ]]; launcher_check "a port with no port after it is refused" $?
+launcher_env; run_launcher; echo "zone-x stopped" > "$STUB_DIR/zones"; rm "$STUB_DIR/up"; : > "$STUB_DIR/calls"; "$root/spaceturtle" supervise > "$tmp/out" 2>&1
+a=$(line_no '^start --quiet zone-x$'); b=$(line_no 'exec connector-start'); [[ -n $a && -n $b && $a -lt $b ]] && ! grep -q '^create ' "$STUB_DIR/calls"
+launcher_check "what the unit runs starts a stopped zone, then the supervisor in it" $?
 
 # The zone comes from the connector's zone image, nothing is copied in, and the supervisor is connector-start.
 grep '^create ' "$STUB_DIR/calls" >/dev/null; launcher_env; run_launcher
-grep '^create ' "$STUB_DIR/calls" | grep -q -- '--template ghcr.io/toon-protocol/spaceturtle-connector-zone:latest '; launcher_check "the zone is made from the connector's zone image" $?
+grep -q -- '^create ghcr.io/toon-protocol/spaceturtle-connector-zone:latest --name zone-x .*--pull if-missing ' "$STUB_DIR/calls"; launcher_check "the zone is made from the connector's zone image, pulled if it is not here" $?
 launcher_env; SPACETURTLE_CONNECTOR_IMAGE=example.test/zone:1 run_launcher
-grep '^create ' "$STUB_DIR/calls" | grep -q -- '--template example.test/zone:1 '; launcher_check "SPACETURTLE_CONNECTOR_IMAGE changes the image" $?
-! grep -q '^cp [^z]' "$STUB_DIR/calls" && ! grep -qE '^cp .*:/' <(grep -v 'wallet-backup' "$STUB_DIR/calls"); launcher_check "nothing is copied into the zone" $?
+grep -q -- '^create example.test/zone:1 --name zone-x ' "$STUB_DIR/calls"; launcher_check "SPACETURTLE_CONNECTOR_IMAGE changes the image" $?
+! grep '^copy ' "$STUB_DIR/calls" | grep -qv -- "^copy --quiet zone-x:/tmp/wallet-backup " && ! grep '^create ' "$STUB_DIR/calls" | grep -qE -- '--copy|--script'; launcher_check "nothing is copied into the zone" $?
 grep connector-start "$STUB_DIR/calls" | grep -q 'TOON_PASSPHRASE_FILE=\$HOME/.config/toon-passphrase' && ! grep -q 'toon up' "$STUB_DIR/calls"
 launcher_check "the supervisor starts through connector-start with the passphrase file outside the wallet's storage" $?
 [[ $(grep -c connector-start "$STUB_DIR/calls") -eq 1 ]]; launcher_check "connector-start is started once" $?
 : > "$STUB_DIR/calls"; run_launcher; ! grep -q connector-start "$STUB_DIR/calls"; launcher_check "it is not started again while it runs" $?
 
-for step in "ln -sfn" "toon wallet fund" "connector-start" "toon wallet backup" "toon init"; do
+for step in "untrusted-runtime" "toon wallet fund" "connector-start" "toon wallet backup" "toon init"; do
   launcher_env; echo "$step" > "$STUB_DIR/fail-on"; run_launcher; rc=$?
   [[ $rc -ne 0 ]]; launcher_check "a run failing at '$step' stops" $?
   rm "$STUB_DIR/fail-on"; : > "$STUB_DIR/calls"; run_launcher; rc=$?
   launcher_check "a run after one that failed at '$step' succeeds" $rc
   [[ -s $SPACETURTLE_BACKUP_DIR/wallet-backup ]]; launcher_check "  and finishes the backup" $?
-  ! grep -E '^create --name zone-x ' "$STUB_DIR/calls" | grep -q .; launcher_check "  without creating the zone again" $?
+  ! grep -E '^create .*--name zone-x ' "$STUB_DIR/calls" | grep -q .; launcher_check "  without creating the zone again" $?
 done
 launcher_env; echo "zone-x" > "$STUB_DIR/fail-on"; run_launcher
 rm "$STUB_DIR/fail-on"; echo "zone-x running" > "$STUB_DIR/zones"; : > "$STUB_DIR/calls"; run_launcher
-! grep -E '^create --name zone-x ' "$STUB_DIR/calls" | grep -q .; launcher_check "a zone that exists is not created again" $?
+! grep -E '^create .*--name zone-x ' "$STUB_DIR/calls" | grep -q .; launcher_check "a zone that exists is not created again" $?
 launcher_env; echo "zone-x-old running" > "$STUB_DIR/zones"; run_launcher
 grep -q '^create ' "$STUB_DIR/calls"; launcher_check "a zone whose name only starts with the zone's is not taken for it" $?
 # The zone is lost: a new one gets every step again, not only the create.
 rm "$STUB_DIR/zones"; : > "$STUB_DIR/calls"; rm "$STUB_DIR/up"; run_launcher
-grep -q '^policy allow network --sandbox zone-x' "$STUB_DIR/calls" && grep -q -- "ln -sfn" "$STUB_DIR/calls" && grep -q 'toon init' "$STUB_DIR/calls" \
+grep -q '^create .*--name zone-x ' "$STUB_DIR/calls" && grep -q 'untrusted-runtime' "$STUB_DIR/calls" && grep -q 'toon init' "$STUB_DIR/calls" \
   && grep -q 'toon wallet fund' "$STUB_DIR/calls" && grep -q 'toon wallet backup' "$STUB_DIR/calls"
 launcher_check "a zone made again gets every step again" $?
 
 launcher_env; rm "$SPACETURTLE_KVM"; run_launcher; rc=$?
 [[ $rc -ne 0 ]] && grep -qi kvm "$tmp/out" && grep -qi firmware "$tmp/out" && [[ ! -e $STUB_DIR/calls ]]; launcher_check "with no KVM it stops before doing anything, with cause and remedy" $?
-launcher_env; touch "$STUB_DIR/signed-out"; run_launcher; rc=$?
-[[ $rc -ne 0 ]] && grep -q 'sbx login' "$tmp/out" && ! grep -qE '^(create|policy|exec|cp)' "$STUB_DIR/calls"; launcher_check "signed out, it stops before doing anything, with cause and remedy" $?
-launcher_env; SPACETURTLE_SBX=$tmp/bin/missing run_launcher; rc=$?
-[[ $rc -ne 0 ]] && grep -qi 'not installed' "$tmp/out" && grep -q 'github.com/docker/sbx-releases' "$tmp/out" \
-  && [[ ! -e $SPACETURTLE_STATE_DIR/launcher && ! -e $SPACETURTLE_DATA_DIR && ! -e $SPACETURTLE_BACKUP_DIR ]]; launcher_check "with sbx missing it stops before doing anything, with cause and remedy" $?
+if [[ $EUID -ne 0 ]]; then
+  launcher_env; chmod 000 "$SPACETURTLE_KVM"; run_launcher; rc=$?
+  [[ $rc -ne 0 ]] && grep -q 'usermod -aG kvm' "$tmp/out" && [[ ! -e $STUB_DIR/calls ]]; launcher_check "with a KVM the person may not use it stops before doing anything, with cause and remedy" $?
+fi
+launcher_env; touch "$STUB_DIR/broken"; run_launcher; rc=$?
+[[ $rc -ne 0 ]] && grep -q 'doctor' "$tmp/out" && ! grep -qE '^(create|exec|copy|start)' "$STUB_DIR/calls"; launcher_check "with a microsandbox that does not run it stops before doing anything, and says how to learn why" $?
+launcher_env; SPACETURTLE_MSB_HOME=$tmp/$(printf 'h%.0s' {1..60}) run_launcher; rc=$?
+[[ $rc -ne 0 ]] && grep -q '54 characters' "$tmp/out" && [[ ! -e $STUB_DIR/calls ]]; launcher_check "with a home microsandbox would refuse as too long it stops before doing anything, and says the limit" $?
+launcher_env; (unset SPACETURTLE_MSB SPACETURTLE_MSB_HOME; HOME=/home/u XDG_DATA_HOME=/$(printf 'd%.0s' {1..50}) "$root/spaceturtle" status > "$tmp/out" 2>&1)
+grep -q 'not installed at /home/u/.spaceturtle-msb/bin/msb' "$tmp/out"
+launcher_check "a data directory too long for microsandbox gives way to a home for it in the home directory" $?
+launcher_env; SPACETURTLE_MSB=$tmp/bin/missing run_launcher; rc=$?
+[[ $rc -ne 0 ]] && grep -qi 'not installed' "$tmp/out" && grep -q 'install.sh' "$tmp/out" \
+  && [[ ! -e $SPACETURTLE_STATE_DIR/launcher && ! -e $SPACETURTLE_DATA_DIR && ! -e $SPACETURTLE_BACKUP_DIR ]]; launcher_check "with microsandbox missing it stops before doing anything, with cause and remedy" $?
+! grep -rqiE 'login|sign(ed)? in|account' "$tmp/out"; launcher_check "nothing the launcher says asks for an account" $?
 
-# --- the launcher: spaceturtle mainnet ---
-run_mainnet() { printf '%s\n' "$1" | "$root/spaceturtle" mainnet "${@:2}" > "$tmp/out" 2>&1; }
-changed_nothing() { ! grep -qE 'toon network set|toon limit set' "$STUB_DIR/calls"; }
+# --- install.sh: one command puts the launcher of a release on the machine ---
+# A curl that serves GitHub from $STUB_DIR: the latest release's tag, the release's source
+# archive, and a microsandbox archive: an msb that says its version, and the library beside it.
+install_env() {
+  launcher_env
+  export SPACETURTLE_INSTALL_DIR=$tmp/launcher SPACETURTLE_BIN_DIR=$tmp/linkbin SPACETURTLE_CURL=$tmp/bin/gh-curl
+  export SPACETURTLE_MSB_VERSION=9.9.9
+  mkdir -p "$tmp/src/spaceturtle-1.2.3/agent" "$tmp/src/msb"
+  cp "$root/spaceturtle" "$tmp/src/spaceturtle-1.2.3/"; cp "$root/agent/spaceturtle.yaml" "$tmp/src/spaceturtle-1.2.3/agent/"
+  tar -czf "$STUB_DIR/source.tar.gz" -C "$tmp/src" spaceturtle-1.2.3
+  printf '#!/bin/bash\necho "msb 9.9.9"\n' > "$tmp/src/msb/msb"; echo kernel > "$tmp/src/msb/libkrunfw.so.5.6.1"
+  tar -czf "$STUB_DIR/msb.tar.gz" -C "$tmp/src/msb" msb libkrunfw.so.5.6.1
+  export SPACETURTLE_MSB_SHA256=$(sha256sum "$STUB_DIR/msb.tar.gz" | cut -d' ' -f1)
+  cat > "$SPACETURTLE_CURL" <<'STUB'
+#!/bin/bash
+echo "$*" >> "$STUB_DIR/curl-calls"
+out=; url=${@: -1}
+while (($#)); do [[ $1 == -o ]] && out=$2; shift; done
+case $url in
+  */releases/latest) [[ -e $STUB_DIR/no-release ]] && exit 22; echo '{"tag_name":"v1.2.3"}' ;;
+  */archive/refs/tags/v1.2.3.tar.gz) cp "$STUB_DIR/source.tar.gz" "$out" ;;
+  */v9.9.9/microsandbox-linux-x86_64.tar.gz) cp "$STUB_DIR/msb.tar.gz" "$out" ;;
+  *) exit 22 ;;
+esac
+STUB
+  chmod +x "$SPACETURTLE_CURL"
+}
+run_install() { "$root/install.sh" > "$tmp/out" 2>&1; }
+install_check() { count=$((count + 1)); if [[ $2 -eq 0 ]]; then echo "ok   install: $1"; else echo "FAIL install: $1"; sed 's/^/     /' "$tmp/out" 2>/dev/null; fails=$((fails + 1)); fi; }
 
-launcher_env; echo "zone-x running" > "$STUB_DIR/zones"
-run_mainnet "yes"; rc=$?
-[[ $rc -ne 0 ]] && changed_nothing; launcher_check "mainnet without the typed word changes nothing" $?
-grep -q 0xAAA111 "$tmp/out" && grep -q SoLBBB222 "$tmp/out" && grep -qi 'no faucet' "$tmp/out" && grep -qi 'real funds' "$tmp/out"
-launcher_check "the message names the addresses to fund and says there is no faucet" $?
-: > "$STUB_DIR/calls"; run_mainnet ""; rc=$?
-[[ $rc -ne 0 ]] && changed_nothing; launcher_check "mainnet with no answer changes nothing" $?
-: > "$STUB_DIR/calls"; run_mainnet "mainnet"; rc=$?
-launcher_check "mainnet with the typed word succeeds" $rc
-grep -q 'toon network set mainnet' "$STUB_DIR/calls" && grep -q 'toon limit set --network-default' "$STUB_DIR/calls"; launcher_check "it moves the node and lowers the limit" $?
-s=$(grep -n 'toon status --json' "$STUB_DIR/calls" | tail -1 | cut -d: -f1); n=$(line_no 'toon network set mainnet')
-[[ -n $s && -n $n && $s -gt $n ]] && grep -q 'is on mainnet' "$tmp/out"; launcher_check "after it, status shows mainnet" $?
-: > "$STUB_DIR/calls"; run_mainnet "mainnet"; rc=$?
-[[ $rc -eq 0 ]] && grep -qi 'already on mainnet' "$tmp/out" && changed_nothing; launcher_check "on mainnet already, it says so and changes nothing" $?
-launcher_env; echo "zone-x running" > "$STUB_DIR/zones"; run_mainnet "mainnet" --keep-limit; rc=$?
-[[ $rc -eq 0 ]] && grep -q 'toon network set mainnet' "$STUB_DIR/calls" && ! grep -q 'toon limit set' "$STUB_DIR/calls"; launcher_check "--keep-limit leaves the limit alone" $?
-launcher_env; echo "zone-x running" > "$STUB_DIR/zones"; echo 'toon limit set' > "$STUB_DIR/fail-on"; run_mainnet "mainnet"; rc=$?
-[[ $rc -ne 0 ]] && grep -q 'limit could not be lowered' "$tmp/out" && grep -q 'toon limit set --network-default' "$tmp/out"; launcher_check "a failed limit stops and says how to lower it" $?
-launcher_env; run_mainnet "mainnet"; rc=$?
-[[ $rc -ne 0 ]] && changed_nothing; launcher_check "with no zone it stops and changes nothing" $?
+install_env; run_install; rc=$?
+[[ $rc -eq 0 ]] && cmp -s "$tmp/launcher/spaceturtle" "$root/spaceturtle" && cmp -s "$tmp/launcher/agent/spaceturtle.yaml" "$root/agent/spaceturtle.yaml" && [[ -x $tmp/launcher/spaceturtle && $(<"$tmp/launcher/version") == 1.2.3 ]]
+install_check "the latest release's launcher and agent definition are installed, with the release named" $?
+[[ $(readlink "$tmp/linkbin/spaceturtle") == "$tmp/launcher/spaceturtle" ]]; install_check "spaceturtle is linked into the bin directory" $?
+grep -q 'spaceturtle start' "$tmp/out" && grep -q 'spaceturtle key' "$tmp/out" && grep -q "$tmp/linkbin" "$tmp/out" && ! grep -qiE 'login|sign in|account' "$tmp/out"
+install_check "it ends with what to run next, which names no account and no sign-in" $?
+h=$SPACETURTLE_MSB_HOME; [[ $("$h/bin/msb" --version) == "msb 9.9.9" && $(readlink "$h/lib/libkrunfw.so") == libkrunfw.so.5 && $(readlink "$h/lib/libkrunfw.so.5") == libkrunfw.so.5.6.1 && -s $h/lib/libkrunfw.so.5.6.1 ]]
+install_check "microsandbox is put in a home that is spaceturtle's alone, its library beside it" $?
+"$tmp/linkbin/spaceturtle" start > "$tmp/out" 2>&1; rc=$?
+[[ $rc -eq 0 ]] && grep -q -- '^create ghcr.io/toon-protocol/spaceturtle-connector-zone:1.2.3 --name zone-x ' "$STUB_DIR/calls" && grep -q -- '^create ghcr.io/toon-protocol/spaceturtle-agent-zone:1.2.3 --name agent-x ' "$STUB_DIR/calls"
+install_check "run through the link, the launcher finds itself and pulls the images of the release it came from" $?
+: > "$STUB_DIR/calls"; echo secret-key-123 > "$SPACETURTLE_MODEL_KEY_FILE"; "$tmp/linkbin/spaceturtle" session --unattended > "$tmp/out" 2>&1; rc=$?
+[[ $rc -eq 0 ]] && cmp -s <(head -n -2 "$SPACETURTLE_STATE_DIR/session/spaceturtle.yaml") "$tmp/launcher/agent/spaceturtle.yaml"; install_check "  and a session reads the definition that was installed beside it" $?
+echo changed >> "$tmp/launcher/spaceturtle"; echo stale > "$tmp/launcher/leftover"; run_install; rc=$?
+[[ $rc -eq 0 ]] && cmp -s "$tmp/launcher/spaceturtle" "$root/spaceturtle" && [[ ! -e $tmp/launcher/leftover && ! -e $tmp/launcher.new && ! -e $tmp/launcher.old ]]; install_check "running it again replaces the launcher whole" $?
+[[ $(grep -c microsandbox-linux "$STUB_DIR/curl-calls") -eq 1 ]]; install_check "  and leaves a microsandbox that is already the pinned version" $?
+install_env; rm "$SPACETURTLE_KVM"; run_install; rc=$?
+[[ $rc -ne 0 ]] && grep -qi kvm "$tmp/out" && grep -qi firmware "$tmp/out" && [[ ! -e $tmp/launcher && ! -e $tmp/linkbin && ! -e $STUB_DIR/curl-calls ]]; install_check "with no KVM it says so and installs nothing" $?
+install_env; SPACETURTLE_MSB_SHA256=$(printf '0%.0s' {1..64}) run_install; rc=$?
+[[ $rc -ne 0 && ! -e $SPACETURTLE_MSB_HOME/bin/msb ]] && grep -q 'not the release it should be' "$tmp/out"; install_check "a microsandbox download with another checksum is not installed" $?
+if [[ $EUID -ne 0 ]]; then
+  install_env; chmod 000 "$SPACETURTLE_KVM"; run_install; rc=$?
+  [[ $rc -ne 0 && ! -e $tmp/launcher ]] && grep -q 'usermod -aG kvm' "$tmp/out"; install_check "with a KVM the person may not use it says how to be allowed, and installs nothing" $?
+fi
+install_env; touch "$STUB_DIR/no-release"; run_install; rc=$?
+[[ $rc -ne 0 && ! -e $tmp/launcher ]] && grep -q 'SPACETURTLE_VERSION' "$tmp/out"; install_check "with no release to be found it says how to name one, and installs nothing" $?
+install_env; touch "$STUB_DIR/no-release"; SPACETURTLE_VERSION=v1.2.3 run_install; rc=$?
+[[ $rc -eq 0 && $(<"$tmp/launcher/version") == 1.2.3 ]] && ! grep -q 'releases/latest' "$STUB_DIR/curl-calls"; install_check "a release can be named" $?
+install_env; SPACETURTLE_VERSION='main; rm -rf x' run_install; rc=$?
+[[ $rc -ne 0 && ! -e $tmp/launcher ]] && grep -q 'is not a release' "$tmp/out"; install_check "a version that is not a release is refused" $?
+unset SPACETURTLE_INSTALL_DIR SPACETURTLE_BIN_DIR SPACETURTLE_CURL SPACETURTLE_MSB_SHA256 SPACETURTLE_MSB_VERSION
+
+# --- the launcher: the network is start's flags, kept with the Install ---
+start_with() { printf '%s\n' "$1" | "$root/spaceturtle" start "${@:2}" > "$tmp/out" 2>&1; } # the typed answer, then the flags
+init_line() { grep 'toon init' "$STUB_DIR/calls"; }
+made_nothing() { ! grep -qE '^create |toon init|toon wallet|agent-key' "$STUB_DIR/calls" 2>/dev/null; }
+
+launcher_env; start_with "" --evm-rpc-url 'https://rpc.example.test/v1?key=a*b' --evm-token 0xAbC --solana --max-per-day 500; rc=$?
+[[ $rc -eq 0 && $(init_line) == *"toon init --accept-anyone-terms --network devnet '--evm-rpc-url' 'https://rpc.example.test/v1?key=a*b' '--evm-token' '0xAbC' '--solana' '--max-per-day' '500' --json"* ]]
+launcher_check "start's flags go to toon init as given, on devnet unless a network is named" $?
+: > "$STUB_DIR/calls"; start_with ""; rc=$?
+[[ $rc -eq 0 ]] && ! grep -q 'toon init' "$STUB_DIR/calls"; launcher_check "a later start needs no flags" $?
+start_with "" --evm-rpc-url 'https://rpc.example.test/v1?key=a*b' --evm-token 0xAbC --solana --max-per-day 500; launcher_check "a later start with the same flags is accepted" $?
+: > "$STUB_DIR/calls"; start_with "" --evm-rpc-url https://other.example.test; rc=$?
+[[ $rc -ne 0 ]] && grep -q 'already initialised' "$tmp/out" && grep -q 'rpc.example.test' "$tmp/out" && [[ ! -s $STUB_DIR/calls || -z $(grep -vE '^ls$' "$STUB_DIR/calls") ]]
+launcher_check "a later start that names another network is refused, says what the Install has, and changes nothing" $?
+launcher_env; echo "toon init" > "$STUB_DIR/fail-on"; start_with "" --evm-token 0xAbC; rm "$STUB_DIR/fail-on"; start_with ""; rc=$?
+[[ $rc -eq 0 && $(init_line | tail -1) == *"'--evm-token' '0xAbC'"* ]]; launcher_check "a run that was interrupted goes on with the network it was given" $?
+for bad_flags in "--network testnet" "--evm-rpc-url" "--evm-rpc-url it's" "--evm-chain-id base" "--everything"; do
+  launcher_env; start_with "" $bad_flags; rc=$?
+  [[ $rc -ne 0 ]] && grep -q 'usage: spaceturtle start' "$tmp/out" && made_nothing; launcher_check "start refuses '$bad_flags' with the usage and makes nothing" $?
+done
+
+launcher_env; start_with "yes" --network mainnet; rc=$?
+[[ $rc -ne 0 ]] && grep -qi 'real funds' "$tmp/out" && grep -qi 'no faucet' "$tmp/out" && made_nothing; launcher_check "mainnet without the typed word makes nothing" $?
+start_with "" --network mainnet; rc=$?
+[[ $rc -ne 0 ]] && made_nothing; launcher_check "mainnet with no answer makes nothing" $?
+start_with "mainnet" --network mainnet; rc=$?
+[[ $rc -eq 0 && $(init_line) == *"toon init --accept-anyone-terms --network mainnet --json"* ]]; launcher_check "mainnet with the typed word initialises the node on mainnet" $?
+! grep -q 'toon wallet fund' "$STUB_DIR/calls" && grep -q 0xAAA111 "$tmp/out" && grep -q SoLBBB222 "$tmp/out" && grep -qi 'no faucet' "$tmp/out"
+launcher_check "on mainnet nothing is funded, and the addresses to fund are named" $?
+: > "$STUB_DIR/calls"; "$root/spaceturtle" start < /dev/null > "$tmp/out" 2>&1; rc=$?
+[[ $rc -eq 0 ]] && ! grep -q 'type "mainnet"' "$tmp/out" && ! grep -q 'toon wallet' "$STUB_DIR/calls"; launcher_check "a later start of a mainnet Install asks nothing and funds nothing" $?
+
+launcher_env; echo 0x2105 > "$STUB_DIR/chain-id"; start_with "" --evm-chain-id 8453 --evm-rpc-url https://rpc.example.test; rc=$?
+c=$(line_no eth_chainId); f=$(line_no 'toon wallet fund'); [[ $rc -eq 0 && -n $c && -n $f && $c -lt $f ]] && ! grep -q -- '--evm-chain-id' <(init_line)
+launcher_check "the chain id is asked of the node's RPC endpoint before anything is funded, and is not one of toon's flags" $?
+: > "$STUB_DIR/calls"; start_with "" --evm-chain-id 8453 --evm-rpc-url https://rpc.example.test; ! grep -q eth_chainId "$STUB_DIR/calls"; launcher_check "a chain that was checked is not asked again" $?
+launcher_env; echo 0x14a34 > "$STUB_DIR/chain-id"; start_with "" --evm-chain-id 8453; rc=$?
+[[ $rc -ne 0 ]] && grep -q 'serves chain 84532, not 8453' "$tmp/out" && ! grep -qE 'toon wallet fund|agent-key create|connector-start' "$STUB_DIR/calls"
+launcher_check "an endpoint that serves another chain stops the run before anything is funded or started" $?
+: > "$STUB_DIR/calls"; start_with ""; rc=$?
+[[ $rc -ne 0 ]] && ! grep -q 'toon wallet fund' "$STUB_DIR/calls"; launcher_check "  and so does the next run" $?
+launcher_env; start_with "" --evm-chain-id 8453; rc=$?
+[[ $rc -ne 0 ]] && grep -q 'did not say which chain' "$tmp/out" && ! grep -q 'toon wallet fund' "$STUB_DIR/calls"; launcher_check "an endpoint that does not answer stops the run too" $?
 
 # --- sessions and the timer ---
 # A launcher whose connector's zone is running, with a model key.
@@ -1118,52 +1273,120 @@ session_env() {
   echo secret-key-123 > "$SPACETURTLE_MODEL_KEY_FILE"; : > "$STUB_DIR/calls"
 }
 run_cmd() { "$root/spaceturtle" "$@" > "$tmp/out" 2>&1; }
+sdef() { echo "$SPACETURTLE_STATE_DIR/session/spaceturtle.yaml"; }
+session_run() { grep 'docker-agent run' "$STUB_DIR/calls"; }
+GUEST_DEF=/home/agent/session/spaceturtle.yaml
+BASE_WALL="allow@dns,allow@host:tcp:7123,allow@host:tcp:7124"; SKILL_WALL="allow@api.github.com:tcp:443,allow@codeload.github.com:tcp:443"
 session_env; run_cmd session; rc=$?
-run=$(grep '^run ' "$STUB_DIR/calls")
-[[ $rc -eq 0 && $run == *"--image ghcr.io/toon-protocol/spaceturtle-agent-zone:latest"* && $run == *"agent/spaceturtle.yaml"* ]]; launcher_check "a session passes the zone image and the definition" $?
-[[ $(grep -o -- '--allow-host [^ ]*' <<<"$run" | tr '\n' ' ') == "--allow-host api.anthropic.com --allow-host localhost:7123 " ]]; launcher_check "the allow-list is exactly the provider and one loopback port" $?
+run=$(session_run)
+[[ $rc -eq 0 && $run == "exec --quiet --tty -e ANTHROPIC_API_KEY -e TOON_AGENT_KEY agent-x -- docker-agent run --sandbox=false --app-name spaceturtle --model anthropic/claude-sonnet-5-5 --banner-file /usr/local/share/spaceturtle/banner.txt --sidebar-section Earnings=cat /home/agent/session/earnings --sidebar-section Spending limit=spaceturtle-limit --sidebar-section TOON apps=spaceturtle-apps $GUEST_DEF" ]] && cmp -s "$(sdef)" "$root/agent/spaceturtle.yaml"
+launcher_check "a session runs docker-agent in the agent's zone, on the definition as shipped" $?
+session_env; run_cmd; rc=$?
+[[ $rc -eq 0 && $(session_run) == "$run" ]]; launcher_check "spaceturtle with nothing after it is a session" $?
+# With someone there the chat opens on the banner; nobody watches an unattended session.
+[[ $run == *" --banner-file /usr/local/share/spaceturtle/banner.txt --sidebar-section Earnings=cat /home/agent/session/earnings --sidebar-section Spending limit=spaceturtle-limit --sidebar-section TOON apps=spaceturtle-apps $GUEST_DEF" ]] && ! yq -e '.agents.spaceturtle | has("welcome_message")' "$root/agent/spaceturtle.yaml" > /dev/null 2>&1
+launcher_check "a session opens on spaceturtle's banner, which a welcome message would hide" $?
+# The sidebar's list of apps, from what `toon status` tells an agent key.
+apps_list() { mkdir -p "$tmp/apps-bin"; printf '#!/bin/sh\ncat <<JSON\n%s\nJSON\n' "$1" > "$tmp/apps-bin/toon"; chmod +x "$tmp/apps-bin/toon"; PATH=$tmp/apps-bin:$PATH sh "$root/images/agent/spaceturtle-apps"; }
+[[ $(apps_list '{"pending_apps":[{"name":"notes","status":"pending"}],"toon_apps":[{"name":"relay","connector":{"running":true},"apps":[{"name":"relay","running":true},{"name":"whoami","running":false}]}]}') == $'● relay  running\n○ whoami  stopped\n◌ notes  pending' ]]
+launcher_check "the sidebar lists each app, whether it runs, and the apps that wait" $?
+[[ $(apps_list '{"error":{"code":"not_running"}}') == "the node does not answer" ]]; launcher_check "the sidebar says when the node does not answer" $?
+limit_shown() { mkdir -p "$tmp/apps-bin"; printf '#!/bin/sh\ncat <<JSON\n%s\nJSON\n' "$1" > "$tmp/apps-bin/toon"; chmod +x "$tmp/apps-bin/toon"; PATH=$tmp/apps-bin:$PATH sh "$root/images/agent/spaceturtle-limit"; }
+[[ $(limit_shown '{"limits":{"relay":{"per_command":"10000000","per_day":"100000000","remaining_today":"99999000"}}}') == $'left today   99,999,000\nper day      100,000,000\nper command  10,000,000\nin base units of the token' ]]
+launcher_check "the sidebar shows what the agent key may still pay today, of its limits" $?
+[[ $(limit_shown '{"error":{"code":"not_running"}}') == "the node does not answer" ]]; launcher_check "the spending limit says when the node does not answer" $?
+[[ $(<"$STUB_DIR/agent-wall") == "$BASE_WALL,allow@api.anthropic.com:tcp:443,$SKILL_WALL" ]]
+launcher_check "the agent's zone reaches name resolution, the two ports, the provider's host and the skills' hosts, and nothing else" $?
 ! grep -q secret-key-123 "$STUB_DIR/calls"; launcher_check "the model key is not an argument" $?
-[[ $run != *--max-cost* ]]; launcher_check "a session by hand has no unattended ceiling" $?
-run_cmd set model openai/gpt-x; : > "$STUB_DIR/calls"; run_cmd session
-[[ $(grep -o -- '--allow-host [^ ]*' "$STUB_DIR/calls" | head -1) == "--allow-host api.openai.com" && $(grep '^run ' "$STUB_DIR/calls") == *"--model openai/gpt-x"* ]]; launcher_check "one setting changes the model, and the provider follows" $?
-: > "$STUB_DIR/calls"; run_cmd session --unattended; rc=$?
-grep '^run ' "$STUB_DIR/calls" | grep -q -- '--max-cost 1 '; launcher_check "an unattended session has a cost ceiling by default" $?
+[[ $run != *--yolo* && $run != *--exec* ]] && ! grep -q '^budget:' "$(sdef)"; launcher_check "a session by hand asks before a tool runs and has no unattended ceiling" $?
+a=$(line_no '^start --quiet agent-x$'); b=$(line_no 'docker-agent run'); c=$(line_no '^stop .*agent-x$'); [[ -n $a && -n $b && -n $c && $a -lt $b && $b -lt $c ]] && grep -q '^agent-x stopped' "$STUB_DIR/zones"
+launcher_check "a session starts the agent's zone, and stops it when it ends" $?
+: > "$STUB_DIR/calls"; run_cmd session; ! grep -qE '^create |^remove ' "$STUB_DIR/calls"; launcher_check "a zone whose wall is the one wanted is not made again" $?
+( flock 9; sleep 3 ) 9> "$SPACETURTLE_STATE_DIR/session.lock" & sleep 0.5; : > "$STUB_DIR/calls"; run_cmd session; rc=$?; wait
+[[ $rc -ne 0 && -z $(session_run) ]] && grep -q 'already running' "$tmp/out"; launcher_check "a second session while one runs is refused" $?
+run_cmd set model openai/gpt-x; : > "$STUB_DIR/calls"; run_cmd session; rc=$?
+r=$(line_no '^remove .*agent-x$'); c=$(line_no '^create .*--name agent-x '); d=$(line_no 'docker-agent run')
+[[ $rc -eq 0 && -n $r && -n $c && -n $d && $r -lt $c && $c -lt $d && $(<"$STUB_DIR/agent-wall") == "$BASE_WALL,allow@api.openai.com:tcp:443,$SKILL_WALL" && $(session_run) == *"-e OPENAI_API_KEY "*"--model openai/gpt-x"* ]]
+launcher_check "one setting changes the model, the provider follows, and the zone is made again with the new wall" $?
+[[ $(<"$STUB_DIR/agent-zone-key") == PRIVATE-HALF-1 && $(wc -l < "$STUB_DIR/keys") -eq 1 ]] && ! grep -rq 'PRIVATE-HALF' "$STUB_DIR/calls" "$tmp/out" "$SPACETURTLE_STATE_DIR" "$SPACETURTLE_CONFIG_DIR"
+launcher_check "  and the agent key goes across in memory: the same key, in no argument, output or file" $?
+run_cmd set model chatgpt/gpt-x; : > "$STUB_DIR/calls"; run_cmd session
+[[ $(<"$STUB_DIR/agent-wall") == *",allow@chatgpt.com:tcp:443,"* && $(session_run) == *"-e CHATGPT_OAUTH_TOKEN "*"--model chatgpt/gpt-x"* ]]; launcher_check "a ChatGPT account serves as the provider, its token in the key file" $?
+run_cmd set model anthropic/claude-x; rm "$STUB_DIR/agent-zone-key"; : > "$STUB_DIR/calls"; run_cmd session; rc=$?
+[[ $rc -ne 0 && -z $(session_run) ]] && grep -q 'agent-key replace' "$tmp/out" && ! grep -qE '^create |^remove ' "$STUB_DIR/calls"; launcher_check "a zone whose key cannot be read is not made again, and the session says what does" $?
+session_env; run_cmd set model other/model-x; run_cmd session; rc=$?
+[[ $rc -ne 0 && -z $(session_run) ]] && grep -q 'SPACETURTLE_MODEL_HOST' "$tmp/out"; launcher_check "a provider the launcher does not know needs its host named" $?
+SPACETURTLE_MODEL_HOST=models.example.test run_cmd session; rc=$?
+[[ $rc -eq 0 && $(<"$STUB_DIR/agent-wall") == "$BASE_WALL,allow@models.example.test:tcp:443,$SKILL_WALL" && $(session_run) == *"-e MODEL_API_KEY "* ]]; launcher_check "  and with it named, the wall holds that host" $?
+for not_a_host in 'x.test,allow@public' public host 192.168.1.1; do
+  SPACETURTLE_MODEL_HOST=$not_a_host run_cmd session; rc=$?
+  [[ $rc -ne 0 ]] && ! grep -qE 'allow@(public|host:tcp:443|192)' "$STUB_DIR/agent-wall"; launcher_check "'$not_a_host', which is not a host's name, does not reach the wall" $?
+done
+session_env; echo "https://public/ilp" > "$STUB_DIR/connector-url"; run_cmd session; rc=$?
+[[ $rc -eq 0 ]] && ! grep -q 'allow@public' "$STUB_DIR/agent-wall"; launcher_check "a node's record that names a group of addresses as its connector adds no rule" $?
+# An `env` that records its arguments stands first on the path: a key handed to a program that way would be in them.
+session_env; printf '#!/bin/bash\necho "$*" >> "$STUB_DIR/env-calls"\nexec /usr/bin/env "$@"\n' > "$tmp/bin/env"; chmod +x "$tmp/bin/env"
+PATH=$tmp/bin:$PATH run_cmd session; rc=$?; PATH=$tmp/bin:$PATH run_cmd session --unattended
+[[ $rc -eq 0 ]] && ! grep -q secret-key-123 "$STUB_DIR/env-calls" "$STUB_DIR/calls" 2>/dev/null; launcher_check "the model key is no program's argument on the way to the zone" $?
+session_env; echo "https://connector.example.test/ilp" > "$STUB_DIR/connector-url"; run_cmd session
+[[ $(<"$STUB_DIR/agent-wall") == *",allow@connector.example.test:tcp:443,"* ]]; launcher_check "the agent's zone may reach the connector of the node's network, to seal a packet to it" $?
+session_env; echo "http://abcdef.anyone/ilp" > "$STUB_DIR/connector-url"; run_cmd session; rc=$?
+[[ $rc -eq 0 ]] && ! grep -qE '^create |^remove ' "$STUB_DIR/calls"; launcher_check "a connector that is not reached over https adds no rule" $?
+session_env; run_cmd session --unattended; rc=$?
+[[ $rc -eq 0 && $(session_run) == "exec --quiet --no-stdin -e ANTHROPIC_API_KEY -e TOON_AGENT_KEY agent-x -- docker-agent run --sandbox=false --app-name spaceturtle --model anthropic/claude-sonnet-5-5 --exec --yolo $GUEST_DEF "* ]]
+launcher_check "an unattended session runs without a terminal and without asking" $?
+[[ $(tail -2 "$(sdef)") == $'budget:\n  max_cost: 1' ]] && cmp -s <(head -n -2 "$(sdef)") "$root/agent/spaceturtle.yaml"; launcher_check "an unattended session has a cost ceiling by default, as the definition's budget" $?
+session_env; printf '#!/bin/bash\n[[ $1 != 7124 ]]\n' > "$tmp/bin/probe"; chmod +x "$tmp/bin/probe"
+SPACETURTLE_PORT_PROBE=$tmp/bin/probe run_cmd session --unattended; rc=$?
+[[ $rc -ne 0 && $(<"$tmp/out") == *"ports 7123 and 7124 of this machine do not both lead to it"*"spaceturtle stop"* ]] && ! grep -q 'docker-agent run' "$STUB_DIR/calls"
+launcher_check "no session starts when the zone's ports are not open on the machine" $?
 run_cmd set ceiling 0.25; : > "$STUB_DIR/calls"; run_cmd session --unattended
-grep '^run ' "$STUB_DIR/calls" | grep -q -- '--max-cost 0.25 '; launcher_check "the ceiling can be changed" $?
+[[ $(tail -1 "$(sdef)") == "  max_cost: 0.25" ]]; launcher_check "the ceiling can be changed" $?
 run_cmd set ceiling 0; [[ $? -ne 0 ]]; launcher_check "a ceiling of zero is refused" $?
 run_cmd status; grep -q '^last unattended session: 20' "$tmp/out"; launcher_check "status shows the last unattended session's time" $?
+run_cmd session; ! grep -q '^budget:' "$(sdef)"; launcher_check "a session by hand after an unattended one has no ceiling" $?
 session_env; rm "$SPACETURTLE_MODEL_KEY_FILE"; run_cmd session; rc=$?
-[[ $rc -ne 0 ]] && grep -q 'no model key' "$tmp/out" && grep -q "$SPACETURTLE_MODEL_KEY_FILE" "$tmp/out" && ! grep -q '^run ' "$STUB_DIR/calls"; launcher_check "with no model key it stops and says how to supply one" $?
+[[ $rc -ne 0 ]] && grep -q 'no model key' "$tmp/out" && grep -q "$SPACETURTLE_MODEL_KEY_FILE" "$tmp/out" && [[ -z $(session_run) ]]; launcher_check "with no model key it stops and says how to supply one" $?
 session_env; : > "$STUB_DIR/calls"; rm "$STUB_DIR/up"; run_cmd session; rc=$?
-[[ $rc -ne 0 ]] && grep -q "connector's zone" "$tmp/out" && ! grep -q '^run ' "$STUB_DIR/calls"; launcher_check "with the supervisor not running no session starts, and it says so" $?
+[[ $rc -ne 0 ]] && grep -q "connector's zone" "$tmp/out" && [[ -z $(session_run) ]]; launcher_check "with the supervisor not running no session starts, and it says so" $?
 session_env; rm "$STUB_DIR/zones"; : > "$STUB_DIR/calls"; run_cmd session; rc=$?
-[[ $rc -ne 0 ]] && grep -q "connector's zone" "$tmp/out" && ! grep -q '^run ' "$STUB_DIR/calls"; launcher_check "with no connector zone no session starts, and it says so" $?
+[[ $rc -ne 0 ]] && grep -q "connector's zone" "$tmp/out" && [[ -z $(session_run) ]]; launcher_check "with no connector zone no session starts, and it says so" $?
 session_env; echo "zone-x stopped" > "$STUB_DIR/zones"; run_cmd session; rc=$?
-[[ $rc -ne 0 ]] && ! grep -q '^run ' "$STUB_DIR/calls"; launcher_check "with the connector's zone stopped no session starts" $?
+[[ $rc -ne 0 && -z $(session_run) ]]; launcher_check "with the connector's zone stopped no session starts" $?
+session_env; sed -i '/^agent-x /d' "$STUB_DIR/zones"; run_cmd session; rc=$?
+[[ $rc -ne 0 && -z $(session_run) ]] && grep -q 'agent-key replace' "$tmp/out"; launcher_check "with no agent's zone no session starts, and it says how to make one" $?
 
 launcher_env; run_launcher
 grep -q 'enable --now spaceturtle.timer' "$STUB_DIR/systemctl-calls" && grep -q 'OnUnitActiveSec=6h' "$SPACETURTLE_UNIT_DIR/spaceturtle.timer"   && grep -q 'session --unattended' "$SPACETURTLE_UNIT_DIR/spaceturtle.service"; launcher_check "start turns the timer on at a conservative interval" $?
+jq_dir=$(dirname "$(command -v jq)"); grep -q "^Environment=PATH=.*$jq_dir\(:\|$\)" "$SPACETURTLE_UNIT_DIR/spaceturtle.service" && grep -q "^Environment=PATH=.*$jq_dir\(:\|$\)" "$SPACETURTLE_UNIT_DIR/spaceturtle-connector.service"; launcher_check "both units can find jq, wherever it is" $?
 run_cmd status; grep -q '^timer: on, every 6h' "$tmp/out" && grep -q '^last unattended session: never' "$tmp/out"; launcher_check "status shows the timer on and no session yet" $?
-run_cmd timer interval 2h; grep -q 'OnUnitActiveSec=2h' "$SPACETURTLE_UNIT_DIR/spaceturtle.timer"; launcher_check "the interval can be set" $?
+: > "$STUB_DIR/systemctl-calls"; run_cmd timer interval 2h; grep -q 'OnUnitActiveSec=2h' "$SPACETURTLE_UNIT_DIR/spaceturtle.timer" && grep -q 'OnActiveSec=2h' "$SPACETURTLE_UNIT_DIR/spaceturtle.timer" && ! grep -q OnBootSec "$SPACETURTLE_UNIT_DIR/spaceturtle.timer" \
+  && grep -q 'restart spaceturtle.timer' "$STUB_DIR/systemctl-calls"; launcher_check "the interval can be set, counts from when the timer starts, and a running timer takes it" $?
+: > "$STUB_DIR/systemctl-calls"; run_launcher; ! grep -q 'restart spaceturtle.timer' "$STUB_DIR/systemctl-calls" && grep -q '^--user enable spaceturtle-connector.service$' "$STUB_DIR/systemctl-calls"
+launcher_check "a second start does not push the next session out, and enables the unit again" $?
+SPACETURTLE_CONNECTOR_PORT='1;x' run_launcher; [[ $? -ne 0 ]] && grep -q 'must be a port number' "$tmp/out"; launcher_check "a port that is not a number is refused" $?
 run_cmd timer interval soon; [[ $? -ne 0 ]]; launcher_check "a bad interval is refused" $?
 run_cmd timer off; grep -q 'disable --now spaceturtle.timer' "$STUB_DIR/systemctl-calls"; launcher_check "the timer can be turned off" $?
 run_cmd status; grep -q '^timer: off, every 2h' "$tmp/out"; launcher_check "status shows it off" $?
-: > "$STUB_DIR/systemctl-calls"; run_launcher; ! grep -q enable "$STUB_DIR/systemctl-calls"; launcher_check "start does not turn a timer off by the Observer back on" $?
-run_cmd timer interval 3h; ! grep -q enable "$STUB_DIR/systemctl-calls"; launcher_check "an interval set while it is off leaves it off" $?
-run_cmd timer on; grep -q 'enable --now' "$STUB_DIR/systemctl-calls" && grep -q 'OnUnitActiveSec=3h' "$SPACETURTLE_UNIT_DIR/spaceturtle.timer"; launcher_check "the timer can be turned on again" $?
+: > "$STUB_DIR/systemctl-calls"; run_launcher; ! grep -q 'enable.*spaceturtle.timer' "$STUB_DIR/systemctl-calls"; launcher_check "start does not turn a timer off by the Observer back on" $?
+run_cmd timer interval 3h; ! grep -q 'enable.*spaceturtle.timer' "$STUB_DIR/systemctl-calls"; launcher_check "an interval set while it is off leaves it off" $?
+run_cmd timer on; grep -q 'enable --now spaceturtle.timer' "$STUB_DIR/systemctl-calls" && grep -q 'OnUnitActiveSec=3h' "$SPACETURTLE_UNIT_DIR/spaceturtle.timer"; launcher_check "the timer can be turned on again" $?
 
-# --- the launcher: waiting, approve, refuse and status, against a stub sbx whose toon lists a waiting app ---
+# --- the launcher: waiting, approve, refuse and status, against a stub msb whose toon lists a waiting app ---
 waiting_env() {
   launcher_env
   echo "zone-x running" > "$STUB_DIR/zones"
   now=$(date +%s)
   # A peer that is pending is not an app, so it is not waiting.
-  echo "{\"peers\":[{\"name\":\"bob\",\"state\":\"pending\"}],\"agent_node\":{\"toon_apps\":[{\"apps\":[{\"name\":\"relay\",\"state\":\"running\"},{\"name\":\"oracle\",\"state\":\"pending\",\"image\":\"docker.io/x/oracle:1\",\"requested_at\":$((now - 7300))}]}]}}" > "$STUB_DIR/status"
+  # and neither is an app the Observer already refused.
+  echo "{\"peers\":[{\"name\":\"bob\",\"state\":\"pending\"}],\"agent_node\":{\"pending_apps\":[{\"name\":\"oracle\",\"status\":\"pending\",\"image\":\"docker.io/x/oracle:1\",\"requested_at\":$((now - 7300))},{\"name\":\"gone\",\"status\":\"refused\",\"image\":\"x/gone:1\"}],\"toon_apps\":[{\"apps\":[{\"name\":\"relay\",\"running\":true}]}]}}" > "$STUB_DIR/status"
 }
 waiting_env; run_cmd waiting; rc=$?
 launcher_check "waiting lists the name, image and age of each waiting app" $(( rc == 0 && $(grep -cP '^oracle\tdocker.io/x/oracle:1\t2h$' "$tmp/out") == 1 ? 0 : 1 ))
-! grep -qE 'relay|bob' "$tmp/out"; launcher_check "waiting does not list an app that is running, or anything pending that is not an app" $?
-waiting_env; echo '{"apps":[]}' > "$STUB_DIR/status"; run_cmd waiting; rc=$?
+! grep -qE 'relay|bob|gone' "$tmp/out"; launcher_check "waiting does not list an app that is running or was refused, or anything pending that is not an app" $?
+waiting_env; echo '{"agent_node":{"pending_apps":[{"name":"oracle","status":"pending","image":null,"url":"https://x.example/app"}]}}' > "$STUB_DIR/status"; run_cmd waiting
+grep -qP '^oracle\thttps://x.example/app\tunknown$' "$tmp/out"; launcher_check "waiting names the URL of an app that has no image, and says when the time is not known" $?
+waiting_env; echo '{"agent_node":{"pending_apps":[]}}' > "$STUB_DIR/status"; run_cmd waiting; rc=$?
 [[ $rc -eq 0 ]] && grep -q 'no app is waiting' "$tmp/out"; launcher_check "waiting with nothing waiting says so" $?
 waiting_env; : > "$STUB_DIR/calls"; run_cmd approve oracle; rc=$?
 launcher_check "approve runs toon approve on a waiting app" $(( rc == 0 && $(grep -c "toon approve -- 'oracle'" "$STUB_DIR/calls") == 1 ? 0 : 1 ))
@@ -1179,6 +1402,15 @@ waiting_env; run_cmd status; rc=$?
 launcher_check "status shows the number waiting" $(( rc == 0 && $(grep -c '1 app(s) waiting' "$tmp/out") == 1 ? 0 : 1 ))
 waiting_env; echo "toon status --json" > "$STUB_DIR/fail-on"; run_cmd status; rc=$?
 [[ $rc -ne 0 ]] && grep -q 'toon status failed' "$tmp/out" && ! grep -q 'waiting for approval' "$tmp/out"; launcher_check "status with toon status failing says so and counts nothing" $?
+# What the node has earned: an agent key is told none of it, so the launcher reads it in the connector's zone.
+earn_env() { waiting_env
+  echo '{"channels":[{"direction":"inbound","watermark":1200,"landed":1000},{"direction":"inbound","watermark":34,"landed":0},{"direction":"outbound","watermark":999,"landed":5}]}' > "$STUB_DIR/channels"
+  echo '{"fees_earned":"1500","packets":{"fulfilled":7,"rejected":2},"toon_app":"relay"}' > "$STUB_DIR/packets"; }
+earn_env; run_cmd status; rc=$?
+[[ $rc -eq 0 ]] && grep -qx 'spaceturtle: earnings: received  1,234 (1,000 landed)' "$tmp/out" && grep -qx 'spaceturtle: earnings: this run  1,500 in fees, 7 packets' "$tmp/out"
+launcher_check "status says what the inbound channels have been paid, what landed, and the fees since the connector started" $?
+earn_env; : > "$STUB_DIR/channels"; : > "$STUB_DIR/packets"; run_cmd status; rc=$?
+[[ $rc -eq 0 ]] && grep -qx 'spaceturtle: earnings: cannot be read now' "$tmp/out"; launcher_check "status says when the earnings cannot be read" $?
 waiting_env; echo "toon status --json" > "$STUB_DIR/fail-on"; : > "$STUB_DIR/calls"; run_cmd approve oracle; rc=$?
 [[ $rc -ne 0 ]] && grep -q 'toon status failed' "$tmp/out" && ! grep -q 'not waiting' "$tmp/out" && ! grep -q "toon approve" "$STUB_DIR/calls"
 launcher_check "approve with toon status failing says so and changes nothing" $?
@@ -1186,14 +1418,15 @@ launcher_check "approve with toon status failing says so and changes nothing" $?
 
 # --- the launcher: status, stop, upgrade, backup, remove ---
 full_status() { # a node with an app running, one waiting, and a relay
-  echo '{"network":"devnet","agent_node":{"relay":{"url":"ws://127.0.0.1:7777"},"toon_apps":[{"apps":[{"name":"relay","state":"running"},{"name":"oracle","state":"pending","image":"x/oracle:1"}]}]}}' > "$STUB_DIR/status"
+  echo '{"agent_node":{"pending_apps":[{"name":"oracle","status":"pending","image":"x/oracle:1"}],"toon_apps":[{"apps":[{"name":"relay","running":true,"read_address":"127.0.0.1:7777"},{"name":"store","running":false}]}]}}' > "$STUB_DIR/status"
 }
 up_env() { launcher_env; run_launcher; : > "$STUB_DIR/calls"; : > "$STUB_DIR/systemctl-calls"; full_status; }
 up_env; echo "agent-x running" >> "$STUB_DIR/zones"; run_cmd status; rc=$?
 [[ $rc -eq 0 ]] && grep -q "connector's zone (zone-x): running" "$tmp/out" && grep -q "agent's zone (agent-x): in a session" "$tmp/out" \
-  && grep -q 'app relay: running' "$tmp/out" && grep -q 'app oracle: not running' "$tmp/out" && grep -q 'network: devnet' "$tmp/out" \
+  && grep -q 'app relay: running' "$tmp/out" && grep -q 'app store: not running' "$tmp/out" && grep -q 'network: devnet' "$tmp/out" \
   && grep -q 'relay: reachable' "$tmp/out" && grep -q '1 app(s) waiting' "$tmp/out" && grep -q '^timer: on' "$tmp/out"; launcher_check "status names every zone, every app, the network and the relay" $?
 grep -q 'curl -s .*http://127.0.0.1:7777' "$STUB_DIR/calls"; launcher_check "the relay is checked from inside the connector's zone, at the address the node reports" $?
+echo mainnet > "$STUB_DIR/network"; run_cmd status; grep -q 'network: mainnet' "$tmp/out"; launcher_check "status reads the network from the home's record" $?
 sed -i '/agent-x/d' "$STUB_DIR/zones"; touch "$STUB_DIR/relay-down"; run_cmd status
 grep -q "agent's zone (agent-x): idle" "$tmp/out" && grep -q 'relay: not reachable' "$tmp/out"; launcher_check "status says idle and an unreachable relay" $?
 for st in stopped; do
@@ -1205,22 +1438,24 @@ up_env; rm "$STUB_DIR/zones"; run_cmd status; rc=$?
 
 # stop, then start
 up_env; echo secret-id > "$SPACETURTLE_DATA_DIR/identity"; run_cmd stop; rc=$?
-[[ $rc -eq 0 ]] && grep -q '^stop zone-x' "$STUB_DIR/calls" && grep -q 'stop spaceturtle.timer' "$STUB_DIR/systemctl-calls" && ! grep -q 'disable' "$STUB_DIR/systemctl-calls" \
+[[ $rc -eq 0 ]] && grep -q '^stop .*zone-x$' "$STUB_DIR/calls" && grep -q 'stop spaceturtle.timer' "$STUB_DIR/systemctl-calls" && ! grep -q 'disable.*spaceturtle.timer' "$STUB_DIR/systemctl-calls" \
   && [[ $(conf_timer=$(sed -n 's/^timer=//p' "$SPACETURTLE_CONFIG_DIR/launcher.conf" 2>/dev/null | tail -1); echo "${conf_timer:-on}") == on ]]; launcher_check "stop stops the zone and the timer's unit, and leaves the timer's setting" $?
-echo "agent-x running" >> "$STUB_DIR/zones"; : > "$STUB_DIR/calls"; echo "zone-x running" >> "$STUB_DIR/zones"; sed -i '/^zone-x stopped/d' "$STUB_DIR/zones"; run_cmd stop
-grep -q '^stop agent-x' "$STUB_DIR/calls"; launcher_check "stop ends a session in the agent's zone" $?
-up_env; run_cmd stop; : > "$STUB_DIR/calls"; : > "$STUB_DIR/systemctl-calls"; run_launcher; rc=$?
-[[ $rc -eq 0 ]] && grep -q '^start zone-x' "$STUB_DIR/calls" && ! grep -qE '^create |toon init|toon wallet fund' "$STUB_DIR/calls" && grep -q connector-start "$STUB_DIR/calls" \
-  && grep -q 'enable --now spaceturtle.timer' "$STUB_DIR/systemctl-calls" && [[ $(<"$SPACETURTLE_DATA_DIR/identity") == secret-id ]] 2>/dev/null || [[ ! -e $SPACETURTLE_DATA_DIR/identity ]]; launcher_check "start after stop starts the zone and the supervisor, creates and funds nothing, and turns the timer on" $?
+u=$(grep -n 'disable --now spaceturtle-connector.service' "$STUB_DIR/systemctl-calls" | cut -d: -f1); [[ -n $u ]] && ! grep -q 'restart' "$STUB_DIR/systemctl-calls"
+launcher_check "stop turns off the unit that would start the zone again" $?
+sed -i '/^agent-x /d' "$STUB_DIR/zones"; echo "agent-x running" >> "$STUB_DIR/zones"; : > "$STUB_DIR/calls"; echo "zone-x running" >> "$STUB_DIR/zones"; sed -i '/^zone-x stopped/d' "$STUB_DIR/zones"; run_cmd stop
+grep -q '^stop .*agent-x$' "$STUB_DIR/calls"; launcher_check "stop ends a session in the agent's zone" $?
+up_env; echo secret-id > "$SPACETURTLE_DATA_DIR/identity"; run_cmd stop; : > "$STUB_DIR/calls"; : > "$STUB_DIR/systemctl-calls"; run_launcher; rc=$?
+[[ $rc -eq 0 ]] && grep -q '^start --quiet zone-x$' "$STUB_DIR/calls" && ! grep -qE '^create |toon init|toon wallet fund' "$STUB_DIR/calls" && grep -q connector-start "$STUB_DIR/calls" \
+  && grep -q 'enable --now spaceturtle.timer' "$STUB_DIR/systemctl-calls" && grep -q 'enable spaceturtle-connector.service' "$STUB_DIR/systemctl-calls" && [[ $(<"$SPACETURTLE_DATA_DIR/identity") == secret-id ]]; launcher_check "start after stop starts the zone and the supervisor, creates and funds nothing, and turns the timer and the unit on" $?
 up_env; run_cmd timer off; run_cmd stop; : > "$STUB_DIR/systemctl-calls"; run_launcher
-! grep -q 'enable' "$STUB_DIR/systemctl-calls"; launcher_check "start after stop leaves a timer that was off, off" $?
+! grep -q 'enable.*spaceturtle.timer' "$STUB_DIR/systemctl-calls"; launcher_check "start after stop leaves a timer that was off, off" $?
 up_env; rm "$STUB_DIR/zones"; run_cmd stop; rc=$?
 [[ $rc -eq 0 ]] && grep -q 'nothing to stop' "$tmp/out" && ! grep -q '^stop' "$STUB_DIR/calls"; launcher_check "stop with no zone says so and exits 0" $?
 
 # backup
 up_env; echo old > "$SPACETURTLE_BACKUP_DIR/wallet-backup"; run_cmd backup; rc=$?
 [[ $rc -eq 0 && $(<"$SPACETURTLE_BACKUP_DIR/wallet-backup") == sealed ]] && grep -q "$SPACETURTLE_BACKUP_DIR/wallet-backup" "$tmp/out"; launcher_check "backup writes a sealed backup and says where" $?
-up_env; echo old > "$SPACETURTLE_BACKUP_DIR/wallet-backup"; echo "cp zone-x" > "$STUB_DIR/fail-on"; run_cmd backup; rc=$?
+up_env; echo old > "$SPACETURTLE_BACKUP_DIR/wallet-backup"; echo "copy --quiet zone-x" > "$STUB_DIR/fail-on"; run_cmd backup; rc=$?
 [[ $rc -ne 0 && $(<"$SPACETURTLE_BACKUP_DIR/wallet-backup") == old && ! -e $SPACETURTLE_BACKUP_DIR/wallet-backup.new ]]; launcher_check "a backup that does not arrive leaves the earlier one" $?
 up_env; echo "zone-x stopped" > "$STUB_DIR/zones"; run_cmd backup; rc=$?
 [[ $rc -ne 0 ]] && grep -q 'not running' "$tmp/out"; launcher_check "backup needs the zone running and says so" $?
@@ -1229,18 +1464,23 @@ up_env; echo "zone-x stopped" > "$STUB_DIR/zones"; run_cmd backup; rc=$?
 PASS_TEXT=hunter2-passphrase-xyz
 upg_env() { up_env; echo "agent-x stopped" >> "$STUB_DIR/zones"; echo "$PASS_TEXT" > "$STUB_DIR/zone-passphrase"; echo wallet-bytes > "$SPACETURTLE_DATA_DIR/w1"; (cd "$SPACETURTLE_DATA_DIR" && sha256sum * ) > "$tmp/before"; : > "$STUB_DIR/stdin"; }
 upg_env; run_cmd upgrade; rc=$?
-b=$(line_no 'toon wallet backup'); r=$(line_no '^rm '); c=$(grep -n '^create ' "$STUB_DIR/calls" | tail -1 | cut -d: -f1)
-[[ $rc -eq 0 && -n $b && -n $r && $b -lt $r && $r -lt $c ]] && grep '^create ' "$STUB_DIR/calls" | grep -q -- '--template ghcr.io/toon-protocol/spaceturtle-connector-zone:latest '; launcher_check "upgrade backs up, then removes, then creates from the connector's zone image" $?
+b=$(line_no 'toon wallet backup'); r=$(line_no '^remove '); c=$(grep -n '^create ' "$STUB_DIR/calls" | tail -1 | cut -d: -f1)
+[[ $rc -eq 0 && -n $b && -n $r && $b -lt $r && $r -lt $c ]] && grep -q -- '^create ghcr.io/toon-protocol/spaceturtle-connector-zone:latest --name zone-x .*--pull always ' "$STUB_DIR/calls" && grep -q -- '^create ghcr.io/toon-protocol/spaceturtle-agent-zone:latest --name agent-x .*--pull always ' "$STUB_DIR/calls"
+launcher_check "upgrade backs up, then removes, then creates both zones from the newest of their images" $?
+grep -q '^--user stop spaceturtle-connector.service$' "$STUB_DIR/systemctl-calls" && grep -q '^--user restart spaceturtle-connector.service$' "$STUB_DIR/systemctl-calls" && grep '^create .*--name zone-x ' "$STUB_DIR/calls" | grep -q -- '--port 127.0.0.1:7123:17100 --port 127.0.0.1:7124:17101'
+launcher_check "upgrade stops the unit before the zone goes, starts it for the new one, and the new zone has the two ports" $?
 (cd "$SPACETURTLE_DATA_DIR" && sha256sum * ) | cmp -s - "$tmp/before"; launcher_check "upgrade leaves the wallet's storage byte for byte" $?
-! grep -qE 'toon init|toon wallet fund' "$STUB_DIR/calls" && grep -q 'policy allow network --sandbox zone-x' "$STUB_DIR/calls" && grep -q connector-start "$STUB_DIR/calls"; launcher_check "upgrade does not initialise or fund again, and sets up the new zone" $?
+! grep -qE 'toon init|toon wallet fund' "$STUB_DIR/calls" && grep -q connector-start "$STUB_DIR/calls"; launcher_check "upgrade does not initialise or fund again, and starts the supervisor in the new zone" $?
 [[ $(<"$STUB_DIR/stdin") == "$PASS_TEXT" ]]; launcher_check "the passphrase reaches the new zone through standard input" $?
 ! grep -rqF "$PASS_TEXT" "$STUB_DIR/calls" "$STUB_DIR/systemctl-calls" "$tmp/out" && ! grep -rlF "$PASS_TEXT" "$tmp" /tmp --exclude-dir="$(basename "$STUB_DIR")" --exclude-dir=claude-\* 2>/dev/null | grep -q .; launcher_check "the passphrase is in no argument, output or file on the machine" $?
-grep -q '^rm .*agent-x' "$STUB_DIR/calls"; launcher_check "upgrade clears the agent's zone so the next session uses the newest image" $?
-upg_env; echo "cp zone-x" > "$STUB_DIR/fail-on"; run_cmd upgrade; rc=$?
-[[ $rc -ne 0 ]] && ! grep -q '^rm ' "$STUB_DIR/calls"; launcher_check "upgrade with a failing backup removes nothing" $?
+grep -q '^remove .*agent-x$' "$STUB_DIR/calls"; launcher_check "upgrade clears the agent's zone so the next session uses the newest image" $?
+upg_env; echo "pull --quiet" > "$STUB_DIR/fail-on"; run_cmd upgrade; rc=$?
+[[ $rc -ne 0 ]] && grep -q 'nothing was changed' "$tmp/out" && ! grep -q '^remove ' "$STUB_DIR/calls"; launcher_check "upgrade that cannot pull the newest images removes nothing" $?
+upg_env; echo "copy --quiet zone-x" > "$STUB_DIR/fail-on"; run_cmd upgrade; rc=$?
+[[ $rc -ne 0 ]] && ! grep -q '^remove ' "$STUB_DIR/calls"; launcher_check "upgrade with a failing backup removes nothing" $?
 upg_env; echo 'cat "$HOME/.config/toon-passphrase"' > "$STUB_DIR/fail-on"; run_cmd upgrade; rc=$?
-[[ $rc -ne 0 ]] && ! grep -q '^rm ' "$STUB_DIR/calls"; launcher_check "upgrade with a passphrase that cannot be read removes nothing" $?
-upg_env; echo "exec -i" > "$STUB_DIR/fail-on"; run_cmd upgrade; rc=$?
+[[ $rc -ne 0 ]] && ! grep -q '^remove ' "$STUB_DIR/calls"; launcher_check "upgrade with a passphrase that cannot be read removes nothing" $?
+upg_env; echo 'cat > "$HOME/.config/toon-passphrase"' > "$STUB_DIR/fail-on"; run_cmd upgrade; rc=$?
 [[ $rc -ne 0 ]] && grep -q 'passphrase could not be placed' "$tmp/out" && grep -q "$SPACETURTLE_BACKUP_DIR/wallet-backup" "$tmp/out"; launcher_check "upgrade that cannot place the passphrase names the backup as the way back" $?
 launcher_env; run_cmd upgrade; rc=$?
 [[ $rc -ne 0 ]] && grep -q 'spaceturtle start' "$tmp/out"; launcher_check "upgrade with no zone says to run start" $?
@@ -1249,27 +1489,35 @@ launcher_env; run_cmd upgrade; rc=$?
 rm_env() { up_env; echo "agent-x running" >> "$STUB_DIR/zones"; echo k > "$SPACETURTLE_MODEL_KEY_FILE"; echo wallet-bytes > "$SPACETURTLE_DATA_DIR/w1"; run_cmd set model openai/x; }
 rm_cmd() { printf '%s\n' "${@:2}" | "$root/spaceturtle" remove $1 > "$tmp/out" 2>&1; }
 rm_env; rm_cmd "" y; rc=$?
-[[ $rc -eq 0 ]] && grep -q 'fresh backup' "$tmp/out" && [[ -s $SPACETURTLE_DATA_DIR/w1 && -s $SPACETURTLE_BACKUP_DIR/wallet-backup ]] && [[ ! -e $SPACETURTLE_MODEL_KEY_FILE && ! -e $SPACETURTLE_STATE_DIR/launcher && ! -e $SPACETURTLE_CONFIG_DIR/launcher.conf && ! -e $SPACETURTLE_UNIT_DIR/spaceturtle.timer ]] \
-  && grep -q '^rm .*zone-x' "$STUB_DIR/calls" && grep -q '^rm .*agent-x' "$STUB_DIR/calls" && grep -q 'disable --now spaceturtle.timer' "$STUB_DIR/systemctl-calls" \
-  && grep -q "$SPACETURTLE_DATA_DIR" "$tmp/out" && grep -q "$SPACETURTLE_BACKUP_DIR" "$tmp/out"; launcher_check "remove removes the zones, the units, the markers, the settings and the key, keeps the wallet and the backup, and says where" $?
+[[ $rc -eq 0 ]] && grep -q 'fresh backup' "$tmp/out" && [[ -s $SPACETURTLE_DATA_DIR/w1 && -s $SPACETURTLE_BACKUP_DIR/wallet-backup ]] && [[ ! -e $SPACETURTLE_MODEL_KEY_FILE && ! -e $SPACETURTLE_STATE_DIR/launcher && ! -e $SPACETURTLE_STATE_DIR/agent && ! -e $SPACETURTLE_CONFIG_DIR/launcher.conf && ! -e $SPACETURTLE_UNIT_DIR/spaceturtle.timer && ! -e $SPACETURTLE_UNIT_DIR/spaceturtle-connector.service && ! -e $SPACETURTLE_STATE_DIR/session ]] \
+  && grep -q '^remove .*zone-x$' "$STUB_DIR/calls" && grep -q '^remove .*agent-x$' "$STUB_DIR/calls" && grep -q 'disable --now spaceturtle.timer' "$STUB_DIR/systemctl-calls" && grep -q 'disable --now spaceturtle-connector.service' "$STUB_DIR/systemctl-calls" \
+  && grep -q "$SPACETURTLE_DATA_DIR" "$tmp/out" && grep -q "$SPACETURTLE_BACKUP_DIR" "$tmp/out" && grep -q "$SPACETURTLE_MSB_HOME" "$tmp/out"; launcher_check "remove removes the zones, what the agent kept, the units, the markers, the settings and the key, keeps the wallet and the backup, and says where they and the zone images are" $?
 rm_env; l1=$(line_no 'toon wallet backup'); rm_cmd "" n; rc=$?
 [[ $rc -eq 0 && $(grep -c 'toon wallet backup' "$STUB_DIR/calls") -eq 0 ]]; launcher_check "remove lets the fresh backup be declined" $?
 rm_env; rm_cmd --delete-wallet delete y; rc=$?
-[[ $rc -eq 0 && ! -e $SPACETURTLE_DATA_DIR && -d $SPACETURTLE_BACKUP_DIR ]] && grep -q '^rm .*zone-x' "$STUB_DIR/calls"; launcher_check "remove --delete-wallet with the typed word deletes the wallet's storage and keeps the backup directory" $?
+[[ $rc -eq 0 && ! -e $SPACETURTLE_DATA_DIR && -d $SPACETURTLE_BACKUP_DIR ]] && grep -q '^remove .*zone-x$' "$STUB_DIR/calls"; launcher_check "remove --delete-wallet with the typed word deletes the wallet's storage and keeps the backup directory" $?
 rm_env; rm_cmd --delete-wallet yes; rc=$?
-nothing_removed() { [[ -s $SPACETURTLE_DATA_DIR/w1 ]] && ! grep -qE '^rm |disable|toon wallet backup' "$STUB_DIR/calls" "$STUB_DIR/systemctl-calls" && [[ -e $SPACETURTLE_MODEL_KEY_FILE && -d $SPACETURTLE_STATE_DIR/launcher ]]; }
+nothing_removed() { [[ -s $SPACETURTLE_DATA_DIR/w1 ]] && ! grep -qE '^remove |disable|toon wallet backup' "$STUB_DIR/calls" "$STUB_DIR/systemctl-calls" && [[ -e $SPACETURTLE_MODEL_KEY_FILE && -d $SPACETURTLE_STATE_DIR/launcher ]]; }
 [[ $rc -ne 0 ]] && nothing_removed; launcher_check "remove --delete-wallet with another answer removes nothing" $?
 rm_env; "$root/spaceturtle" remove --delete-wallet < /dev/null > "$tmp/out" 2>&1; rc=$?
 [[ $rc -ne 0 ]] && nothing_removed; launcher_check "remove --delete-wallet at end of input removes nothing and exits non-zero" $?
 rm_env; rm_cmd --everything; rc=$?
 [[ $rc -ne 0 ]] && grep -q 'usage: spaceturtle remove' "$tmp/out" && nothing_removed; launcher_check "remove refuses any other argument with the usage" $?
-rm_env; echo "cp zone-x" > "$STUB_DIR/fail-on"; rm_cmd "" y; rc=$?
-[[ $rc -ne 0 ]] && ! grep -q '^rm ' "$STUB_DIR/calls"; launcher_check "remove whose fresh backup fails removes nothing" $?
+rm_env; echo "copy --quiet zone-x" > "$STUB_DIR/fail-on"; rm_cmd "" y; rc=$?
+[[ $rc -ne 0 ]] && ! grep -q '^remove ' "$STUB_DIR/calls"; launcher_check "remove whose fresh backup fails removes nothing" $?
 
 # the agent key
 launcher_env; run_launcher; rc=$?
 [[ $rc -eq 0 && $(wc -l < "$STUB_DIR/keys") -eq 1 ]] && grep -q 'toon agent-key create' "$STUB_DIR/calls"; launcher_check "a first run creates exactly one agent key, with the default scope and limit" $?
-! grep -qE -- '--scope|--limit' <(grep 'agent-key create' "$STUB_DIR/calls"); launcher_check "the agent key is created without overriding the default scope or limit" $?
+! grep -qE -- '--scope|--max-per|--limit' <(grep 'agent-key create' "$STUB_DIR/calls") && grep 'agent-key create' "$STUB_DIR/calls" | grep -q -- '--out /tmp/agent-key'; launcher_check "the agent key is created without overriding the default scope or limit" $?
+grep 'agent-x -- sh -c umask 077' "$STUB_DIR/calls" | grep -q 'http://host.microsandbox.internal:7123' && grep 'agent-x -- sh -c umask 077' "$STUB_DIR/calls" | grep -q 'http://host.microsandbox.internal:7124'
+launcher_check "on the way in, the key file's addresses become the machine's two ports that lead to the connector's zone" $?
+made=$(grep '^create .*--name agent-x ' "$STUB_DIR/calls")
+[[ $made == *" --cpus 2 --memory 2G "* && $made == *" --mount-dir $SPACETURTLE_STATE_DIR/session:/home/agent/session:ro "* && $made == *" --net-default-egress deny --net-rule allow@dns,allow@host:tcp:7123,allow@host:tcp:7124,allow@api.anthropic.com:tcp:443,"* ]] && ! grep -qE -- '--net (public|all|host|private)|allow@(public|private|host)[, ]|--port' <<<"$made"
+launcher_check "the agent's zone is small, mounts the session's definition read-only, refuses whatever its wall does not name, and of the machine may reach those two ports" $?
+[[ $made == *" --mount-dir $SPACETURTLE_STATE_DIR/agent/config:/home/agent/.config/spaceturtle:uid=1000,gid=1000 "* && $made == *" --mount-dir $SPACETURTLE_STATE_DIR/agent/state:/home/agent/.local/state/spaceturtle:uid=1000,gid=1000 "* ]]
+launcher_check "what the agent keeps is in mounted directories, so it outlasts the agent's zone" $?
+a=$(line_no 'toon agent-key create'); d=$(line_no 'exec connector-start'); [[ -n $a && -n $d && $a -lt $d ]]; launcher_check "the key is made before the supervisor starts, so that it listens for orders" $?
 [[ $(<"$STUB_DIR/agent-zone-key") == PRIVATE-HALF-1 ]]; launcher_check "the private half is placed in the agent's zone" $?
 ! grep -rq 'PRIVATE-HALF' "$tmp/out" "$SPACETURTLE_STATE_DIR" "$SPACETURTLE_CONFIG_DIR" "$HOME" "$SPACETURTLE_DATA_DIR" "$SPACETURTLE_BACKUP_DIR" "$STUB_DIR/calls" 2>/dev/null && [[ ! -e $STUB_DIR/agentkeyfile ]]
 launcher_check "the private half is nowhere else: not in the output, the launcher's files, the home, the calls, or the connector's zone" $?
@@ -1288,19 +1536,23 @@ run_launcher; [[ $(wc -l < "$STUB_DIR/keys") -eq 0 ]]; launcher_check "start doe
 up_env; : > "$STUB_DIR/calls"; rm -f "$STUB_DIR/agent-zone-key"; run_cmd agent-key replace; rc=$?
 [[ $rc -eq 0 && $(<"$STUB_DIR/keys") == key-2 && $(<"$STUB_DIR/agent-zone-key") == PRIVATE-HALF-2 ]] && ! grep -qE 'wallet|toon init' "$STUB_DIR/calls"; launcher_check "agent-key replace revokes the old key, places a new one and leaves the wallet alone" $?
 up_env; : > "$STUB_DIR/calls"; run_cmd agent-key replace
-p=$(line_no '^exec -i agent-x'); v=$(line_no 'toon agent-key revoke'); [[ -n $p && -n $v && $p -lt $v ]]; launcher_check "agent-key replace places the new key before it revokes the old one" $?
+p=$(line_no 'agent-x -- sh -c umask 077'); v=$(line_no 'toon agent-key revoke'); [[ -n $p && -n $v && $p -lt $v ]]; launcher_check "agent-key replace places the new key before it revokes the old one" $?
 up_env; echo "agent-x stopped" >> "$STUB_DIR/zones"; : > "$STUB_DIR/calls"; run_cmd agent-key revoke
-grep -q 'exec agent-x sh -c rm -f $HOME/.config/toon-agent/key' "$STUB_DIR/calls" && grep -q '^agent-x stopped' "$STUB_DIR/zones"; launcher_check "agent-key revoke deletes the private half from a stopped agent's zone, and leaves it stopped" $?
+grep -q 'agent-x -- sh -c rm -f $HOME/.config/toon-agent/key' "$STUB_DIR/calls" && grep -q '^agent-x stopped' "$STUB_DIR/zones"; launcher_check "agent-key revoke deletes the private half from a stopped agent's zone, and leaves it stopped" $?
 upg_env; run_cmd agent-key revoke; run_cmd upgrade; rc=$?
 [[ $rc -eq 0 && ! -s $STUB_DIR/keys ]]; launcher_check "upgrade does not make a key after a revoke" $?
 up_env; : > "$STUB_DIR/calls"; run_cmd agent-key limit 3; rc=$?
-[[ $rc -eq 0 ]] && grep -q "toon agent-key set --limit '3' -- 'key-1'" "$STUB_DIR/calls"; launcher_check "agent-key limit sets the spending limit" $?
-up_env; run_cmd agent-key limit lots; rc=$?
-[[ $rc -ne 0 ]] && grep -q 'usage' "$tmp/out"; launcher_check "agent-key limit refuses a value that is not an amount" $?
+[[ $rc -eq 0 ]] && grep -q "toon agent-key set --max-per-day '3' --max-per-command '3' -- 'key-1'" "$STUB_DIR/calls"; launcher_check "agent-key limit sets the day's limit, and brings what one command may pay down with it" $?
+up_env; : > "$STUB_DIR/calls"; run_cmd agent-key limit 50; rc=$?
+[[ $rc -eq 0 ]] && grep -q "toon agent-key set --max-per-day '50' -- 'key-1'" "$STUB_DIR/calls"; launcher_check "agent-key limit leaves a per-command limit that is under the day's" $?
+for bad_amount in lots 0.5 0; do
+  up_env; run_cmd agent-key limit "$bad_amount"; rc=$?
+  [[ $rc -ne 0 ]] && grep -q 'usage' "$tmp/out" && ! grep -q 'agent-key set' "$STUB_DIR/calls"; launcher_check "agent-key limit refuses '$bad_amount', which is not a whole number of base units" $?
+done
 upg_env; run_cmd upgrade; rc=$?
 [[ $rc -eq 0 && $(<"$STUB_DIR/keys") == key-2 ]]; launcher_check "upgrade, which removes the agent's zone, replaces the key" $?
 # no tool in the agent definition can do it
-bad=$tmp/bad.yaml; yq '.agents.spaceturtle.toolsets += [{"type":"script","shell":{"k":{"cmd":"toon agent-key set --limit 99","description":"x"}}}]' "$root/agent/spaceturtle.yaml" > "$bad"
+bad=$tmp/bad.yaml; yq '.agents.spaceturtle.toolsets += [{"type":"script","shell":{"k":{"cmd":"toon agent-key set --max-per-day 99","description":"x"}}}]' "$root/agent/spaceturtle.yaml" > "$bad"
 "$root/tests/check-agent" "$bad" > "$tmp/out" 2>&1; rc=$?
 [[ $rc -ne 0 ]] && grep -q forbidden-command "$tmp/out"; launcher_check "check-agent refuses a tool that runs toon agent-key" $?
 

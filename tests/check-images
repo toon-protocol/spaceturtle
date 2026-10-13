@@ -24,16 +24,20 @@ for df in agent/Dockerfile connector/Dockerfile; do
   done < <(sed -n 's/^ARG \([A-Za-z0-9_=.:-]*\).*/\1/p' "$df")
   grep -q 'sha256sum -c' "$df" || problem "$df: toon's checksum is not verified"
   grep -q 'TOON_VERSION' "$df" || problem "$df: toon is not pinned"
-  grep -q -E '^FROM .*@\$\{[A-Z_]+DIGEST\}' "$df" || problem "$df: the base is not pinned by digest"
+  grep -q '^FROM ' "$df" && ! grep -E '^FROM ' "$df" | grep -q -v -E '@\$\{[A-Z_]+DIGEST\}' || problem "$df: a base is not pinned by digest"
   grep -q -E ':latest|\blatest/' "$df" && problem "$df: names latest"
 done
 grep -q 'sha512sum -c' connector/Dockerfile || problem "connector/Dockerfile: gVisor's checksum is not verified"
+# docker-agent is built again from the commit of its release, and from nothing later.
+grep -q 'rev-parse HEAD)" = "\$DOCKER_AGENT_COMMIT"' agent/Dockerfile || problem "agent/Dockerfile: docker-agent's source is not held to a commit"
+[[ -s agent/docker-agent.patch && -s agent/banner.awk && -x agent/spaceturtle-apps && -x agent/spaceturtle-limit ]] || problem "agent: docker-agent's patch or the banner's generator is missing"
 
 # A version or a checksum that is not what it should look like.
 [[ $TOON_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || problem "TOON_VERSION is not a release"
 for v in TOON_SHA256_AMD64 TOON_SHA256_ARM64 DOCKER_AGENT_SHA256_AMD64; do [[ ${!v} =~ ^[0-9a-f]{64}$ ]] || problem "$v is not a sha256"; done
 for v in GVISOR_SHA512_AMD64 GVISOR_SHA512_ARM64; do [[ ${!v} =~ ^[0-9a-f]{128}$ ]] || problem "$v is not a sha512"; done
-for v in DOCKER_AGENT_BASE_DIGEST CONNECTOR_BASE_DIGEST; do [[ ${!v} =~ ^sha256:[0-9a-f]{64}$ ]] || problem "$v is not a digest"; done
+[[ $DOCKER_AGENT_COMMIT =~ ^[0-9a-f]{40}$ ]] || problem "DOCKER_AGENT_COMMIT is not a commit"
+for v in DOCKER_AGENT_BASE_DIGEST CONNECTOR_BASE_DIGEST GO_IMAGE_DIGEST; do [[ ${!v} =~ ^sha256:[0-9a-f]{64}$ ]] || problem "$v is not a digest"; done
 
 # The agent's zone holds no wallet, passphrase or key.
 if grep -n -i -E 'passphrase|mnemonic|secret|agent_key|toon (init|wallet)|\.toon|config/toon|^(ENV|COPY|ADD|VOLUME)\b.*(key|wallet)' agent/Dockerfile | grep -v '^[0-9]*:#' | grep .; then
@@ -42,7 +46,7 @@ fi
 
 # One command prints every version.
 out=$(./versions 2>&1) || problem "versions failed"
-for v in "$TOON_VERSION" "$DOCKER_AGENT_VERSION" "$GVISOR_VERSION" "$DOCKER_AGENT_BASE_DIGEST" "$CONNECTOR_BASE_DIGEST"; do
+for v in "$TOON_VERSION" "$DOCKER_AGENT_VERSION" "$GVISOR_VERSION" "$DOCKER_AGENT_BASE_DIGEST" "$CONNECTOR_BASE_DIGEST" "$DOCKER_AGENT_COMMIT" "$GO_VERSION"; do
   grep -qF -- "$v" <<<"$out" || problem "versions does not print $v"
 done
 exit $bad

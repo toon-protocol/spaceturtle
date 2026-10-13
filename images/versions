@@ -7,6 +7,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 cat <<OUT
 agent's zone image
   docker-agent sandbox image  docker/docker-agent-sbx-templates:$DOCKER_AGENT_VERSION@$DOCKER_AGENT_BASE_DIGEST
+  docker-agent                $DOCKER_AGENT_VERSION, built from $DOCKER_AGENT_COMMIT with images/agent/docker-agent.patch, by Go $GO_VERSION
   toon                        $TOON_VERSION (sha256 verified)
 connector's zone image
   sandbox base                docker/sandbox-templates:shell-docker@$CONNECTOR_BASE_DIGEST
