@@ -133,9 +133,9 @@
 #                           (default: ~/.config/spaceturtle)
 #   SPACETURTLE_MODEL_KEY_FILE  the model key (default: ~/.config/spaceturtle-launcher/model-key)
 #   SPACETURTLE_MODEL_HOST  the model provider's host, for a provider the launcher does not know
-#   SPACETURTLE_CONNECTOR_IMAGE  the connector's zone image (default: ghcr.io/toon-protocol/spaceturtle-connector-zone:latest)
+#   SPACETURTLE_CONNECTOR_IMAGE  the connector's zone image (default: ghcr.io/toon-protocol/spaceturtle-connector-zone, at the release install.sh installed, else latest)
 #   SPACETURTLE_AGENT_ZONE  the agent's zone's name (default: st-agent)
-#   SPACETURTLE_AGENT_IMAGE the agent's zone image (default: ghcr.io/toon-protocol/spaceturtle-agent-zone:latest)
+#   SPACETURTLE_AGENT_IMAGE the agent's zone image (default: ghcr.io/toon-protocol/spaceturtle-agent-zone, likewise)
 #   SPACETURTLE_AGENT_DEF   the agent definition (default: agent/spaceturtle.yaml beside this file)
 #   SPACETURTLE_CONNECTOR_PORT  the first of the two loopback ports of the machine that lead to the
 #                           connector's zone: this one to the supervisor's orders, the next
@@ -155,10 +155,14 @@ backup_dir=${SPACETURTLE_BACKUP_DIR:-$HOME/spaceturtle-backup}
 config_dir=${SPACETURTLE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/spaceturtle}
 conf=$config_dir/launcher.conf
 key_file=${SPACETURTLE_MODEL_KEY_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/spaceturtle-launcher/model-key}
-connector_image=${SPACETURTLE_CONNECTOR_IMAGE:-ghcr.io/toon-protocol/spaceturtle-connector-zone:latest}
+# Where the launcher itself is, through any link to it: the agent definition is beside it.
+here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
+# install.sh names the release it installed, and the zone images are that release's.
+image_tag=latest
+[[ ! -s $here/version ]] || image_tag=$(<"$here/version")
+connector_image=${SPACETURTLE_CONNECTOR_IMAGE:-ghcr.io/toon-protocol/spaceturtle-connector-zone:$image_tag}
 agent_zone=${SPACETURTLE_AGENT_ZONE:-st-agent}
-agent_image=${SPACETURTLE_AGENT_IMAGE:-ghcr.io/toon-protocol/spaceturtle-agent-zone:latest}
-here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+agent_image=${SPACETURTLE_AGENT_IMAGE:-ghcr.io/toon-protocol/spaceturtle-agent-zone:$image_tag}
 agent_def=${SPACETURTLE_AGENT_DEF:-$here/agent/spaceturtle.yaml}
 connector_port=${SPACETURTLE_CONNECTOR_PORT:-47100}
 [[ $connector_port =~ ^[1-9][0-9]{0,4}$ ]] || { echo "spaceturtle: SPACETURTLE_CONNECTOR_PORT must be a port number, not '$connector_port'" >&2; exit 1; }
