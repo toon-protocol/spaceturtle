@@ -44,7 +44,7 @@ jobs:
       - name: jq is in the agent's zone, where the launcher rewrites the key file's addresses
         if: matrix.image == 'agent'
         run: docker run --rm --entrypoint jq spaceturtle-agent-zone:ci --version
-      - name: gVisor and the overlay client's proxy line are in the connector's zone
+      - name: gVisor is in the connector's zone, and no proxy line for the overlay client
         if: matrix.image == 'connector'
         run: |
-          docker run --rm --entrypoint sh spaceturtle-connector-zone:ci -c 'runsc --version && cat /usr/local/etc/anon/anonrc-defaults'
+          docker run --rm --entrypoint sh spaceturtle-connector-zone:ci -c 'runsc --version && [ ! -e /usr/local/etc/anon/anonrc-defaults ]'

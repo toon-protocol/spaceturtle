@@ -5,16 +5,18 @@
 #
 # It checks the machine first and changes nothing if something is missing. Then it puts the
 # launcher and the agent definition of one release in ~/.local/share/spaceturtle/launcher,
-# links `spaceturtle` into ~/.local/bin, and installs Docker Sandboxes (`sbx`) if the machine
-# has none. The launcher it installs pulls the zone images of that same release. It does not
-# sign in to Docker or start anything: it ends by saying what to run next.
+# links `spaceturtle` into ~/.local/bin, and puts microsandbox (`msb`), which the zones run
+# in, in ~/.local/share/spaceturtle/microsandbox: a copy that is spaceturtle's alone, at the
+# version the launcher is tested with. The launcher it installs pulls the zone images of that
+# same release. It needs no account, asks for none and starts nothing: it ends by saying
+# what to run next.
 # Run it again to move to the newest release, then `spaceturtle upgrade`.
 #
 # Environment:
 #   SPACETURTLE_VERSION      the release to install, such as v0.2.0 (default: the latest)
 #   SPACETURTLE_INSTALL_DIR  where the launcher goes (default: ~/.local/share/spaceturtle/launcher)
 #   SPACETURTLE_BIN_DIR      where the link goes (default: ~/.local/bin)
-#   SPACETURTLE_KVM, SPACETURTLE_SBX, SPACETURTLE_SYSTEMCTL  as the launcher reads them
+#   SPACETURTLE_KVM, SPACETURTLE_MSB_HOME, SPACETURTLE_SYSTEMCTL  as the launcher reads them
 #   SPACETURTLE_CURL         the curl program (default: curl)
 set -euo pipefail
 
@@ -22,13 +24,13 @@ repo=toon-protocol/spaceturtle
 dir=${SPACETURTLE_INSTALL_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/spaceturtle/launcher}
 bin=${SPACETURTLE_BIN_DIR:-$HOME/.local/bin}
 kvm=${SPACETURTLE_KVM:-/dev/kvm}
-sbx=${SPACETURTLE_SBX:-sbx}
+msb_home=${SPACETURTLE_MSB_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/spaceturtle/microsandbox}
 systemctl_=${SPACETURTLE_SYSTEMCTL:-systemctl}
 curl_=${SPACETURTLE_CURL:-curl}
-# Docker Sandboxes, pinned: the release the launcher is tested with. The checksum is the
-# digest GitHub records for the release's DockerSandboxes-linux-amd64.tar.gz.
-sbx_version=${SPACETURTLE_SBX_VERSION:-0.47.0}
-sbx_sha256=${SPACETURTLE_SBX_SHA256:-a89cb4380075ebb20938103bc98ec63327fbeabe43a71f0575ddb285a051eab4}
+# microsandbox, pinned: the release the launcher is tested with. The checksum is the one the
+# release's checksums.sha256 gives for microsandbox-linux-x86_64.tar.gz.
+msb_version=${SPACETURTLE_MSB_VERSION:-0.7.8}
+msb_sha256=${SPACETURTLE_MSB_SHA256:-86f9f72dc3e639c7175bc07909b4b63ce412517c1ef8a2e1921171af5682fded}
 
 say() { echo "spaceturtle: $*"; }
 die() { echo "spaceturtle: $*" >&2; exit 1; }
@@ -36,7 +38,11 @@ die() { echo "spaceturtle: $*" >&2; exit 1; }
 # Everything the machine lacks, said at once, before anything is changed.
 lacking=()
 [[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] || lacking+=("a Linux machine on x86_64: the zone images are built for nothing else")
-[[ -e $kvm ]] || lacking+=("KVM ($kvm): turn on virtualisation in the firmware (VT-x or AMD-V) and load the kvm module")
+if [[ ! -e $kvm ]]; then lacking+=("KVM ($kvm): turn on virtualisation in the firmware (VT-x or AMD-V) and load the kvm module")
+elif [[ ! -r $kvm || ! -w $kvm ]]; then lacking+=("the right to use KVM ($kvm): run 'sudo usermod -aG kvm \$USER', then sign out and in again")
+fi
+# microsandbox is built against the GNU C library.
+getconf GNU_LIBC_VERSION >/dev/null 2>&1 || lacking+=("the GNU C library (glibc 2.28 or newer), which microsandbox needs")
 command -v "$systemctl_" >/dev/null 2>&1 || lacking+=("systemd, for the user units that keep the Install running")
 for program in "$curl_" jq tar sha256sum; do
   command -v "$program" >/dev/null 2>&1 || lacking+=("$program")
@@ -77,23 +83,28 @@ mv "$dir.new" "$dir"
 rm -rf "$dir.old"
 ln -sfn "$dir/spaceturtle" "$bin/spaceturtle"
 
-if ! command -v "$sbx" >/dev/null 2>&1 && [[ ! -x $HOME/.docker/sbx/bin/sbx ]]; then
-  say "installing Docker Sandboxes $sbx_version, which the zones run in"
-  "$curl_" -fsSL -o "$tmp/sbx.tar.gz" "https://github.com/docker/sbx-releases/releases/download/v$sbx_version/DockerSandboxes-linux-amd64.tar.gz" \
-    || die "Docker Sandboxes could not be downloaded. Install it from https://github.com/docker/sbx-releases, then run 'spaceturtle start'."
-  echo "$sbx_sha256  $tmp/sbx.tar.gz" | sha256sum -c - >/dev/null || die "the download of Docker Sandboxes is not the release it should be, so it was not installed"
-  tar -xzf "$tmp/sbx.tar.gz" -C "$tmp"
-  bash "$tmp/docker-sbx/install.sh" || die "Docker Sandboxes' own installer failed. Install it from https://github.com/docker/sbx-releases, then run 'spaceturtle start'."
+# microsandbox is a program and the library that holds the zones' kernel, side by side.
+if [[ $("$msb_home/bin/msb" --version 2>/dev/null) != "msb $msb_version" ]]; then
+  say "installing microsandbox $msb_version, which the zones run in"
+  "$curl_" -fsSL -o "$tmp/msb.tar.gz" "https://github.com/superradcompany/microsandbox/releases/download/v$msb_version/microsandbox-linux-x86_64.tar.gz" \
+    || die "microsandbox could not be downloaded, so the launcher has nothing to run the zones in. Run this again."
+  echo "$msb_sha256  $tmp/msb.tar.gz" | sha256sum -c - >/dev/null || die "the download of microsandbox is not the release it should be, so it was not installed"
+  mkdir "$tmp/msb"
+  tar -xzf "$tmp/msb.tar.gz" -C "$tmp/msb" || die "the download of microsandbox is not an archive"
+  lib=$(cd "$tmp/msb" && ls libkrunfw.so.*.*.* 2>/dev/null | head -n 1)
+  [[ -s $tmp/msb/msb && -n $lib ]] || die "the download of microsandbox does not hold what it should"
+  mkdir -p "$msb_home/bin" "$msb_home/lib"
+  install -m 0644 "$tmp/msb/$lib" "$msb_home/lib/$lib"
+  abi=${lib#libkrunfw.so.}; abi=${abi%%.*}
+  ln -sfn "$lib" "$msb_home/lib/libkrunfw.so.$abi"
+  ln -sfn "libkrunfw.so.$abi" "$msb_home/lib/libkrunfw.so"
+  install -m 0755 "$tmp/msb/msb" "$msb_home/bin/msb"
 fi
 
 say "installed. What to run next:"
 n=1
 step() { echo "  $n. $*"; n=$((n + 1)); }
-path_add=
-command -v "$sbx" >/dev/null 2>&1 || path_add="\$HOME/.docker/sbx/bin:"
-case ":$PATH:" in *":$bin:"*) ;; *) path_add+="$bin:" ;; esac
-[[ -z $path_add ]] || step "export PATH=\"$path_add\$PATH\"     (and add it to your shell's profile)"
-PATH="$HOME/.docker/sbx/bin:$PATH" "$sbx" ls >/dev/null 2>&1 || step "sbx login && sbx daemon start -d     (a Docker account; it opens a browser)"
+case ":$PATH:" in *":$bin:"*) ;; *) step "export PATH=\"$bin:\$PATH\"     (and add it to your shell's profile)" ;; esac
 step "spaceturtle start     (about a minute; makes the Install on devnet)"
 step "spaceturtle key       (your model provider's key, read without showing it)"
 step "spaceturtle session   (talk to your agent)"

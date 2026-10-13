@@ -1,7 +1,7 @@
-# The connector's zone: toon, the container engine the apps run on (the base's own Docker),
-# and gVisor's runsc for images that are not TOON's own. It holds no wallet: the wallet's
-# storage is a volume the launcher mounts, so replacing this image leaves it alone.
-# `connector-start` is the entrypoint; it needs no `systemd --user`.
+# The connector's zone, a virtual machine under microsandbox: toon, the container engine the
+# apps run on (the base's own Docker), and gVisor's runsc for images that are not TOON's own.
+# It holds no wallet: the wallet's storage is a directory the launcher mounts, so replacing
+# this image leaves it alone. `connector-start` is the entrypoint; it needs no `systemd --user`.
 # Build arguments come from images/versions.env and have no defaults here.
 ARG CONNECTOR_BASE_DIGEST
 FROM docker/sandbox-templates:shell-docker@${CONNECTOR_BASE_DIGEST}
@@ -48,11 +48,6 @@ rm -rf /var/lib/apt/lists/* /tmp/toon-v* /tmp/gvisor /tmp/gvisor.tar.bz2 "/tmp/$
 # The runtime dockerd offers an app whose image is not TOON's own.
 mkdir -p /etc/docker
 echo '{"runtimes":{"runsc":{"path":"/usr/local/bin/runsc"}}}' > /etc/docker/daemon.json
-
-# The overlay client reads this file before the config toon writes, and only the sandbox's
-# forward proxy lets it connect (the live test on #42). toon has no setting for a proxy.
-mkdir -p /usr/local/etc/anon
-echo "HTTPSProxy gateway.docker.internal:3128" > /usr/local/etc/anon/anonrc-defaults
 SCRIPT
 
 COPY --chmod=0755 connector-start /usr/local/bin/connector-start
