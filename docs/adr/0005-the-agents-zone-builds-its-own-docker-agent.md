@@ -2,7 +2,7 @@
 
 A session is a chat that `docker-agent` draws. On an empty conversation it draws its own name in large letters, from a list of lines fixed in the program, and no flag, setting or field of an agent definition puts anything in its place except a welcome message, which is Markdown drawn once. spaceturtle's banner is a turtle that swims. So the agent's zone image no longer takes `docker-agent` as Docker built it: it builds the same release again from its source, with one change, `images/agent/docker-agent-banner.patch`, which adds `--banner-file`. The file is a film of frames, and `docker-agent` plays it on the clock its spinners already use, until the conversation starts. The image makes the film from the banner the README shows.
 
-The change is offered to `docker/docker-agent`. When a release of theirs holds it, the build stage and the patch go, and the image takes Docker's program again.
+The change is offered to `docker/docker-agent` as [pull request 4578](https://github.com/docker/docker-agent/pull/4578). When a release of theirs holds it, the build stage and the patch go, and the image takes Docker's program again.
 
 ## Considered Options
 
