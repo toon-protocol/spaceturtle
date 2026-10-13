@@ -78,10 +78,15 @@
 #       Reads the model key from the terminal into the key file (mode 600).
 #   spaceturtle waiting
 #       Lists the apps the agent node holds until the Observer approves them: each
-#       one's name, image and how long it has waited.
-#   spaceturtle approve <app>
+#       one's name, image, how long it has waited, and what the agent asked for it
+#       beside the image: a price, variables, the network, the names of secrets.
+#   spaceturtle approve <app> [--secret NAME=FILE]... [--secret-file PATH=FILE]...
 #       Approves a waiting app: `toon approve` starts it, and an image that is not
-#       TOON's own runs under the sandboxed runtime (toon_cli#209).
+#       TOON's own runs under the sandboxed runtime (toon_cli#209). It says first what
+#       the app asks for. For each secret the app names, the Observer gives a file of
+#       this machine, or at a terminal types it without it being shown; an empty line
+#       makes a new random one in the connector's zone. A secret reaches the zone on a
+#       pipe and is never the agent's.
 #   spaceturtle refuse <app> [reason]
 #       Refuses a waiting app and discards it.
 #   spaceturtle status
@@ -530,7 +535,7 @@ agent_zone_wall() {
 
 # Makes the agent's zone, which is left running. The wall is the zone's from when it is made.
 make_agent_zone() { # the wall
-  mkdir -p "$agent_dir/config" "$agent_dir/state" "$session_dir" || die "cannot create $agent_dir"
+  mkdir -p "$agent_dir/config" "$agent_dir/state/requests" "$session_dir" || die "cannot create $agent_dir"
   # A rule that names a host holds for the addresses the name resolves to (--net-strict=false).
   # microsandbox can hold it to the name itself only by opening the zone's TLS, which is not done.
   "$msb" create "$agent_image" --name "$agent_zone" --cpus 2 --memory 2G --quiet --pull "$pull" \
@@ -583,6 +588,8 @@ session() {
   flock -n 9 || die "a session is already running in the agent's zone ($agent_zone). 'spaceturtle stop' ends it."
   state=$(zone_state "$agent_zone")
   write_session_def "$unattended"
+  # Where the Observer's Requests wait; an Install made before this had none.
+  mkdir -p "$agent_dir/state/requests" 2>/dev/null || true
   wall=$(agent_wall) || exit 1
   # No program in a zone is given the lock (9>&-), so it is free once this launcher ends.
   # The trap runs after this function has gone, so what it names is not local.
@@ -898,7 +905,13 @@ waiting_apps() {
   [[ -n $doc ]] || doc=$(in_zone 'toon status --json') || die "toon status failed in the zone"
   jq -c '[.. | objects | .pending_apps? | arrays | .[] | objects
     | select((.name // "") != "" and (.state // .status // "pending") == "pending" and (.refused // null) == null)
-    | {name, image: (.image // .url // ""), since: (.requested_at // .asked_at // .since // .created_at // .at // null)}]
+    | {name, image: (.image // .url // ""), since: (.requested_at // .asked_at // .since // .created_at // .at // null),
+       secrets: [.secrets.variables[]? | strings], secret_files: [.secrets.files[]? | strings],
+       # What the agent asked for beside the image, for the Observer to read before approving.
+       asks: ([(.price | select(. != null and . != 0) | "price \(.)"),
+               ([.variables[]? | strings] | select(length > 0) | "variables " + join(" ")),
+               (select(.allowances.allow_egress == true) | "the network"),
+               ([.secrets.variables[]?, .secrets.files[]? | strings] | select(length > 0) | "secrets " + join(" "))] | join("; "))}]
     | unique_by(.name) | .[]' <<<"$doc" || die "toon status gave a document that is not JSON"
 }
 
@@ -920,24 +933,89 @@ cmd_waiting() {
   while IFS= read -r l; do
     [[ -n $l ]] || continue
     name=$(jq -r .name <<<"$l"); image=$(jq -r .image <<<"$l"); since=$(jq -r .since <<<"$l")
-    printf '%s\t%s\t%s\n' "$name" "$image" "$(age "$since")"; n=$((n + 1))
+    printf '%s\t%s\t%s\t%s\n' "$name" "$image" "$(age "$since")" "$(jq -r '.asks | if . == "" then "asks for nothing more" else "asks for " + . end' <<<"$l")"; n=$((n + 1))
   done <<<"$lines"
   ((n > 0)) || say "no app is waiting"
 }
 
-# approve|refuse <app> [reason]: only an app that is waiting is touched.
-decide() {
-  local verb=$1 app=${2:-} reason=${3:-} lines
-  [[ -n $app && $app != -* ]] || die "usage: spaceturtle $verb <app>$([[ $verb == refuse ]] && echo ' [reason]')"
+# refuse <app> [reason]: only an app that is waiting is touched.
+refuse() {
+  local app=${1:-} reason=${2:-} lines
+  [[ -n $app && $app != -* ]] || die "usage: spaceturtle refuse <app> [reason]"
   preflight
   lines=$(waiting_apps) || exit 1
   jq -e --arg n "$app" 'select(.name == $n)' <<<"$lines" >/dev/null || die "$app is not waiting, so nothing was changed. 'spaceturtle waiting' lists what is."
-  if [[ $verb == approve ]]; then
-    in_zone "toon approve -- $(sh_quote "$app")" || die "toon approve failed in the zone"
+  in_zone "toon refuse ${reason:+--reason $(sh_quote "$reason") }-- $(sh_quote "$app")" || die "toon refuse failed in the zone"
+  say "refused $app: it is discarded"
+}
+
+# approve <app> [--secret NAME=FILE]... [--secret-file PATH=FILE]...: only an app that is
+# waiting is touched. An app may name secrets it needs. The agent never holds one: the Observer
+# gives each here, from a file of this machine or, for a variable, typed without being shown,
+# and it goes to the connector's zone on a pipe, never as an argument of any program.
+approve() {
+  local app=${1:-} lines entry name path file value flags=() given_names=() given_files=() i=0
+  [[ -n $app && $app != -* ]] || die "usage: spaceturtle approve <app> [--secret NAME=FILE]... [--secret-file PATH=FILE]..."
+  shift
+  while (($#)); do
+    case $1 in
+      --secret) [[ ${2:-} == ?*=?* ]] || die "--secret takes NAME=FILE, a file of this machine"; given_names+=("$2"); shift 2 ;;
+      --secret-file) [[ ${2:-} == ?*=?* ]] || die "--secret-file takes PATH=FILE, a file of this machine"; given_files+=("$2"); shift 2 ;;
+      *) die "usage: spaceturtle approve <app> [--secret NAME=FILE]... [--secret-file PATH=FILE]..." ;;
+    esac
+  done
+  preflight
+  lines=$(waiting_apps) || exit 1
+  entry=$(jq -c --arg n "$app" 'select(.name == $n)' <<<"$lines")
+  [[ -n $entry ]] || die "$app is not waiting, so nothing was changed. 'spaceturtle waiting' lists what is."
+  say "$app ($(jq -r .image <<<"$entry")) $(jq -r '.asks | if . == "" then "asks for nothing more" else "asks for " + . end' <<<"$entry")"
+  local held='$HOME/.cache/spaceturtle-approve'
+  in_zone "umask 077 && mkdir -p $held && find $held -type f -delete" || die "cannot prepare the connector's zone for the secrets"
+  # The names come on a descriptor of their own, so the terminal stays the standard input.
+  while IFS= read -r name <&3; do
+    [[ -n $name ]] || continue
+    [[ $name =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "the app names a secret '$name', which is not a variable's name; nothing was changed"
+    file=; for value in "${given_names[@]}"; do [[ ${value%%=*} == "$name" ]] && file=${value#*=}; done
+    if [[ -n $file ]]; then
+      [[ -r $file ]] || die "cannot read $file, the file given for $name; nothing was changed"
+      zexec "$zone" -- sh -c "umask 077 && cat > $held/v-$name" < "$file" || die "the secret $name could not be placed in the connector's zone"
+    elif [[ -t 0 ]]; then
+      printf '%s for %s (not shown; an empty line makes a new random one): ' "$name" "$app" >&2
+      IFS= read -rs value; echo >&2
+      if [[ -n $value ]]; then
+        printf '%s\n' "$value" | zexec "$zone" -- sh -c "umask 077 && cat > $held/v-$name" || die "the secret $name could not be placed in the connector's zone"
+      else
+        # Thirty-two random bytes as hex, made in the zone and never seen outside it.
+        in_zone "umask 077 && head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \\n' > $held/v-$name && [ -s $held/v-$name ]" || die "a random $name could not be made in the connector's zone"
+        say "$name: a new random one, made in the connector's zone"
+      fi
+      value=
+    else
+      die "$app needs the secret $name. Give it with --secret $name=FILE, or run this at a terminal to type it; nothing was changed"
+    fi
+    flags+=(--secret "$name=$held/v-$name")
+  done 3< <(jq -r '.secrets[]' <<<"$entry")
+  while IFS= read -r path <&3; do
+    [[ -n $path ]] || continue
+    [[ $path =~ ^/[A-Za-z0-9._/-]+$ ]] || die "the app names a secret file '$path', which is not a plain path; nothing was changed"
+    file=; for value in "${given_files[@]}"; do [[ ${value%%=*} == "$path" ]] && file=${value#*=}; done
+    [[ -n $file ]] || die "$app needs a secret file at $path. Give it with --secret-file $path=FILE; nothing was changed"
+    [[ -r $file ]] || die "cannot read $file, the file given for $path; nothing was changed"
+    i=$((i + 1))
+    zexec "$zone" -- sh -c "umask 077 && cat > $held/f-$i" < "$file" || die "the secret file for $path could not be placed in the connector's zone"
+    flags+=(--secret-file "$path=$held/f-$i")
+  done 3< <(jq -r '.secret_files[]' <<<"$entry")
+  local cmd="toon approve" f
+  for f in "${flags[@]}"; do
+    # The file's place is in the zone's own home, which the zone's shell names.
+    if [[ $f == --* ]]; then cmd+=" $f"; else cmd+=" \"$f\""; fi
+  done
+  if in_zone "$cmd -- $(sh_quote "$app")"; then
+    in_zone "find $held -type f -delete"
     say "approved $app: it starts now, and an image that is not TOON's own runs under the sandboxed runtime"
   else
-    in_zone "toon refuse ${reason:+--reason $(sh_quote "$reason") }-- $(sh_quote "$app")" || die "toon refuse failed in the zone"
-    say "refused $app: it is discarded"
+    in_zone "find $held -type f -delete"
+    die "toon approve failed in the zone"
   fi
 }
 
@@ -1131,8 +1209,8 @@ case ${1:-} in
   set) shift; set_ "$@" ;;
   key) key ;;
   waiting) cmd_waiting ;;
-  approve) decide approve "${2:-}" ;;
-  refuse) decide refuse "${2:-}" "${3:-}" ;;
+  approve) shift; approve "$@" ;;
+  refuse) refuse "${2:-}" "${3:-}" ;;
   status) cmd_status ;;
   agent-key) shift; cmd_agent_key "$@" ;;
   stop) [[ $# -eq 1 ]] || die "usage: spaceturtle stop"; cmd_stop ;;

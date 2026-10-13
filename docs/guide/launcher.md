@@ -162,8 +162,8 @@ no tool for any of them:
 
 | Command | What it does |
 | --- | --- |
-| `spaceturtle waiting` | Lists each waiting app with its image or URL, and how long it has waited when `toon` says (0.2.0 does not, so it reads `unknown`) |
-| `spaceturtle approve <app>` | Starts it; an image that is not TOON's own runs under the sandboxed runtime |
+| `spaceturtle waiting` | Lists each waiting app with its image or URL, how long it has waited when `toon` says (0.2.0 does not, so it reads `unknown`), and what the agent asked for it beside the image: a price, variables, the network, the names of secrets |
+| `spaceturtle approve <app>` | Says what the app asks for, then starts it; an image that is not TOON's own runs under the sandboxed runtime. For each secret the app names you give a file (`--secret NAME=FILE`, `--secret-file PATH=FILE`), or at a terminal type it without it being shown; an empty line makes a new random one in the connector's zone. The agent names a secret and never holds one |
 | `spaceturtle refuse <app> [reason]` | Discards it |
 | `spaceturtle status` | Also says whether the supervisor is running, how many apps are waiting and what the node has earned |
 | `spaceturtle agent-key show` | The agent key's scope, limits and what is left today; never the private half |
