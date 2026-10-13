@@ -1266,8 +1266,12 @@ GUEST_DEF=/home/agent/session/spaceturtle.yaml
 BASE_WALL="allow@dns,allow@host:tcp:7123,allow@host:tcp:7124"; SKILL_WALL="allow@api.github.com:tcp:443,allow@codeload.github.com:tcp:443"
 session_env; run_cmd session; rc=$?
 run=$(session_run)
-[[ $rc -eq 0 && $run == "exec --quiet --tty -e ANTHROPIC_API_KEY -e TOON_AGENT_KEY agent-x -- docker-agent run --sandbox=false --model anthropic/claude-sonnet-5-5 $GUEST_DEF" ]] && cmp -s "$(sdef)" "$root/agent/spaceturtle.yaml"
+[[ $rc -eq 0 && $run == "exec --quiet --tty -e ANTHROPIC_API_KEY -e TOON_AGENT_KEY agent-x -- docker-agent run --sandbox=false --app-name spaceturtle --model anthropic/claude-sonnet-5-5 $GUEST_DEF" ]] && cmp -s "$(sdef)" "$root/agent/spaceturtle.yaml"
 launcher_check "a session runs docker-agent in the agent's zone, on the definition as shipped" $?
+# The first drawing of TurtleIcon.qml, two blocks to a square, is the picture in the welcome message.
+turtle=$(awk '/^ *\[ *"/ {on=1} on {gsub(/[^.#]/, ""); gsub(/#/, "██"); gsub(/\./, "  "); sub(/ +$/, ""); print; if (++n == 16) exit}' "$root/TurtleIcon.qml")
+[[ -n $turtle && $(yq '.agents.spaceturtle.welcome_message' "$root/agent/spaceturtle.yaml") == '```'$'\n'"$turtle"$'\n''```'$'\n'* ]]
+launcher_check "a session opens on the turtle of the icon, not on docker-agent's banner" $?
 [[ $(<"$STUB_DIR/agent-wall") == "$BASE_WALL,allow@api.anthropic.com:tcp:443,$SKILL_WALL" ]]
 launcher_check "the agent's zone reaches name resolution, the two ports, the provider's host and the skills' hosts, and nothing else" $?
 ! grep -q secret-key-123 "$STUB_DIR/calls"; launcher_check "the model key is not an argument" $?
@@ -1306,7 +1310,7 @@ session_env; echo "https://connector.example.test/ilp" > "$STUB_DIR/connector-ur
 session_env; echo "http://abcdef.anyone/ilp" > "$STUB_DIR/connector-url"; run_cmd session; rc=$?
 [[ $rc -eq 0 ]] && ! grep -qE '^create |^remove ' "$STUB_DIR/calls"; launcher_check "a connector that is not reached over https adds no rule" $?
 session_env; run_cmd session --unattended; rc=$?
-[[ $rc -eq 0 && $(session_run) == "exec --quiet --no-stdin -e ANTHROPIC_API_KEY -e TOON_AGENT_KEY agent-x -- docker-agent run --sandbox=false --model anthropic/claude-sonnet-5-5 --exec --yolo $GUEST_DEF "* ]]
+[[ $rc -eq 0 && $(session_run) == "exec --quiet --no-stdin -e ANTHROPIC_API_KEY -e TOON_AGENT_KEY agent-x -- docker-agent run --sandbox=false --app-name spaceturtle --model anthropic/claude-sonnet-5-5 --exec --yolo $GUEST_DEF "* ]]
 launcher_check "an unattended session runs without a terminal and without asking" $?
 [[ $(tail -2 "$(sdef)") == $'budget:\n  max_cost: 1' ]] && cmp -s <(head -n -2 "$(sdef)") "$root/agent/spaceturtle.yaml"; launcher_check "an unattended session has a cost ceiling by default, as the definition's budget" $?
 run_cmd set ceiling 0.25; : > "$STUB_DIR/calls"; run_cmd session --unattended

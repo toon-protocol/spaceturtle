@@ -551,10 +551,11 @@ session() {
   # exported by the shell itself, in a subshell that becomes msb.
   # The agent key's path, not the key, goes in the environment; the file is in the agent's zone.
   # The agent's zone is its sandbox already, so docker-agent is told not to make another.
+  # The chat names spaceturtle; the definition's welcome message stands where docker-agent's banner would.
   (
     export "$key_var=$(<"$key_file")" "TOON_AGENT_KEY=${agent_key_path/\$HOME//home/agent}"
     exec "$msb" exec --quiet "${attach[@]}" -e "$key_var" -e TOON_AGENT_KEY \
-      "$agent_zone" -- docker-agent run --sandbox=false --model "$model" "${run[@]}"
+      "$agent_zone" -- docker-agent run --sandbox=false --app-name spaceturtle --model "$model" "${run[@]}"
   ) 9>&-
 }
 
