@@ -1117,6 +1117,63 @@ launcher_env; SPACETURTLE_SBX=$tmp/bin/missing run_launcher; rc=$?
 [[ $rc -ne 0 ]] && grep -qi 'not installed' "$tmp/out" && grep -q 'github.com/docker/sbx-releases' "$tmp/out" \
   && [[ ! -e $SPACETURTLE_STATE_DIR/launcher && ! -e $SPACETURTLE_DATA_DIR && ! -e $SPACETURTLE_BACKUP_DIR ]]; launcher_check "with sbx missing it stops before doing anything, with cause and remedy" $?
 
+# --- install.sh: one command puts the launcher of a release on the machine ---
+# A curl that serves GitHub from $STUB_DIR: the latest release's tag, the release's source
+# archive, and a Docker Sandboxes archive whose installer leaves a mark.
+install_env() {
+  launcher_env
+  export SPACETURTLE_INSTALL_DIR=$tmp/launcher SPACETURTLE_BIN_DIR=$tmp/linkbin SPACETURTLE_CURL=$tmp/bin/gh-curl
+  mkdir -p "$tmp/src/spaceturtle-1.2.3/agent" "$tmp/src/docker-sbx"
+  cp "$root/spaceturtle" "$tmp/src/spaceturtle-1.2.3/"; cp "$root/agent/spaceturtle.yaml" "$tmp/src/spaceturtle-1.2.3/agent/"
+  tar -czf "$STUB_DIR/source.tar.gz" -C "$tmp/src" spaceturtle-1.2.3
+  echo ': > "$STUB_DIR/sbx-installed"' > "$tmp/src/docker-sbx/install.sh"
+  tar -czf "$STUB_DIR/sbx.tar.gz" -C "$tmp/src" docker-sbx
+  export SPACETURTLE_SBX_SHA256=$(sha256sum "$STUB_DIR/sbx.tar.gz" | cut -d' ' -f1)
+  cat > "$SPACETURTLE_CURL" <<'STUB'
+#!/bin/bash
+echo "$*" >> "$STUB_DIR/curl-calls"
+out=; url=${@: -1}
+while (($#)); do [[ $1 == -o ]] && out=$2; shift; done
+case $url in
+  */releases/latest) [[ -e $STUB_DIR/no-release ]] && exit 22; echo '{"tag_name":"v1.2.3"}' ;;
+  */archive/refs/tags/v1.2.3.tar.gz) cp "$STUB_DIR/source.tar.gz" "$out" ;;
+  */DockerSandboxes-linux-amd64.tar.gz) cp "$STUB_DIR/sbx.tar.gz" "$out" ;;
+  *) exit 22 ;;
+esac
+STUB
+  chmod +x "$SPACETURTLE_CURL"
+}
+run_install() { "$root/install.sh" > "$tmp/out" 2>&1; }
+install_check() { count=$((count + 1)); if [[ $2 -eq 0 ]]; then echo "ok   install: $1"; else echo "FAIL install: $1"; sed 's/^/     /' "$tmp/out" 2>/dev/null; fails=$((fails + 1)); fi; }
+
+install_env; run_install; rc=$?
+[[ $rc -eq 0 ]] && cmp -s "$tmp/launcher/spaceturtle" "$root/spaceturtle" && cmp -s "$tmp/launcher/agent/spaceturtle.yaml" "$root/agent/spaceturtle.yaml" && [[ -x $tmp/launcher/spaceturtle && $(<"$tmp/launcher/version") == 1.2.3 ]]
+install_check "the latest release's launcher and agent definition are installed, with the release named" $?
+[[ $(readlink "$tmp/linkbin/spaceturtle") == "$tmp/launcher/spaceturtle" ]]; install_check "spaceturtle is linked into the bin directory" $?
+grep -q 'spaceturtle start' "$tmp/out" && grep -q 'spaceturtle key' "$tmp/out" && grep -q "$tmp/linkbin" "$tmp/out" && ! grep -q 'sbx login' "$tmp/out" && [[ ! -e $STUB_DIR/sbx-installed ]]
+install_check "it ends with what to run next, and leaves an sbx that is there and signed in alone" $?
+"$tmp/linkbin/spaceturtle" start > "$tmp/out" 2>&1; rc=$?
+[[ $rc -eq 0 ]] && grep '^create --name zone-x' "$STUB_DIR/calls" | grep -q -- '--template ghcr.io/toon-protocol/spaceturtle-connector-zone:1.2.3 ' && grep '^create --name agent-x' "$STUB_DIR/calls" | grep -q 'spaceturtle-agent-zone:1.2.3 '
+install_check "run through the link, the launcher finds itself and pulls the images of the release it came from" $?
+: > "$STUB_DIR/calls"; echo secret-key-123 > "$SPACETURTLE_MODEL_KEY_FILE"; "$tmp/linkbin/spaceturtle" session --unattended > "$tmp/out" 2>&1; rc=$?
+[[ $rc -eq 0 ]] && cmp -s <(head -n -2 "$SPACETURTLE_STATE_DIR/session/spaceturtle.yaml") "$tmp/launcher/agent/spaceturtle.yaml"; install_check "  and a session reads the definition that was installed beside it" $?
+echo changed >> "$tmp/launcher/spaceturtle"; echo stale > "$tmp/launcher/leftover"; run_install; rc=$?
+[[ $rc -eq 0 ]] && cmp -s "$tmp/launcher/spaceturtle" "$root/spaceturtle" && [[ ! -e $tmp/launcher/leftover && ! -e $tmp/launcher.new && ! -e $tmp/launcher.old ]]; install_check "running it again replaces the launcher whole" $?
+install_env; rm "$SPACETURTLE_KVM"; run_install; rc=$?
+[[ $rc -ne 0 ]] && grep -qi kvm "$tmp/out" && grep -qi firmware "$tmp/out" && [[ ! -e $tmp/launcher && ! -e $tmp/linkbin && ! -e $STUB_DIR/curl-calls ]]; install_check "with no KVM it says so and installs nothing" $?
+install_env; SPACETURTLE_SBX=$tmp/bin/no-sbx HOME=$tmp/emptyhome run_install; rc=$?
+[[ $rc -eq 0 && -e $STUB_DIR/sbx-installed ]] && grep -q 'sbx login' "$tmp/out" && grep -q '.docker/sbx/bin' "$tmp/out"; install_check "a machine with no sbx gets Docker Sandboxes, and is told to sign in and where sbx is" $?
+install_env; SPACETURTLE_SBX=$tmp/bin/no-sbx HOME=$tmp/emptyhome SPACETURTLE_SBX_SHA256=$(printf '0%.0s' {1..64}) run_install; rc=$?
+[[ $rc -ne 0 && ! -e $STUB_DIR/sbx-installed ]] && grep -q 'not the release it should be' "$tmp/out"; install_check "a Docker Sandboxes download with another checksum is not run" $?
+install_env; touch "$STUB_DIR/signed-out"; run_install; grep -q 'sbx login' "$tmp/out"; install_check "an sbx that is signed out is named in what to run next" $?
+install_env; touch "$STUB_DIR/no-release"; run_install; rc=$?
+[[ $rc -ne 0 && ! -e $tmp/launcher ]] && grep -q 'SPACETURTLE_VERSION' "$tmp/out"; install_check "with no release to be found it says how to name one, and installs nothing" $?
+install_env; touch "$STUB_DIR/no-release"; SPACETURTLE_VERSION=v1.2.3 run_install; rc=$?
+[[ $rc -eq 0 && $(<"$tmp/launcher/version") == 1.2.3 ]] && ! grep -q 'releases/latest' "$STUB_DIR/curl-calls"; install_check "a release can be named" $?
+install_env; SPACETURTLE_VERSION='main; rm -rf x' run_install; rc=$?
+[[ $rc -ne 0 && ! -e $tmp/launcher ]] && grep -q 'is not a release' "$tmp/out"; install_check "a version that is not a release is refused" $?
+unset SPACETURTLE_INSTALL_DIR SPACETURTLE_BIN_DIR SPACETURTLE_CURL SPACETURTLE_SBX_SHA256
+
 # --- the launcher: the network is start's flags, kept with the Install ---
 start_with() { printf '%s\n' "$1" | "$root/spaceturtle" start "${@:2}" > "$tmp/out" 2>&1; } # the typed answer, then the flags
 init_line() { grep 'toon init' "$STUB_DIR/calls"; }

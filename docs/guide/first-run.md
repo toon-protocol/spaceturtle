@@ -21,8 +21,28 @@ changing nothing, when one is missing:
   money: read [How the money is kept safe](concepts.md#how-the-money-is-kept-safe)
   first. The network is `start`'s flags: see [The network](launcher.md#the-network).
 
-The launcher is the file [`spaceturtle`](../../spaceturtle) in this repository. Clone the
-repository once and put that file on your `PATH`.
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/toon-protocol/spaceturtle/main/install.sh | bash
+```
+
+[`install.sh`](../../install.sh) needs no root. It first checks the machine (Linux on
+x86_64, KVM, systemd, `curl`, `jq`, `tar`) and installs nothing if something is missing. Then
+it:
+
+- puts the launcher and the agent definition of the latest release in
+  `~/.local/share/spaceturtle/launcher`, and links `spaceturtle` into `~/.local/bin`;
+- installs Docker Sandboxes, at the version the launcher is tested with and checked against
+  its checksum, if the machine has no `sbx`;
+- says what to run next. It does not sign in to Docker and starts nothing.
+
+The launcher it installs pulls the zone images of that same release. Run it again to move to
+the newest release, then `spaceturtle upgrade`. `SPACETURTLE_VERSION=v0.2.0` installs that
+release instead.
+
+To work from a clone instead, put the file [`spaceturtle`](../../spaceturtle) on your
+`PATH`, by its directory or by a link; it then pulls the `latest` images.
 
 ## The first run
 
