@@ -379,16 +379,17 @@ index 0000000..6fa8bee
 +}
 diff --git a/pkg/tui/components/sidebar/command_sections.go b/pkg/tui/components/sidebar/command_sections.go
 new file mode 100644
-index 0000000..913a315
+index 0000000..1bd2cff
 --- /dev/null
 +++ b/pkg/tui/components/sidebar/command_sections.go
-@@ -0,0 +1,147 @@
+@@ -0,0 +1,136 @@
 +package sidebar
 +
 +import (
 +	"context"
 +	"errors"
 +	"os/exec"
++	"slices"
 +	"strings"
 +	"time"
 +
@@ -497,7 +498,7 @@ index 0000000..913a315
 +	if msg.index < 0 || msg.index >= len(m.commandSections) {
 +		return nil
 +	}
-+	if state := &m.commandSections[msg.index]; !equalLines(state.lines, msg.lines) {
++	if state := &m.commandSections[msg.index]; !slices.Equal(state.lines, msg.lines) {
 +		state.lines = msg.lines
 +		m.invalidateCache()
 +	}
@@ -505,18 +506,6 @@ index 0000000..913a315
 +	return tea.Tick(commandSectionInterval, func(time.Time) tea.Msg {
 +		return commandSectionDueMsg{index: index}
 +	})
-+}
-+
-+func equalLines(a, b []string) bool {
-+	if len(a) != len(b) {
-+		return false
-+	}
-+	for i := range a {
-+		if a[i] != b[i] {
-+			return false
-+		}
-+	}
-+	return true
 +}
 +
 +// commandSection renders one command section, or "" while it has no output.

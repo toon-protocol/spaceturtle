@@ -4,7 +4,7 @@ A session is a chat that `docker-agent` draws. On an empty conversation it draws
 
 The second change adds `--sidebar-section`. The chat's sidebar has a fixed list of sections (Session, Token Usage, Agent, Tools) and none for what an agent node runs. The flag adds a section whose body is the output of a command, run again every five seconds. The launcher gives it `spaceturtle-apps`, a script in the image that asks `toon status` with the session's agent key and lists each app, whether it runs, and the apps that wait for the Observer.
 
-Both changes are offered to `docker/docker-agent`, the banner as [pull request 4578](https://github.com/docker/docker-agent/pull/4578). When a release of theirs holds both, the build stage and the patch go, and the image takes Docker's program again.
+Both changes are offered to `docker/docker-agent`, the banner as [pull request 4578](https://github.com/docker/docker-agent/pull/4578) and the sidebar section as [pull request 4585](https://github.com/docker/docker-agent/pull/4585). When a release of theirs holds both, the build stage and the patch go, and the image takes Docker's program again.
 
 ## Considered Options
 
