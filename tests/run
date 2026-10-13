@@ -1292,8 +1292,10 @@ for not_a_host in 'x.test,allow@public' public host 192.168.1.1; do
 done
 session_env; echo "https://public/ilp" > "$STUB_DIR/connector-url"; run_cmd session; rc=$?
 [[ $rc -eq 0 ]] && ! grep -q 'allow@public' "$STUB_DIR/agent-wall"; launcher_check "a node's record that names a group of addresses as its connector adds no rule" $?
-session_env; ps_seen=$tmp/ps-seen; ( for _ in $(seq 200); do cat /proc/[0-9]*/cmdline 2>/dev/null | tr '\0' ' ' | grep -q secret-key-123 && : > "$ps_seen"; done ) & run_cmd session; run_cmd session; kill $! 2>/dev/null; wait 2>/dev/null
-[[ ! -e $ps_seen ]]; launcher_check "the model key is no program's argument on the way" $?
+# An `env` that records its arguments stands first on the path: a key handed to a program that way would be in them.
+session_env; printf '#!/bin/bash\necho "$*" >> "$STUB_DIR/env-calls"\nexec /usr/bin/env "$@"\n' > "$tmp/bin/env"; chmod +x "$tmp/bin/env"
+PATH=$tmp/bin:$PATH run_cmd session; rc=$?; PATH=$tmp/bin:$PATH run_cmd session --unattended
+[[ $rc -eq 0 ]] && ! grep -q secret-key-123 "$STUB_DIR/env-calls" "$STUB_DIR/calls" 2>/dev/null; launcher_check "the model key is no program's argument on the way to the zone" $?
 session_env; echo "https://connector.example.test/ilp" > "$STUB_DIR/connector-url"; run_cmd session
 [[ $(<"$STUB_DIR/agent-wall") == *",allow@connector.example.test:tcp:443,"* ]]; launcher_check "the agent's zone may reach the connector of the node's network, to seal a packet to it" $?
 session_env; echo "http://abcdef.anyone/ilp" > "$STUB_DIR/connector-url"; run_cmd session; rc=$?
