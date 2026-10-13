@@ -1,20 +1,30 @@
 #!/bin/bash
-# Prints a release's notes: the command that runs it in the agent's zone image, every reference it publishes under
-# its version, and the versions the two zone images carry (images/versions).
+# Prints a release's notes: the one command that installs it, every reference it publishes under its version,
+# and the versions the two zone images carry (images/versions).
 # Usage: release/notes <tag or version>      Reads DOCKERHUB_NAMESPACE as release/references does.
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 refs=$("$root/release/references" "${1-}")
+# The tag, whether the release was named by its tag or by its version.
+tag=v${1#v}
 # The references of one artifact, as a list.
 listed() { awk -v a="$1" '$1 == a { print "- `" $2 "`" }' <<<"$refs"; }
 cat <<OUT
-## Run it
+## Install it
 
 \`\`\`
-docker agent run $(awk '$1 == "definition" { print $2; exit }' <<<"$refs") --template $(awk '$1 == "agent" { print $2; exit }' <<<"$refs")
+curl -fsSL https://raw.githubusercontent.com/toon-protocol/spaceturtle/$tag/install.sh | SPACETURTLE_VERSION=$tag bash
 \`\`\`
 
-\`--template\` names the agent's zone image, which holds \`toon\`. Without it the agent starts in \`docker-agent\`'s own image and none of its \`toon\` tools work.
+It needs Linux on x86_64 with KVM, and no account anywhere. It installs the launcher of this release and starts nothing. Then:
+
+\`\`\`
+spaceturtle start     # about a minute after the first pull; makes the Install on devnet
+spaceturtle key       # your model provider's key, read without showing it
+spaceturtle           # talk to your agent
+\`\`\`
+
+An Install that is there already moves to this release with the same command, then \`spaceturtle upgrade\`.
 
 ## What this release publishes
 
