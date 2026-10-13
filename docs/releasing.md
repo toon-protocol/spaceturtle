@@ -55,7 +55,7 @@ Publish a pre-release first (`v0.1.0-rc.1`), which GitHub marks as one, and chec
 - [ ] The references in the release notes exist, three in each registry, all under the version
 - [ ] `docker agent share pull ghcr.io/toon-protocol/spaceturtle:<version>` writes a file that `cmp` finds equal to `agent/spaceturtle.yaml` at the tag
 - [ ] The same from Docker Hub, when it is mirrored
-- [ ] `docker agent run ghcr.io/toon-protocol/spaceturtle:<version> --template ghcr.io/toon-protocol/spaceturtle-agent-zone:<version>` pulls the definition and starts the agent in the agent's zone image, where its `status` tool reaches `toon`
+- [ ] The install command in the release notes, run with directories of its own (`SPACETURTLE_INSTALL_DIR`, `SPACETURTLE_BIN_DIR`, `SPACETURTLE_MSB_HOME`), installs the launcher of the version, and its `spaceturtle start` makes an Install from the published images
 - [ ] `docker run --rm --entrypoint toon <an image reference> --version` prints the `toon` version the notes name
 - [ ] The release notes name the `toon`, `docker-agent` and gVisor versions
 
