@@ -1,0 +1,14 @@
+#!/bin/sh
+# What the chat's sidebar shows under "TOON apps": each app behind the agent node's
+# connectors and whether it runs, then the apps that wait for the Observer. docker-agent runs
+# this every few seconds (--sidebar-section, ADR 0005) with the agent key the session has, so
+# it shows what the agent itself is told by `toon status`, and no more.
+status=$(toon status --json 2>/dev/null) || true
+if ! printf '%s' "$status" | jq -e '.toon_apps' > /dev/null 2>&1; then
+  echo "the node does not answer"
+  exit 0
+fi
+printf '%s' "$status" | jq -r '
+  (.toon_apps[] | (if .connector.running then empty else "○ \(.name): connector stopped" end),
+    (.apps[] | "\(if .running then "●" else "○" end) \(.name)  \(if .running then "running" else "stopped" end)")),
+  (.pending_apps[]? | "◌ \(.name)  \(.status // "pending")")'

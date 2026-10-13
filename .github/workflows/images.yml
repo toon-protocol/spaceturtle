@@ -43,11 +43,12 @@ jobs:
           docker run --rm --entrypoint sh spaceturtle-agent-zone:ci -c '
             ! env | grep -i -E "passphrase|mnemonic|secret|agent_key" &&
             ! ls -d "$HOME/.toon" "$HOME/.config/toon" "$HOME/.local/share/toon" 2>/dev/null | grep .'
-      - name: docker-agent in the agent's zone plays a banner, and the banner is there
+      - name: docker-agent in the agent's zone plays a banner and takes a sidebar section, and both are there
         if: matrix.image == 'agent'
         run: |
           docker run --rm --entrypoint sh spaceturtle-agent-zone:ci -c '
             docker-agent run --help | grep -q -- --banner-file &&
+            docker-agent run --help | grep -q -- --sidebar-section && [ -x /usr/local/bin/spaceturtle-apps ] &&
             [ "$(grep -c "$(printf "\\f")" /usr/local/share/spaceturtle/banner.txt)" = 239 ]'
       - name: jq is in the agent's zone, where the launcher rewrites the key file's addresses
         if: matrix.image == 'agent'

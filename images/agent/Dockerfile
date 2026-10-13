@@ -8,8 +8,9 @@ ARG DOCKER_AGENT_BASE_DIGEST
 ARG GO_VERSION
 ARG GO_IMAGE_DIGEST
 
-# docker-agent of the same release, built again with one change: --banner-file, which draws
-# a film of frames where docker-agent's own banner would be (ADR 0005). The source is held to
+# docker-agent of the same release, built again with two changes (ADR 0005): --banner-file,
+# which draws a film of frames where docker-agent's own banner would be, and --sidebar-section,
+# which shows a command's output in the chat's sidebar. The source is held to
 # the commit of the release, and the film's turtle is the one of the banner the README shows,
 # which the build is given as the context named assets (docs/assets).
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine@${GO_IMAGE_DIGEST} AS docker-agent
@@ -20,8 +21,8 @@ RUN apk add --no-cache git
 WORKDIR /src
 RUN git clone --quiet --depth 1 --branch "v${DOCKER_AGENT_VERSION}" https://github.com/docker/docker-agent.git . \
  && [ "$(git rev-parse HEAD)" = "$DOCKER_AGENT_COMMIT" ]
-COPY docker-agent-banner.patch /tmp/
-RUN git apply /tmp/docker-agent-banner.patch
+COPY docker-agent.patch /tmp/
+RUN git apply /tmp/docker-agent.patch
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -trimpath -tags no_audio \
       -ldflags "-s -w -X github.com/docker/docker-agent/pkg/version.Version=v${DOCKER_AGENT_VERSION} -X github.com/docker/docker-agent/pkg/version.Commit=${DOCKER_AGENT_COMMIT}" \
@@ -56,7 +57,8 @@ toon --version
 SCRIPT
 COPY --from=docker-agent /out/docker-agent /usr/local/bin/docker-agent
 COPY --from=docker-agent /out/banner.txt /usr/local/share/spaceturtle/banner.txt
-RUN docker-agent run --help | grep -q -- --banner-file
+COPY --chmod=0755 spaceturtle-apps /usr/local/bin/spaceturtle-apps
+RUN docker-agent run --help | grep -q -- --banner-file && docker-agent run --help | grep -q -- --sidebar-section
 USER agent
 LABEL org.opencontainers.image.title="spaceturtle agent's zone" \
       org.opencontainers.image.description="docker-agent's sandbox image with toon and spaceturtle's banner, with nothing of a wallet in it" \
