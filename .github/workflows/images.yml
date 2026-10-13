@@ -41,6 +41,9 @@ jobs:
           docker run --rm --entrypoint sh spaceturtle-agent-zone:ci -c '
             ! env | grep -i -E "passphrase|mnemonic|secret|agent_key" &&
             ! ls -d "$HOME/.toon" "$HOME/.config/toon" "$HOME/.local/share/toon" 2>/dev/null | grep .'
+      - name: jq is in the agent's zone, where the launcher rewrites the key file's addresses
+        if: matrix.image == 'agent'
+        run: docker run --rm --entrypoint jq spaceturtle-agent-zone:ci --version
       - name: gVisor and the overlay client's proxy line are in the connector's zone
         if: matrix.image == 'connector'
         run: |
