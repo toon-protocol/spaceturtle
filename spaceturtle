@@ -147,8 +147,9 @@
 #                           connector's zone: this one to the supervisor's orders, the next
 #                           to the relay TOON app's connector (default: 47100). It is the
 #                           zone's from when it is made, and kept in the settings from then
+#   SPACETURTLE_PORT_PROBE  a program that tells, given a port, whether it is open on this machine
+#                           (default: the launcher connects to it)
 #   SPACETURTLE_SUPERVISOR_WAIT  how many seconds `start` waits for the supervisor (default: 180)
-#   SPACETURTLE_BANNER      `off` starts a session without the moving banner (default: on)
 #   SPACETURTLE_SYSTEMCTL   the systemctl program (default: systemctl)
 #   SPACETURTLE_UNIT_DIR    where the timer's units are written (default: ~/.config/systemd/user)
 set -uo pipefail
@@ -200,9 +201,8 @@ unit_dir=${SPACETURTLE_UNIT_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}
 unit_path=/usr/local/bin:/usr/bin:/bin
 case :$unit_path: in *":$(dirname "$(command -v jq 2>/dev/null || echo /usr/bin/jq)"):"*) ;; *) unit_path=$(dirname "$(command -v jq)"):$unit_path ;; esac
 
-# A message would be lost on the banner's screen, so the banner ends first.
-die() { stop_banner; echo "spaceturtle: $*" >&2; exit 1; }
-say() { stop_banner; echo "spaceturtle: $*"; }
+die() { echo "spaceturtle: $*" >&2; exit 1; }
+say() { echo "spaceturtle: $*"; }
 done_() { [[ -e $marks/$1 ]]; }
 mark() { mkdir -p "$marks" && : > "$marks/$1"; }
 
@@ -356,7 +356,7 @@ step_supervisor() {
   write_connector_unit
   "$systemctl_" --user enable spaceturtle-connector.service || die "the unit that keeps the connector's zone running could not be enabled"
   # A supervisor the unit does not hold would not be started again when it ends.
-  supervisor_running && "$systemctl_" --user is-active --quiet spaceturtle-connector.service && return
+  if supervisor_running && "$systemctl_" --user is-active --quiet spaceturtle-connector.service; then need_ports; return; fi
   say "starting the supervisor"
   "$systemctl_" --user restart spaceturtle-connector.service || die "the unit that keeps the connector's zone running could not be started"
   # The supervisor is there before it answers: the container engine and the apps come up first.
@@ -365,6 +365,7 @@ step_supervisor() {
     ((waited < supervisor_wait)) || die "the supervisor did not start in the zone. 'journalctl --user -u spaceturtle-connector' says why."
     sleep 3; waited=$((waited + 3))
   done
+  need_ports
 }
 
 # Writes a fresh sealed backup to the backup directory. The backup already there is
@@ -437,6 +438,18 @@ need_model_key() {
 need_connector() {
   [[ $(zone_state) == running ]] && supervisor_running \
     || die "the connector's zone ($zone) is not running, so no session is started. Run 'spaceturtle start' first."
+  need_ports
+}
+
+# microsandbox opens the zone's two ports on this machine when the zone starts. If another
+# program held one at that moment the zone runs all the same and nothing listens, so the agent
+# would find no node. Only a zone that is started again gets its ports.
+port_open() {
+  if [[ -n ${SPACETURTLE_PORT_PROBE:-} ]]; then "$SPACETURTLE_PORT_PROBE" "$1"; else (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; fi
+}
+need_ports() {
+  port_open "$connector_port" && port_open "$relay_port" \
+    || die "the connector's zone ($zone) is running, but ports $connector_port and $relay_port of this machine do not both lead to it, so the agent cannot reach the node. Another program may have held one when the zone started. Run 'spaceturtle stop', then 'spaceturtle start'."
 }
 
 # The definition a session reads, written fresh each time into the directory the agent's zone
@@ -516,79 +529,6 @@ rewall_agent_zone() { # the wall wanted
   key=
 }
 
-# --- the banner: the README's picture, moving in the terminal while a session starts ---
-# The squares of docs/assets/spaceturtle-banner-dark.svg: the far stars, the near stars and the
-# turtle's two strokes, each as x,y,width. tests/run holds this list to the picture.
-banner_data() {
-  cat <<'DATA'
-far 82,4,1 101,20,1 12,2,1 24,11,1 14,16,1 54,1,1 22,13,1 107,2,1 61,2,1 108,1,1 31,7,1 15,18,1 101,1,1 56,1,1 34,9,1 107,4,1 30,18,1 78,17,1 46,3,1 48,11,1 24,17,1 16,18,1 15,19,1 52,15,1 109,10,1 119,18,1
-near 116,11,2 76,7,2 46,22,2 62,2,2 76,16,2 126,10,2 114,9,2 18,3,2 107,5,2 87,4,2 125,13,2 10,21,2 19,17,2 80,10,2
-a 64,4,3 57,5,2 65,5,3 57,6,3 66,6,2 58,7,10 59,8,3 63,8,4 58,9,10 69,9,2 57,10,3 61,10,3 65,10,7 56,11,6 63,11,9 56,12,6 63,12,9 57,13,3 61,13,3 65,13,7 58,14,10 69,14,2 59,15,3 63,15,4 58,16,10 57,17,3 66,17,2 57,18,2 65,18,3 64,19,3
-b 62,4,3 63,5,3 57,6,2 65,6,2 58,7,9 59,8,3 63,8,4 58,9,10 69,9,2 57,10,3 61,10,3 65,10,7 56,11,6 63,11,9 56,12,6 63,12,9 57,13,3 61,13,3 65,13,7 58,14,10 69,14,2 59,15,3 63,15,4 58,16,9 57,17,2 65,17,2 63,18,3 62,19,3
-DATA
-}
-
-# Two squares to a character, on a screen of its own that is given back when the banner ends.
-# The turtle takes the terminal's own colour, so it shows on a light one as on a dark one.
-banner_pid=
-start_banner() {
-  local rows cols
-  [[ ${SPACETURTLE_BANNER:-on} != off && -t 0 && -t 1 && -w /dev/tty ]] || return 0
-  read -r rows cols < <(stty size 2>/dev/null)
-  [[ ${rows:-} =~ ^[0-9]+$ && ${cols:-} =~ ^[0-9]+$ ]] && (( rows >= 14 && cols >= 40 )) || return 0
-  printf '\033[?1049h\033[?25l\033[2J' > /dev/tty
-  banner_data | awk -v rows="$rows" -v cols="$cols" '
-function px(x, y) {
-  if (fr ? ((x, y) in tb) : ((x, y) in ta)) return 1
-  if (((x + no) % 128, y) in near) return 2
-  if (((x + fo) % 128, y) in far) return 3
-  return 0
-}
-{ for (i = 2; i <= NF; i++) { split($i, q, ","); for (j = 0; j < q[3]; j++) {
-    if ($1 == "far") far[(q[1] + j) % 128, q[2]]; else if ($1 == "near") near[(q[1] + j) % 128, q[2]]
-    else if ($1 == "a") ta[q[1] + j, q[2]]; else tb[q[1] + j, q[2]] } } }
-END {
-  fg[1] = "\033[39m"; fg[2] = "\033[38;2;170;182;224m"; fg[3] = "\033[38;2;86;98;143m"
-  bg[2] = "\033[48;2;170;182;224m"; bg[3] = "\033[48;2;86;98;143m"
-  w = cols < 128 ? cols : 128; x0 = int((128 - w) / 2); left = int((cols - w) / 2) + 1; top = int((rows - 14) / 2) + 1
-  note = "spaceturtle is starting a session"
-  out = sprintf("\033[%d;%dH\033[2m%s\033[0m", top + 13, int((cols - length(note)) / 2) + 1, note)
-  for (t = 0; ; t++) {
-    fo = int(t * 128 / 360); no = int(t * 128 / 160); fr = int(t / 4.5) % 2
-    for (r = 0; r < 12; r++) {
-      out = out sprintf("\033[%d;%dH", top + r, left)
-      for (c = 0; c < w; c++) {
-        u = px(x0 + c, 2 * r); d = px(x0 + c, 2 * r + 1)
-        if (!u && !d) out = out " "
-        else if (u == d) out = out fg[u] "█"
-        else if (!d) out = out fg[u] "▀"
-        else if (!u) out = out fg[d] "▄"
-        else if (d == 1) out = out fg[1] bg[u] "▄\033[49m"
-        else out = out fg[u] bg[d] "▀\033[49m"
-      }
-      out = out "\033[0m"
-    }
-    printf "%s", out; fflush(); out = ""
-    system("sleep 0.1")
-  }
-}
-' > /dev/tty 2>/dev/null 9>&- &
-  banner_pid=$!
-  banner_until=$(( $(date +%s%N) / 1000000 + 2500 ))
-}
-# The zone starts in less time than a stroke of the flippers takes, so the banner is given
-# two and a half seconds from when it began.
-hold_banner() {
-  [[ -n ${banner_pid:-} ]] || return 0
-  while (( $(date +%s%N) / 1000000 < banner_until )); do sleep 0.1; done
-}
-stop_banner() {
-  [[ -n ${banner_pid:-} ]] || return 0
-  kill "$banner_pid" 2>/dev/null; wait "$banner_pid" 2>/dev/null
-  banner_pid=
-  printf '\033[?25h\033[?1049l' > /dev/tty
-}
-
 session() {
   local unattended=0
   case ${1:-} in
@@ -610,25 +550,25 @@ session() {
   write_session_def "$unattended"
   wall=$(agent_wall) || exit 1
   # No program in a zone is given the lock (9>&-), so it is free once this launcher ends.
-  trap 'stop_banner; "$msb" stop --quiet --timeout 60 "$agent_zone" >/dev/null 2>&1 9>&-' EXIT
-  (( unattended )) || start_banner
+  trap '"$msb" stop --quiet --timeout 60 "$agent_zone" >/dev/null 2>&1 9>&-' EXIT
   if [[ $(agent_zone_wall) != "$wall" ]]; then rewall_agent_zone "$wall" 9>&-
   elif [[ $state == stopped ]]; then "$msb" start --quiet "$agent_zone" 9>&- || die "the agent's zone could not be started"
   fi
   local def=/home/agent/session/spaceturtle.yaml
-  local attach=(--tty) run=("$def")
+  # With someone there, the chat opens on the banner the README shows, moving: the agent's zone
+  # image holds it as a film of frames, and its docker-agent is built to play one (ADR 0005).
+  local attach=(--tty) run=(--banner-file /usr/local/share/spaceturtle/banner.txt "$def")
   if (( unattended )); then
     date -u +%Y-%m-%dT%H:%M:%SZ > "$state_dir/last-unattended" || die "cannot write $state_dir/last-unattended"
     # Nobody answers a prompt, and the definition's tools are the whole of what the agent may do.
     attach=(--no-stdin)
     run=(--exec --yolo "$def" "Begin a session: read the waiting Requests and answer them, then do your daily work.")
   fi
-  hold_banner; stop_banner
   # The key reaches the process by name (-e), never as an argument of any program: it is
   # exported by the shell itself, in a subshell that becomes msb.
   # The agent key's path, not the key, goes in the environment; the file is in the agent's zone.
   # The agent's zone is its sandbox already, so docker-agent is told not to make another.
-  # The chat names spaceturtle; the definition's welcome message stands where docker-agent's banner would.
+  # The chat names spaceturtle, not docker-agent.
   (
     export "$key_var=$(<"$key_file")" "TOON_AGENT_KEY=${agent_key_path/\$HOME//home/agent}"
     exec "$msb" exec --quiet "${attach[@]}" -e "$key_var" -e TOON_AGENT_KEY \

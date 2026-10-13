@@ -1,0 +1,570 @@
+From b3a31f5b633183aa496c2524f8ad593f2f7d2c54 Mon Sep 17 00:00:00 2001
+From: Jonathan Green <dev.jonathan.green@gmail.com>
+Date: Tue, 13 Oct 2026 09:38:54 -0400
+Subject: [PATCH] tui: --banner-file replaces the startup banner, with frames
+ that animate
+
+Signed-off-by: Jonathan Green <dev.jonathan.green@gmail.com>
+---
+ cmd/root/run.go                  |  10 +++
+ docs/features/cli/index.md       |   2 +
+ docs/features/tui/index.md       |   5 ++
+ pkg/tui/banner/banner.go         | 110 +++++++++++++++++++++++++++++++
+ pkg/tui/banner/banner_test.go    |  74 +++++++++++++++++++++
+ pkg/tui/page/chat/banner_test.go |  91 +++++++++++++++++++++++++
+ pkg/tui/page/chat/chat.go        |  53 ++++++++++++++-
+ pkg/tui/tui.go                   |  11 ++++
+ 8 files changed, 354 insertions(+), 2 deletions(-)
+ create mode 100644 pkg/tui/banner/banner_test.go
+ create mode 100644 pkg/tui/page/chat/banner_test.go
+
+diff --git a/cmd/root/run.go b/cmd/root/run.go
+index b5efa8b..ebc38cb 100644
+--- a/cmd/root/run.go
++++ b/cmd/root/run.go
+@@ -41,6 +41,7 @@ import (
+ 	"github.com/docker/docker-agent/pkg/telemetry"
+ 	"github.com/docker/docker-agent/pkg/tour"
+ 	"github.com/docker/docker-agent/pkg/tui"
++	tuibanner "github.com/docker/docker-agent/pkg/tui/banner"
+ 	tuiimage "github.com/docker/docker-agent/pkg/tui/image"
+ 	"github.com/docker/docker-agent/pkg/tui/recorder"
+ 	"github.com/docker/docker-agent/pkg/tui/styles"
+@@ -117,6 +118,7 @@ type runExecFlags struct {
+ 	lean            bool
+ 	leanChanged     bool
+ 	appName         string
++	bannerFile      string
+ 	sidebar         bool
+ 	listenAddr      string
+ 	// sessionWorkingDirRoot confines the working_dir of sessions created
+@@ -211,6 +213,7 @@ func addRunOrExecFlags(cmd *cobra.Command, flags *runExecFlags) {
+ 	_ = cmd.PersistentFlags().MarkHidden("tour")
+ 	cmd.PersistentFlags().BoolVar(&flags.lean, "lean", false, "Use a simplified TUI with minimal chrome")
+ 	cmd.PersistentFlags().StringVar(&flags.appName, "app-name", "", "Application name shown in the TUI in place of \"docker agent\"")
++	cmd.PersistentFlags().StringVar(&flags.bannerFile, "banner-file", "", "Text file drawn in the TUI in place of the startup banner; frames separated by a form-feed line play as an animation")
+ 	cmd.PersistentFlags().StringSliceVar(&flags.disabledCommands, "disable-commands", nil, "Comma-separated list of slash commands to hide and disable in the TUI (e.g. /cost,/eval,/model)")
+ 	cmd.PersistentFlags().BoolVar(&flags.sidebar, "sidebar", true, "Show the sidebar in the TUI (set --sidebar=false to hide it)")
+ 	cmd.PersistentFlags().StringVar(&flags.theme, "theme", "", "Preselect a TUI theme by name, or \"auto\" to match the terminal's light/dark background (overrides the theme from user config; ignored outside the interactive TUI)")
+@@ -591,6 +594,13 @@ func (f *runExecFlags) runOrExec(ctx context.Context, out *cli.Printer, args []s
+ 
+ 	var rec *recorder.Recorder
+ 	tuiOptions := f.tuiOpts(args)
++	if f.bannerFile != "" {
++		b, err := tuibanner.Load(f.bannerFile)
++		if err != nil {
++			return err
++		}
++		tuiOptions = append(tuiOptions, tui.WithBanner(b))
++	}
+ 	if dir := f.explicitDefaultWorkingDir(sess); dir != "" {
+ 		tuiOptions = append(tuiOptions, tui.WithDefaultWorkingDir(dir))
+ 	}
+diff --git a/docs/features/cli/index.md b/docs/features/cli/index.md
+index a41b354..1e03b9b 100644
+--- a/docs/features/cli/index.md
++++ b/docs/features/cli/index.md
+@@ -42,6 +42,7 @@ $ docker agent run [config] [message...] [flags]
+ | `--session-workingdir-root <path>`      | Confine the `working_dir` of sessions created through the `--listen` control plane to this directory and its descendants (default: no restriction — any clean host directory is accepted, though raw values containing `..` are rejected). Recommended when the control plane is reachable by other users. Hidden from `--help`, like `--listen`. |
+ | `--lean`                                | Use a simplified, non-alternate-screen TUI. Unlike the default full-screen TUI, this renders inline in the normal terminal buffer — useful in environments where an alternate screen is unwanted (e.g. inside tmux panes, CI with a tty, or log-friendly pipelines). Like the full TUI, displays an ASCII art banner on startup when the chat is empty (configurable via `show_banner` in [user settings](../../configuration/user-settings/index.md)). |
+ | `--app-name <name>`                     | Override the application name label shown in the TUI (status bar, window title, "/exit" notifications).                                   |
++| `--banner-file <path>`                  | Draw the art in this text file in the TUI in place of the startup banner; frames separated by a form-feed line play as an animation.      |
+ | `--sidebar`                             | Control sidebar visibility. Set to `--sidebar=false` to hide the sidebar and disable the Ctrl+B toggle (default: `true`).                 |
+ | `--disable-commands <list>`             | Hide and disable specific slash commands in the TUI. Accepts a comma-separated list of command names (leading slash optional, case-insensitive). E.g. `--disable-commands="/cost,/eval,/model"`. |
+ | `--theme <name>`                        | Preselect a TUI theme by name, or `auto` to follow the terminal's light/dark background (overrides the theme from user config; ignored outside the interactive TUI) |
+@@ -98,6 +99,7 @@ $ docker agent run agent.yaml "question 1" "question 2" "question 3"
+ 
+ # Customize TUI display
+ $ docker agent run agent.yaml --app-name "My Project"
++$ docker agent run agent.yaml --banner-file ./banner.txt
+ $ docker agent run agent.yaml --sidebar=false
+ $ docker agent run agent.yaml --disable-commands="/cost,/eval,/model"
+ 
+diff --git a/docs/features/tui/index.md b/docs/features/tui/index.md
+index 831f91a..0464dfc 100644
+--- a/docs/features/tui/index.md
++++ b/docs/features/tui/index.md
+@@ -15,6 +15,8 @@ _Docker Agent's default interface is a rich, interactive terminal UI with file a
+ 
+ Both the full TUI and the lean TUI display a centered ASCII art Docker Agent banner on startup when the chat is empty. The banner is automatically hidden once the agent starts responding or when a custom welcome message is configured. You can disable the banner entirely from the **Appearance** tab of `/settings`, or by setting `show_banner: false` in your [user settings](../../configuration/user-settings/index.md).
+ 
++To draw your own art in the full TUI instead, pass `--banner-file <path>` with a text file. A line holding only a form feed (`\f`) separates frames; a file with several frames plays them in a loop, one every 100ms, until the conversation starts. Lines may carry ANSI color sequences. The lean TUI keeps the default banner.
++
+ ```bash
+ # Launch with a config
+ $ docker agent run agent.yaml
+@@ -31,6 +33,9 @@ $ docker agent run agent.yaml --debug
+ # Override the application name shown in the status bar and window title
+ $ docker agent run agent.yaml --app-name "My Project"
+ 
++# Replace the startup banner with your own art (several frames play as an animation)
++$ docker agent run agent.yaml --banner-file ./banner.txt
++
+ # Preselect a color theme
+ $ docker agent run agent.yaml --theme dracula
+ 
+diff --git a/pkg/tui/banner/banner.go b/pkg/tui/banner/banner.go
+index b6f28e1..f75123e 100644
+--- a/pkg/tui/banner/banner.go
++++ b/pkg/tui/banner/banner.go
+@@ -1,10 +1,30 @@
++// Package banner holds the art drawn on an empty conversation.
+ package banner
+ 
++import (
++	"errors"
++	"fmt"
++	"os"
++	"strings"
++	"time"
++
++	"github.com/charmbracelet/x/ansi"
++)
++
+ const (
+ 	Width  = 56
+ 	Height = 13
+ )
+ 
++// FrameDuration is how long each frame of an animated banner is shown.
++const FrameDuration = 100 * time.Millisecond
++
++// FrameSeparator is the line that separates the frames of a banner file.
++const FrameSeparator = "\f"
++
++// maxFileSize bounds a banner file; the art is redrawn on every frame change.
++const maxFileSize = 4 << 20
++
+ // Lines is the Docker Agent ASCII-art startup banner.
+ var Lines = []string{
+ 	`██████╗  ██████╗  ██████╗██╗  ██╗███████╗██████╗ `,
+@@ -21,3 +41,93 @@ var Lines = []string{
+ 	`    ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   `,
+ 	`    ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   `,
+ }
++
++// Banner is one or more frames of art. Every frame is padded to the same
++// size, so the banner does not move as it plays.
++type Banner struct {
++	frames []string
++	width  int
++	height int
++}
++
++// Default returns the Docker Agent banner.
++func Default() Banner {
++	return Banner{frames: []string{strings.Join(Lines, "\n")}, width: Width, height: Height}
++}
++
++// Load reads a banner from a text file. See Parse for the format.
++func Load(path string) (Banner, error) {
++	info, err := os.Stat(path)
++	if err != nil {
++		return Banner{}, fmt.Errorf("reading banner file: %w", err)
++	}
++	if info.Size() > maxFileSize {
++		return Banner{}, fmt.Errorf("banner file %s is larger than %d bytes", path, maxFileSize)
++	}
++	data, err := os.ReadFile(path)
++	if err != nil {
++		return Banner{}, fmt.Errorf("reading banner file: %w", err)
++	}
++	b, err := Parse(string(data))
++	if err != nil {
++		return Banner{}, fmt.Errorf("banner file %s: %w", path, err)
++	}
++	return b, nil
++}
++
++// Parse builds a banner from text. A line holding only a form feed separates
++// frames; a banner with several frames plays them in a loop. Lines may carry
++// ANSI color sequences.
++func Parse(text string) (Banner, error) {
++	text = strings.ReplaceAll(text, "\r\n", "\n")
++	var frames [][]string
++	var width, height int
++	for chunk := range strings.SplitSeq(text, "\n"+FrameSeparator+"\n") {
++		lines := strings.Split(strings.Trim(chunk, "\n"), "\n")
++		if len(lines) == 1 && strings.TrimSpace(ansi.Strip(lines[0])) == "" {
++			continue
++		}
++		height = max(height, len(lines))
++		for _, line := range lines {
++			width = max(width, ansi.StringWidth(line))
++		}
++		frames = append(frames, lines)
++	}
++	if len(frames) == 0 {
++		return Banner{}, errors.New("no banner art found")
++	}
++
++	b := Banner{width: width, height: height, frames: make([]string, 0, len(frames))}
++	for _, lines := range frames {
++		for i, line := range lines {
++			lines[i] = line + strings.Repeat(" ", width-ansi.StringWidth(line))
++		}
++		for len(lines) < height {
++			lines = append(lines, strings.Repeat(" ", width))
++		}
++		b.frames = append(b.frames, strings.Join(lines, "\n"))
++	}
++	return b, nil
++}
++
++func (b Banner) Width() int  { return b.width }
++func (b Banner) Height() int { return b.height }
++
++// Animated reports whether the banner has more than one frame.
++func (b Banner) Animated() bool { return len(b.frames) > 1 }
++
++// FrameIndexAt returns the frame shown after the given elapsed time.
++func (b Banner) FrameIndexAt(elapsed time.Duration) int {
++	if len(b.frames) < 2 || elapsed <= 0 {
++		return 0
++	}
++	return int(elapsed/FrameDuration) % len(b.frames)
++}
++
++// FrameAt returns the art shown after the given elapsed time.
++func (b Banner) FrameAt(elapsed time.Duration) string {
++	if len(b.frames) == 0 {
++		return ""
++	}
++	return b.frames[b.FrameIndexAt(elapsed)]
++}
+diff --git a/pkg/tui/banner/banner_test.go b/pkg/tui/banner/banner_test.go
+new file mode 100644
+index 0000000..0709038
+--- /dev/null
++++ b/pkg/tui/banner/banner_test.go
+@@ -0,0 +1,74 @@
++package banner
++
++import (
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++)
++
++func TestDefaultIsTheDockerAgentArt(t *testing.T) {
++	t.Parallel()
++
++	b := Default()
++	assert.False(t, b.Animated())
++	assert.Equal(t, Width, b.Width())
++	assert.Equal(t, Height, b.Height())
++	assert.Equal(t, strings.Join(Lines, "\n"), b.FrameAt(time.Hour))
++}
++
++func TestParseSingleFrame(t *testing.T) {
++	t.Parallel()
++
++	b, err := Parse("\n ab\nabcd\n\n")
++	require.NoError(t, err)
++	assert.False(t, b.Animated())
++	assert.Equal(t, 4, b.Width())
++	assert.Equal(t, 2, b.Height())
++	assert.Equal(t, " ab \nabcd", b.FrameAt(0))
++}
++
++func TestParseFramesShareOneSize(t *testing.T) {
++	t.Parallel()
++
++	b, err := Parse("ab\ncd\n\f\nxyz\n\f\n\x1b[31mq\x1b[39m\n")
++	require.NoError(t, err)
++	assert.True(t, b.Animated())
++	assert.Equal(t, 3, b.Width(), "color sequences take no width")
++	assert.Equal(t, 2, b.Height())
++	assert.Equal(t, "ab \ncd ", b.FrameAt(0))
++	assert.Equal(t, "xyz\n   ", b.FrameAt(FrameDuration))
++	assert.Equal(t, "\x1b[31mq\x1b[39m  \n   ", b.FrameAt(2*FrameDuration))
++	assert.Equal(t, "ab \ncd ", b.FrameAt(3*FrameDuration), "the frames loop")
++}
++
++func TestParseRejectsEmptyArt(t *testing.T) {
++	t.Parallel()
++
++	for _, text := range []string{"", "\n\n", "  \n\f\n\n"} {
++		_, err := Parse(text)
++		require.Error(t, err)
++	}
++}
++
++func TestLoad(t *testing.T) {
++	t.Parallel()
++
++	path := filepath.Join(t.TempDir(), "banner.txt")
++	require.NoError(t, os.WriteFile(path, []byte("one\r\n\f\r\ntwo\r\n"), 0o600))
++	b, err := Load(path)
++	require.NoError(t, err)
++	assert.Equal(t, "one", b.FrameAt(0))
++	assert.Equal(t, "two", b.FrameAt(FrameDuration))
++
++	_, err = Load(filepath.Join(t.TempDir(), "missing.txt"))
++	require.Error(t, err)
++
++	require.NoError(t, os.WriteFile(path, nil, 0o600))
++	_, err = Load(path)
++	require.ErrorContains(t, err, path)
++}
+diff --git a/pkg/tui/page/chat/banner_test.go b/pkg/tui/page/chat/banner_test.go
+new file mode 100644
+index 0000000..f7ffacf
+--- /dev/null
++++ b/pkg/tui/page/chat/banner_test.go
+@@ -0,0 +1,91 @@
++package chat
++
++import (
++	"testing"
++	"time"
++
++	tea "charm.land/bubbletea/v2"
++	"github.com/charmbracelet/x/ansi"
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++
++	"github.com/docker/docker-agent/pkg/tui/animation"
++	tuibanner "github.com/docker/docker-agent/pkg/tui/banner"
++	"github.com/docker/docker-agent/pkg/tui/service"
++)
++
++type bannerScheduler struct{ now time.Time }
++
++func (s *bannerScheduler) Now() time.Time { return s.now }
++func (s *bannerScheduler) Tick(d time.Duration, f func(time.Time) tea.Msg) tea.Cmd {
++	s.now = s.now.Add(d)
++	delivered := s.now
++	return func() tea.Msg { return f(delivered) }
++}
++
++func newBannerTestPage(t *testing.T, ar *animation.Runtime, art string) *chatPage {
++	t.Helper()
++	b, err := tuibanner.Parse(art)
++	require.NoError(t, err)
++	p := New(ar, t.Context(), nil, &service.SessionState{}, WithBanner(b)).(*chatPage)
++	p.SetSize(160, 40)
++	return p
++}
++
++func bannerText(p *chatPage) string {
++	return ansi.Strip(p.messagesView(p.computeSidebarLayout()))
++}
++
++func TestCustomBannerReplacesTheDefault(t *testing.T) {
++	t.Parallel()
++
++	p := newBannerTestPage(t, animation.NewRuntime(), "my project")
++
++	assert.False(t, p.bannerPlaying())
++	assert.Contains(t, bannerText(p), "my project")
++	assert.NotContains(t, bannerText(p), tuibanner.Lines[0])
++}
++
++func TestAnimatedBannerAdvancesWithTheAnimationClock(t *testing.T) {
++	t.Parallel()
++
++	ar := animation.NewRuntimeWithScheduler(&bannerScheduler{now: time.Unix(1, 0)})
++	p := newBannerTestPage(t, ar, "first\n\f\nsecond\n")
++	require.True(t, p.bannerPlaying())
++	assert.Contains(t, bannerText(p), "first")
++
++	cmd := p.bannerSub.Start()
++	require.NotNil(t, cmd)
++	redraws := 0
++	for ar.Now() < tuibanner.FrameDuration {
++		tick, ok := ar.Accept(cmd().(animation.TickMsg))
++		require.True(t, ok)
++		p.tickBanner(tick)
++		if tick.Dirty() {
++			redraws++
++		}
++		cmd = ar.Continue()
++		require.NotNil(t, cmd)
++	}
++
++	assert.Equal(t, 1, redraws, "only a frame change redraws")
++	assert.Contains(t, bannerText(p), "second")
++}
++
++func TestAnimatedBannerStopsTickingOnceTheConversationStarts(t *testing.T) {
++	t.Parallel()
++
++	ar := animation.NewRuntimeWithScheduler(&bannerScheduler{now: time.Unix(1, 0)})
++	p := newBannerTestPage(t, ar, "first\n\f\nsecond\n")
++	cmd := p.bannerSub.Start()
++	require.Equal(t, int32(1), ar.ActiveCount())
++
++	p.showStartupBanner = false
++	tick, ok := ar.Accept(cmd().(animation.TickMsg))
++	require.True(t, ok)
++	p.tickBanner(tick)
++
++	assert.False(t, tick.Dirty())
++	assert.Zero(t, ar.ActiveCount())
++	assert.Nil(t, ar.Continue())
++}
+diff --git a/pkg/tui/page/chat/chat.go b/pkg/tui/page/chat/chat.go
+index 76683bd..c5ba70a 100644
+--- a/pkg/tui/page/chat/chat.go
++++ b/pkg/tui/page/chat/chat.go
+@@ -254,6 +254,8 @@ type chatPage struct {
+ 	// hideBanner mirrors the user's show_banner setting; the zero value
+ 	// keeps the banner so page literals stay banner-enabled.
+ 	hideBanner bool
++	banner     tuibanner.Banner
++	bannerSub  animation.Subscription
+ 
+ 	// Message queue for enqueuing messages while agent is working
+ 	messageQueue    []queuedMessage
+@@ -414,6 +416,8 @@ func New(ar *animation.Runtime, ctx context.Context, a *app.App, sessionState *s
+ 		commandParser:     commands.NewParser(),
+ 		sessionState:      sessionState,
+ 		showStartupBanner: true,
++		banner:            tuibanner.Default(),
++		bannerSub:         ar.Subscribe(),
+ 	}
+ 
+ 	for _, opt := range opts {
+@@ -470,6 +474,14 @@ func WithShowBanner(show bool) PageOption {
+ 	}
+ }
+ 
++// WithBanner replaces the startup banner. A banner with several frames plays
++// while the conversation is empty.
++func WithBanner(b tuibanner.Banner) PageOption {
++	return func(p *chatPage) {
++		p.banner = b
++	}
++}
++
+ // WithCommandParser injects a command parser for handling slash commands in the editor.
+ func WithCommandParser(p *commands.Parser) PageOption {
+ 	return func(cp *chatPage) {
+@@ -530,6 +542,9 @@ func (p *chatPage) Init() tea.Cmd {
+ 	var cmds []tea.Cmd
+ 
+ 	cmds = append(cmds, p.messages.Init())
++	if p.bannerPlaying() {
++		cmds = append(cmds, p.bannerSub.Start())
++	}
+ 
+ 	// Load state from existing session (for session restore and branching)
+ 	if sess := p.app.Session(); sess != nil {
+@@ -609,6 +624,10 @@ func (p *chatPage) update(msg tea.Msg) (layout.Model, tea.Cmd) {
+ 		}
+ 	}
+ 
++	if tick, ok := msg.(animation.TickMsg); ok {
++		p.tickBanner(tick)
++	}
++
+ 	switch msg := msg.(type) {
+ 	case msgtypes.PlanSidebarDataMsg:
+ 		updated, cmd := p.sidebar.Update(msg)
+@@ -844,11 +863,20 @@ func (p *chatPage) messagesView(sl sidebarLayout) string {
+ 	if messagesView != "" || !p.showStartupBanner || p.hideBanner {
+ 		return messagesView
+ 	}
+-	if sl.chatWidth < tuibanner.Width || sl.chatHeight < tuibanner.Height {
++	art := p.banner
++	if art.Height() == 0 {
++		// Page literals carry no banner; they get the default one.
++		art = tuibanner.Default()
++	}
++	if sl.chatWidth < art.Width() || sl.chatHeight < art.Height() {
+ 		return ""
+ 	}
+ 
+-	banner := styles.BaseStyle.Foreground(styles.Accent).Render(strings.Join(tuibanner.Lines, "\n"))
++	var elapsed time.Duration
++	if art.Animated() {
++		elapsed = p.ar.Now()
++	}
++	banner := styles.BaseStyle.Foreground(styles.Accent).Render(art.FrameAt(elapsed))
+ 	return lipgloss.Place(
+ 		sl.chatWidth,
+ 		sl.chatHeight,
+@@ -858,6 +886,27 @@ func (p *chatPage) messagesView(sl sidebarLayout) string {
+ 	)
+ }
+ 
++// bannerPlaying reports whether an animated banner still has the screen.
++func (p *chatPage) bannerPlaying() bool {
++	return p.banner.Animated() && p.showStartupBanner && !p.hideBanner
++}
++
++// tickBanner redraws on a frame change and gives up the tick once the
++// conversation has replaced the banner.
++func (p *chatPage) tickBanner(tick animation.TickMsg) {
++	if !p.bannerSub.IsActive() {
++		return
++	}
++	if !p.bannerPlaying() {
++		p.bannerSub.Stop()
++		return
++	}
++	before, after := tick.ElapsedBounds()
++	if p.banner.FrameIndexAt(before) != p.banner.FrameIndexAt(after) {
++		tick.MarkDirty()
++	}
++}
++
+ // View renders the chat page (messages + sidebar only, no editor or resize handle)
+ func (p *chatPage) View() string {
+ 	sl := p.computeSidebarLayout()
+diff --git a/pkg/tui/tui.go b/pkg/tui/tui.go
+index 68e5f5c..04dcaf6 100644
+--- a/pkg/tui/tui.go
++++ b/pkg/tui/tui.go
+@@ -27,6 +27,7 @@ import (
+ 	"github.com/docker/docker-agent/pkg/runtime"
+ 	"github.com/docker/docker-agent/pkg/session"
+ 	"github.com/docker/docker-agent/pkg/tui/animation"
++	tuibanner "github.com/docker/docker-agent/pkg/tui/banner"
+ 	"github.com/docker/docker-agent/pkg/tui/commands"
+ 	commanddefaults "github.com/docker/docker-agent/pkg/tui/commands/defaults"
+ 	"github.com/docker/docker-agent/pkg/tui/components/completion"
+@@ -285,6 +286,7 @@ type appModel struct {
+ 	// showBanner displays the ASCII-art startup banner on an empty
+ 	// conversation. Shared by every tab and managed via /settings.
+ 	showBanner bool
++	banner     tuibanner.Banner
+ 
+ 	// buildCommandCategories is a function that returns the list of command categories.
+ 	buildCommandCategories func(context.Context, tea.Model) []commands.Category
+@@ -390,6 +392,13 @@ func WithTourOffer(showTelemetryNotice bool) Option {
+ 	}
+ }
+ 
++// WithBanner replaces the startup banner drawn on an empty conversation.
++func WithBanner(b tuibanner.Banner) Option {
++	return func(m *appModel) {
++		m.banner = b
++	}
++}
++
+ // WithAppName sets the application name.
+ //
+ // If not provided, defaults to "docker agent".
+@@ -538,6 +547,7 @@ func New(ctx context.Context, spawner SessionSpawner, initialApp *app.App, initi
+ 		showBanner:                    userSettings.GetShowBanner(),
+ 		keyboardEnhancementsSupported: termfeatures.SupportsModifiedEnter(os.Getenv),
+ 		dockerDesktop:                 os.Getenv("TERM_PROGRAM") == "docker_desktop",
++		banner:                        tuibanner.Default(),
+ 		appName:                       "docker agent",
+ 		appVersion:                    version.Version,
+ 	}
+@@ -667,6 +677,7 @@ func (m *appModel) chatPageOpts() []chat.PageOption {
+ 		chat.WithSendMode(m.sendMode),
+ 		chat.WithInterruptMode(m.interruptMode),
+ 		chat.WithShowBanner(m.showBanner),
++		chat.WithBanner(m.banner),
+ 	}
+ 
+ 	if m.leanMode {

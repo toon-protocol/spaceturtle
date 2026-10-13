@@ -860,6 +860,12 @@ image_check "a default for a version" "sed -i 's/^ARG TOON_VERSION\$/ARG TOON_VE
 image_check "an unchecked toon" "sed -i '/sha256sum -c/d' connector/Dockerfile" "checksum is not verified"
 image_check "an unchecked gVisor" "sed -i '/sha512sum -c/d' connector/Dockerfile" "gVisor's checksum"
 image_check "an unpinned base" "sed -i 's/@\${DOCKER_AGENT_BASE_DIGEST}//' agent/Dockerfile" "not pinned by digest"
+image_check "an unpinned Go for docker-agent's build" "sed -i 's/@\${GO_IMAGE_DIGEST}//' agent/Dockerfile" "not pinned by digest"
+image_check "docker-agent's source not held to its commit" "sed -i '/rev-parse HEAD/d' agent/Dockerfile" "not held to a commit"
+# The film in the agent's zone image is the README's banner: 384 frames of twelve lines, the turtle's four widest rows in each.
+film=$(awk -f "$root/images/agent/banner.awk" "$root/docs/assets/spaceturtle-banner-dark.svg")
+[[ $(grep -c $'^\f$' <<< "$film") -eq 383 && $(grep -c -v $'^\f$' <<< "$film") -eq $((384 * 12)) && $(grep -c '███' <<< "$film") -eq $((384 * 4)) ]] && echo "ok   the banner's film is whole" || { echo "FAIL the banner's film is whole"; fails=$((fails+1)); }
+count=$((count+1))
 image_check "a passphrase in the agent's zone" "echo 'ENV TOON_PASSPHRASE_FILE=/x' >> agent/Dockerfile" "passphrase, wallet or key"
 image_check "a toon init in the agent's zone" "echo 'RUN toon init' >> agent/Dockerfile" "passphrase, wallet or key"
 image_check "a pin that is no checksum" "sed -i 's/^TOON_SHA256_AMD64=.*/TOON_SHA256_AMD64=abc/' versions.env" "TOON_SHA256_AMD64 is not a sha256"
@@ -983,6 +989,8 @@ launcher_env() {
   : > "$SPACETURTLE_KVM"
   export SPACETURTLE_SYSTEMCTL=$tmp/bin/systemctl SPACETURTLE_UNIT_DIR=$tmp/units SPACETURTLE_MODEL_KEY_FILE=$tmp/model-key
   export SPACETURTLE_AGENT_ZONE=agent-x SPACETURTLE_CONNECTOR_PORT=7123 SPACETURTLE_SUPERVISOR_WAIT=0
+  # No zone is real here, so no port is: the launcher is told they are open, until a test says otherwise.
+  export SPACETURTLE_PORT_PROBE=true
   # A systemctl that records its calls. Restarting the unit that keeps the connector's zone
   # running runs what the unit runs, as systemd would, whatever comes of it.
   cat > "$SPACETURTLE_SYSTEMCTL" <<STUB
@@ -1266,23 +1274,11 @@ GUEST_DEF=/home/agent/session/spaceturtle.yaml
 BASE_WALL="allow@dns,allow@host:tcp:7123,allow@host:tcp:7124"; SKILL_WALL="allow@api.github.com:tcp:443,allow@codeload.github.com:tcp:443"
 session_env; run_cmd session; rc=$?
 run=$(session_run)
-[[ $rc -eq 0 && $run == "exec --quiet --tty -e ANTHROPIC_API_KEY -e TOON_AGENT_KEY agent-x -- docker-agent run --sandbox=false --app-name spaceturtle --model anthropic/claude-sonnet-5-5 $GUEST_DEF" ]] && cmp -s "$(sdef)" "$root/agent/spaceturtle.yaml"
+[[ $rc -eq 0 && $run == "exec --quiet --tty -e ANTHROPIC_API_KEY -e TOON_AGENT_KEY agent-x -- docker-agent run --sandbox=false --app-name spaceturtle --model anthropic/claude-sonnet-5-5 --banner-file /usr/local/share/spaceturtle/banner.txt $GUEST_DEF" ]] && cmp -s "$(sdef)" "$root/agent/spaceturtle.yaml"
 launcher_check "a session runs docker-agent in the agent's zone, on the definition as shipped" $?
-# The banner the README shows is the one a session shows: still in the welcome message, moving in the launcher.
-banner=$root/docs/assets/spaceturtle-banner-dark.svg
-still=$(awk '/<g / { g++ } /<rect / && g != 4 { split($0, q, "\""); for (j = 0; j < q[6]; j++) on[q[2] + j, q[4]] }
-  END { for (r = 0; r < 12; r++) { l = ""
-    for (x = 32; x < 96; x++) { u = (x, 2 * r) in on; d = (x, 2 * r + 1) in on; l = l (u && d ? "█" : u ? "▀" : d ? "▄" : " ") }
-    sub(/ +$/, "", l); print l } }' "$banner")
-[[ $still == *█* && $(yq '.agents.spaceturtle.welcome_message' "$root/agent/spaceturtle.yaml") == '```'$'\n'"$still"$'\n''```'$'\n'* ]]
-launcher_check "a session opens on the README's banner, not on docker-agent's" $?
-squares=$(awk '/<g / { g++; line[g] = g == 1 ? "far" : g == 2 ? "near" : g == 3 ? "a" : "b" }
-  /<rect / { split($0, q, "\""); if (q[2] + 0 < 128) line[g] = line[g] " " q[2] "," q[4] "," q[6] }
-  END { for (i = 1; i <= g; i++) print line[i] }' "$banner")
-[[ $(wc -l <<< "$squares") -eq 4 && $(sed -n "/^  cat <<'DATA'$/,/^DATA$/p" "$root/spaceturtle" | sed '1d;$d') == "$squares" ]]
-launcher_check "the banner the launcher moves is the README's, square for square" $?
-[[ $rc -eq 0 && $(<"$tmp/out") != *$'\033'* ]]
-launcher_check "a session with no terminal draws no banner" $?
+# With someone there the chat opens on the banner; nobody watches an unattended session.
+[[ $run == *" --banner-file /usr/local/share/spaceturtle/banner.txt $GUEST_DEF" ]] && ! yq -e '.agents.spaceturtle | has("welcome_message")' "$root/agent/spaceturtle.yaml" > /dev/null 2>&1
+launcher_check "a session opens on spaceturtle's banner, which a welcome message would hide" $?
 [[ $(<"$STUB_DIR/agent-wall") == "$BASE_WALL,allow@api.anthropic.com:tcp:443,$SKILL_WALL" ]]
 launcher_check "the agent's zone reaches name resolution, the two ports, the provider's host and the skills' hosts, and nothing else" $?
 ! grep -q secret-key-123 "$STUB_DIR/calls"; launcher_check "the model key is not an argument" $?
@@ -1324,6 +1320,10 @@ session_env; run_cmd session --unattended; rc=$?
 [[ $rc -eq 0 && $(session_run) == "exec --quiet --no-stdin -e ANTHROPIC_API_KEY -e TOON_AGENT_KEY agent-x -- docker-agent run --sandbox=false --app-name spaceturtle --model anthropic/claude-sonnet-5-5 --exec --yolo $GUEST_DEF "* ]]
 launcher_check "an unattended session runs without a terminal and without asking" $?
 [[ $(tail -2 "$(sdef)") == $'budget:\n  max_cost: 1' ]] && cmp -s <(head -n -2 "$(sdef)") "$root/agent/spaceturtle.yaml"; launcher_check "an unattended session has a cost ceiling by default, as the definition's budget" $?
+session_env; printf '#!/bin/bash\n[[ $1 != 7124 ]]\n' > "$tmp/bin/probe"; chmod +x "$tmp/bin/probe"
+SPACETURTLE_PORT_PROBE=$tmp/bin/probe run_cmd session --unattended; rc=$?
+[[ $rc -ne 0 && $(<"$tmp/out") == *"ports 7123 and 7124 of this machine do not both lead to it"*"spaceturtle stop"* ]] && ! grep -q 'docker-agent run' "$STUB_DIR/calls"
+launcher_check "no session starts when the zone's ports are not open on the machine" $?
 run_cmd set ceiling 0.25; : > "$STUB_DIR/calls"; run_cmd session --unattended
 [[ $(tail -1 "$(sdef)") == "  max_cost: 0.25" ]]; launcher_check "the ceiling can be changed" $?
 run_cmd set ceiling 0; [[ $? -ne 0 ]]; launcher_check "a ceiling of zero is refused" $?
