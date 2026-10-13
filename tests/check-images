@@ -30,7 +30,7 @@ done
 grep -q 'sha512sum -c' connector/Dockerfile || problem "connector/Dockerfile: gVisor's checksum is not verified"
 # docker-agent is built again from the commit of its release, and from nothing later.
 grep -q 'rev-parse HEAD)" = "\$DOCKER_AGENT_COMMIT"' agent/Dockerfile || problem "agent/Dockerfile: docker-agent's source is not held to a commit"
-[[ -s agent/docker-agent.patch && -s agent/banner.awk && -x agent/spaceturtle-apps ]] || problem "agent: docker-agent's patch or the banner's generator is missing"
+[[ -s agent/docker-agent.patch && -s agent/banner.awk && -x agent/spaceturtle-apps && -x agent/spaceturtle-limit ]] || problem "agent: docker-agent's patch or the banner's generator is missing"
 
 # A version or a checksum that is not what it should look like.
 [[ $TOON_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || problem "TOON_VERSION is not a release"

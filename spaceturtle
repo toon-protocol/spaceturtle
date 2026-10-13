@@ -559,8 +559,9 @@ session() {
   local def=/home/agent/session/spaceturtle.yaml
   # With someone there, the chat opens on the banner the README shows, moving: the agent's zone
   # image holds it as a film of frames, and its docker-agent is built to play one (ADR 0005).
-  # Its sidebar lists the node's apps, as the agent key is told of them.
-  local attach=(--tty) run=(--banner-file /usr/local/share/spaceturtle/banner.txt --sidebar-section "TOON apps=spaceturtle-apps" "$def")
+  # Its sidebar shows what the agent key may still pay today and lists the node's apps, both
+  # as the agent key is told of them.
+  local attach=(--tty) run=(--banner-file /usr/local/share/spaceturtle/banner.txt --sidebar-section "Spending limit=spaceturtle-limit" --sidebar-section "TOON apps=spaceturtle-apps" "$def")
   if (( unattended )); then
     date -u +%Y-%m-%dT%H:%M:%SZ > "$state_dir/last-unattended" || die "cannot write $state_dir/last-unattended"
     # Nobody answers a prompt, and the definition's tools are the whole of what the agent may do.

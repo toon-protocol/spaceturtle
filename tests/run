@@ -1277,18 +1277,22 @@ GUEST_DEF=/home/agent/session/spaceturtle.yaml
 BASE_WALL="allow@dns,allow@host:tcp:7123,allow@host:tcp:7124"; SKILL_WALL="allow@api.github.com:tcp:443,allow@codeload.github.com:tcp:443"
 session_env; run_cmd session; rc=$?
 run=$(session_run)
-[[ $rc -eq 0 && $run == "exec --quiet --tty -e ANTHROPIC_API_KEY -e TOON_AGENT_KEY agent-x -- docker-agent run --sandbox=false --app-name spaceturtle --model anthropic/claude-sonnet-5-5 --banner-file /usr/local/share/spaceturtle/banner.txt --sidebar-section TOON apps=spaceturtle-apps $GUEST_DEF" ]] && cmp -s "$(sdef)" "$root/agent/spaceturtle.yaml"
+[[ $rc -eq 0 && $run == "exec --quiet --tty -e ANTHROPIC_API_KEY -e TOON_AGENT_KEY agent-x -- docker-agent run --sandbox=false --app-name spaceturtle --model anthropic/claude-sonnet-5-5 --banner-file /usr/local/share/spaceturtle/banner.txt --sidebar-section Spending limit=spaceturtle-limit --sidebar-section TOON apps=spaceturtle-apps $GUEST_DEF" ]] && cmp -s "$(sdef)" "$root/agent/spaceturtle.yaml"
 launcher_check "a session runs docker-agent in the agent's zone, on the definition as shipped" $?
 session_env; run_cmd; rc=$?
 [[ $rc -eq 0 && $(session_run) == "$run" ]]; launcher_check "spaceturtle with nothing after it is a session" $?
 # With someone there the chat opens on the banner; nobody watches an unattended session.
-[[ $run == *" --banner-file /usr/local/share/spaceturtle/banner.txt --sidebar-section TOON apps=spaceturtle-apps $GUEST_DEF" ]] && ! yq -e '.agents.spaceturtle | has("welcome_message")' "$root/agent/spaceturtle.yaml" > /dev/null 2>&1
+[[ $run == *" --banner-file /usr/local/share/spaceturtle/banner.txt --sidebar-section Spending limit=spaceturtle-limit --sidebar-section TOON apps=spaceturtle-apps $GUEST_DEF" ]] && ! yq -e '.agents.spaceturtle | has("welcome_message")' "$root/agent/spaceturtle.yaml" > /dev/null 2>&1
 launcher_check "a session opens on spaceturtle's banner, which a welcome message would hide" $?
 # The sidebar's list of apps, from what `toon status` tells an agent key.
 apps_list() { mkdir -p "$tmp/apps-bin"; printf '#!/bin/sh\ncat <<JSON\n%s\nJSON\n' "$1" > "$tmp/apps-bin/toon"; chmod +x "$tmp/apps-bin/toon"; PATH=$tmp/apps-bin:$PATH sh "$root/images/agent/spaceturtle-apps"; }
 [[ $(apps_list '{"pending_apps":[{"name":"notes","status":"pending"}],"toon_apps":[{"name":"relay","connector":{"running":true},"apps":[{"name":"relay","running":true},{"name":"whoami","running":false}]}]}') == $'● relay  running\n○ whoami  stopped\n◌ notes  pending' ]]
 launcher_check "the sidebar lists each app, whether it runs, and the apps that wait" $?
 [[ $(apps_list '{"error":{"code":"not_running"}}') == "the node does not answer" ]]; launcher_check "the sidebar says when the node does not answer" $?
+limit_shown() { mkdir -p "$tmp/apps-bin"; printf '#!/bin/sh\ncat <<JSON\n%s\nJSON\n' "$1" > "$tmp/apps-bin/toon"; chmod +x "$tmp/apps-bin/toon"; PATH=$tmp/apps-bin:$PATH sh "$root/images/agent/spaceturtle-limit"; }
+[[ $(limit_shown '{"limits":{"relay":{"per_command":"10000000","per_day":"100000000","remaining_today":"99999000"}}}') == $'left today   99,999,000\nper day      100,000,000\nper command  10,000,000\nin base units of the token' ]]
+launcher_check "the sidebar shows what the agent key may still pay today, of its limits" $?
+[[ $(limit_shown '{"error":{"code":"not_running"}}') == "the node does not answer" ]]; launcher_check "the spending limit says when the node does not answer" $?
 [[ $(<"$STUB_DIR/agent-wall") == "$BASE_WALL,allow@api.anthropic.com:tcp:443,$SKILL_WALL" ]]
 launcher_check "the agent's zone reaches name resolution, the two ports, the provider's host and the skills' hosts, and nothing else" $?
 ! grep -q secret-key-123 "$STUB_DIR/calls"; launcher_check "the model key is not an argument" $?

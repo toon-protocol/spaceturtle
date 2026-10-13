@@ -57,7 +57,7 @@ toon --version
 SCRIPT
 COPY --from=docker-agent /out/docker-agent /usr/local/bin/docker-agent
 COPY --from=docker-agent /out/banner.txt /usr/local/share/spaceturtle/banner.txt
-COPY --chmod=0755 spaceturtle-apps /usr/local/bin/spaceturtle-apps
+COPY --chmod=0755 spaceturtle-apps spaceturtle-limit /usr/local/bin/
 RUN docker-agent run --help | grep -q -- --banner-file && docker-agent run --help | grep -q -- --sidebar-section
 USER agent
 LABEL org.opencontainers.image.title="spaceturtle agent's zone" \

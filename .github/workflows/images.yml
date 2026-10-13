@@ -48,7 +48,7 @@ jobs:
         run: |
           docker run --rm --entrypoint sh spaceturtle-agent-zone:ci -c '
             docker-agent run --help | grep -q -- --banner-file &&
-            docker-agent run --help | grep -q -- --sidebar-section && [ -x /usr/local/bin/spaceturtle-apps ] &&
+            docker-agent run --help | grep -q -- --sidebar-section && [ -x /usr/local/bin/spaceturtle-apps ] && [ -x /usr/local/bin/spaceturtle-limit ] &&
             [ "$(grep -c "$(printf "\\f")" /usr/local/share/spaceturtle/banner.txt)" = 239 ]'
       - name: jq is in the agent's zone, where the launcher rewrites the key file's addresses
         if: matrix.image == 'agent'

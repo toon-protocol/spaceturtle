@@ -1,0 +1,19 @@
+#!/bin/sh
+# What the chat's sidebar shows under "Spending limit": what the session's agent key may still
+# pay through the connector today, out of its limit for a day, and its limit for one command.
+# This is the agent's budget on the network. "Token Usage" above it is docker-agent's own
+# count of what the model has read and written, and what that cost. docker-agent runs this
+# every few seconds (--sidebar-section, ADR 0005); `toon limit show` pays nothing.
+limits=$(toon limit show --json 2>/dev/null) || true
+if ! printf '%s' "$limits" | jq -e '.limits | length > 0' > /dev/null 2>&1; then
+  echo "the node does not answer"
+  exit 0
+fi
+printf '%s' "$limits" | jq -r '
+  def commas: tostring | explode | reverse | [range(0; length; 3) as $i | .[$i:$i + 3] | implode] | join(",") | explode | reverse | implode;
+  (.limits | length) as $n | .limits | to_entries[] |
+    (if $n > 1 then .key else empty end),
+    "left today   \(.value.remaining_today | commas)",
+    "per day      \(.value.per_day | commas)",
+    "per command  \(.value.per_command | commas)",
+    (if $n > 1 then empty else "in base units of the token" end)'
