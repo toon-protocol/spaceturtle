@@ -39,8 +39,8 @@
 #       Writes a fresh sealed backup to the backup directory; the earlier one is replaced
 #       only once the new one has arrived whole. Needs the connector's zone running.
 #   spaceturtle remove [--delete-wallet]
-#       Offers a fresh backup, then removes both zones, the timer's units, the step
-#       markers, the settings and the model key. Keeps the wallet's storage and the
+#       Offers a fresh backup, then removes both zones, what the agent kept, the timer's
+#       units, the step markers, the settings and the model key. Keeps the wallet's storage and the
 #       backup directory. --delete-wallet also deletes the wallet's storage, after the
 #       word "delete" is typed; anything else changes nothing.
 #
@@ -144,7 +144,8 @@
 #   SPACETURTLE_AGENT_DEF   the agent definition (default: agent/spaceturtle.yaml beside this file)
 #   SPACETURTLE_CONNECTOR_PORT  the first of the two loopback ports of the machine that lead to the
 #                           connector's zone: this one to the supervisor's orders, the next
-#                           to the relay TOON app's connector (default: 47100)
+#                           to the relay TOON app's connector (default: 47100). It is the
+#                           zone's from when it is made, and kept in the settings from then
 #   SPACETURTLE_SUPERVISOR_WAIT  how many seconds `start` waits for the supervisor (default: 180)
 #   SPACETURTLE_SYSTEMCTL   the systemctl program (default: systemctl)
 #   SPACETURTLE_UNIT_DIR    where the timer's units are written (default: ~/.config/systemd/user)
@@ -174,8 +175,10 @@ connector_image=${SPACETURTLE_CONNECTOR_IMAGE:-ghcr.io/toon-protocol/spaceturtle
 agent_zone=${SPACETURTLE_AGENT_ZONE:-st-agent}
 agent_image=${SPACETURTLE_AGENT_IMAGE:-ghcr.io/toon-protocol/spaceturtle-agent-zone:$image_tag}
 agent_def=${SPACETURTLE_AGENT_DEF:-$here/agent/spaceturtle.yaml}
-connector_port=${SPACETURTLE_CONNECTOR_PORT:-47100}
-[[ $connector_port =~ ^[1-9][0-9]{0,4}$ ]] || { echo "spaceturtle: SPACETURTLE_CONNECTOR_PORT must be a port number, not '$connector_port'" >&2; exit 1; }
+# The port the Install was made with is kept in the settings, since the units carry no environment.
+connector_port=${SPACETURTLE_CONNECTOR_PORT:-$(sed -n 's/^port=//p' "$conf" 2>/dev/null | tail -n 1)}
+connector_port=${connector_port:-47100}
+[[ $connector_port =~ ^[1-9][0-9]{0,4}$ ]] && (( connector_port < 65535 )) || { echo "spaceturtle: SPACETURTLE_CONNECTOR_PORT must be a port number, not '$connector_port'" >&2; exit 1; }
 relay_port=$((connector_port + 1))
 supervisor_wait=${SPACETURTLE_SUPERVISOR_WAIT:-180}
 # The agent definition as a session reads it, in a directory the agent's zone mounts read-only.
@@ -236,7 +239,8 @@ create_zone() {
     --mount-dir "$data_dir:/home/agent/.toon/agent-node:$zone_user" \
     --mount-owned /var/lib/docker:kind=disk,size=20G --tmpfs /run \
     --net public --port "127.0.0.1:$connector_port:17100" --port "127.0.0.1:$relay_port:17101" \
-    || die "the connector's zone could not be made; microsandbox says why above. It needs ports $connector_port and $relay_port of this machine: if another program holds one, set SPACETURTLE_CONNECTOR_PORT to the first of two free ports."
+    || die "the connector's zone could not be made; microsandbox says why above. It needs ports $connector_port and $relay_port of this machine: if another program holds one, set SPACETURTLE_CONNECTOR_PORT to the first of two free ports.${way_back:-}"
+  conf_set port "$connector_port"
 }
 
 step_zone() {
@@ -397,6 +401,10 @@ conf_set() { # name, value
 valid_interval() { [[ $1 =~ ^[1-9][0-9]*[mhd]$ ]]; }
 valid_ceiling() { [[ $1 =~ ^([0-9]+(\.[0-9]+)?)$ ]] && [[ $1 =~ [1-9] ]]; }
 
+# A host's name with a domain, which is all a wall's rule may name: an address, or one of
+# microsandbox's own words for a group of addresses (public, private, host), is neither.
+is_host() { [[ $1 =~ ^([A-Za-z0-9-]+\.)+[A-Za-z]{2,}$ ]]; }
+
 # The provider's host and the variable its key goes in, from the model's name. The host is
 # empty for a provider the launcher does not know.
 provider_of() {
@@ -411,7 +419,7 @@ provider_of() {
     *) host= key_var=MODEL_API_KEY ;;
   esac
   [[ -z ${SPACETURTLE_MODEL_HOST:-} ]] || host=$SPACETURTLE_MODEL_HOST
-  [[ $host =~ ^[A-Za-z0-9.-]*$ ]] || die "SPACETURTLE_MODEL_HOST must be a host's name, not '$host'"
+  [[ -z $host ]] || is_host "$host" || die "SPACETURTLE_MODEL_HOST must be a host's name, such as api.example.com, not '$host'"
 }
 
 need_model_key() {
@@ -453,7 +461,10 @@ skill_hosts="api.github.com codeload.github.com"
 agent_wall() {
   local h wall="allow@dns,allow@host:tcp:$connector_port,allow@host:tcp:$relay_port"
   provider_of
-  for h in $host $(network_connector_host) $skill_hosts; do wall+=",allow@$h:tcp:443"; done
+  for h in $host $(network_connector_host) $skill_hosts; do
+    # The connector's host is read from the node's own record, which is not taken on trust.
+    is_host "$h" && wall+=",allow@$h:tcp:443"
+  done
   echo "$wall"
 }
 
@@ -474,8 +485,10 @@ make_agent_zone() { # the wall
     --net-strict=false --net-default-egress deny --net-rule "$1" --label "spaceturtle.wall=$1" \
     || die "the agent's zone could not be made"
   # The directories above the mounted ones are made as root's; the agent's own files go beside them.
-  zexec --no-stdin "$agent_zone" -- sudo chown agent: /home/agent/.config /home/agent/.local /home/agent/.local/state \
-    || die "the agent's zone could not be set up"
+  if ! zexec --no-stdin "$agent_zone" -- sudo chown agent: /home/agent/.config /home/agent/.local /home/agent/.local/state; then
+    "$msb" remove --force --quiet "$agent_zone"
+    die "the agent's zone could not be set up"
+  fi
 }
 
 # A zone whose wall is no longer the one wanted is made again, since a wall cannot be changed.
@@ -489,7 +502,9 @@ rewall_agent_zone() { # the wall wanted
   make_agent_zone "$1"
   if ! printf '%s\n' "$key" | zexec "$agent_zone" -- sh -c 'umask 077 && mkdir -p "$HOME/.config/toon-agent" && cat > "$HOME/.config/toon-agent/key" && [ -s "$HOME/.config/toon-agent/key" ]'; then
     key=
-    die "the agent's zone is made again, but the agent key could not be placed in it. Run 'spaceturtle agent-key replace'."
+    # A zone with the right wall and no key would be taken for a whole one by the next session.
+    "$msb" remove --force --quiet "$agent_zone"
+    die "the agent key could not be placed in the new agent's zone, so that zone is removed. Run 'spaceturtle agent-key replace'."
   fi
   key=
 }
@@ -507,11 +522,11 @@ session() {
   [[ -n $host ]] || die "the launcher does not know the host of '${model%%/*}'. Set SPACETURTLE_MODEL_HOST to it."
   need_connector
   local state wall
-  state=$(zone_state "$agent_zone")
-  [[ $state != "not created" ]] || die "there is no agent's zone ($agent_zone), so there is no agent key to work with. Run 'spaceturtle agent-key replace' to make both."
+  [[ $(zone_state "$agent_zone") != "not created" ]] || die "there is no agent's zone ($agent_zone), so there is no agent key to work with. Run 'spaceturtle agent-key replace' to make both."
   # One session at a time: the zone is stopped when its session ends.
   mkdir -p "$state_dir" && exec 9>"$state_dir/session.lock" || die "cannot write $state_dir/session.lock"
   flock -n 9 || die "a session is already running in the agent's zone ($agent_zone). 'spaceturtle stop' ends it."
+  state=$(zone_state "$agent_zone")
   write_session_def "$unattended"
   wall=$(agent_wall) || exit 1
   # No program in a zone is given the lock (9>&-), so it is free once this launcher ends.
@@ -527,12 +542,15 @@ session() {
     attach=(--no-stdin)
     run=(--exec --yolo "$def" "Begin a session: read the waiting Requests and answer them, then do your daily work.")
   fi
-  # The key reaches the process by name (-e), never as an argument.
+  # The key reaches the process by name (-e), never as an argument of any program: it is
+  # exported by the shell itself, in a subshell that becomes msb.
   # The agent key's path, not the key, goes in the environment; the file is in the agent's zone.
   # The agent's zone is its sandbox already, so docker-agent is told not to make another.
-  env "$key_var=$(<"$key_file")" "TOON_AGENT_KEY=${agent_key_path/\$HOME//home/agent}" \
-    "$msb" exec --quiet "${attach[@]}" -e "$key_var" -e TOON_AGENT_KEY \
-    "$agent_zone" -- docker-agent run --sandbox=false --model "$model" "${run[@]}" 9>&-
+  (
+    export "$key_var=$(<"$key_file")" "TOON_AGENT_KEY=${agent_key_path/\$HOME//home/agent}"
+    exec "$msb" exec --quiet "${attach[@]}" -e "$key_var" -e TOON_AGENT_KEY \
+      "$agent_zone" -- docker-agent run --sandbox=false --model "$model" "${run[@]}"
+  ) 9>&-
 }
 
 # --- the timer: a systemd user timer that runs an unattended session ---
@@ -947,6 +965,12 @@ cmd_upgrade() {
   make_backup || die "the backup failed, so nothing was changed."
   pass=$(zexec --no-stdin "$zone" -- sh -c 'cat "$HOME/.config/toon-passphrase"') && [[ -n $pass ]] \
     || die "the passphrase could not be read out of the old zone, so nothing was changed."
+  # Both images are here before anything is removed: the passphrase is in memory alone from then on.
+  if [[ $pull == always ]]; then
+    "$msb" pull --quiet "$connector_image" && "$msb" pull --quiet "$agent_image" \
+      || die "the newest zone images could not be pulled, so nothing was changed."
+  fi
+  way_back=" The old zone is removed, and the backup at $backup_dir/wallet-backup is the way back."
   say "replacing the connector's zone ($zone)"
   if [[ $(zone_state "$agent_zone") != "not created" ]]; then
     "$msb" remove --force --quiet "$agent_zone" || die "the agent's zone ($agent_zone) could not be removed"

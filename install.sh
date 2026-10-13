@@ -91,7 +91,7 @@ if [[ $("$msb_home/bin/msb" --version 2>/dev/null) != "msb $msb_version" ]]; the
   echo "$msb_sha256  $tmp/msb.tar.gz" | sha256sum -c - >/dev/null || die "the download of microsandbox is not the release it should be, so it was not installed"
   mkdir "$tmp/msb"
   tar -xzf "$tmp/msb.tar.gz" -C "$tmp/msb" || die "the download of microsandbox is not an archive"
-  lib=$(cd "$tmp/msb" && ls libkrunfw.so.*.*.* 2>/dev/null | head -n 1)
+  lib=$(cd "$tmp/msb" && ls libkrunfw.so.*.*.* 2>/dev/null | head -n 1) || lib=
   [[ -s $tmp/msb/msb && -n $lib ]] || die "the download of microsandbox does not hold what it should"
   mkdir -p "$msb_home/bin" "$msb_home/lib"
   install -m 0644 "$tmp/msb/$lib" "$msb_home/lib/$lib"

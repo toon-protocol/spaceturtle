@@ -1092,6 +1092,9 @@ launcher_check "a unit keeps the supervisor running: it is started again when it
 : > "$STUB_DIR/calls"; SPACETURTLE_CONNECTOR_PORT=9000 run_launcher; rc=$?
 [[ $rc -ne 0 ]] && grep -q '7123 and 7124' "$tmp/out" && grep -q 'spaceturtle upgrade' "$tmp/out" && ! grep -qE '^create |toon ' "$STUB_DIR/calls"
 launcher_check "a zone made with other ports is not used with new ones, and the run says how to change them" $?
+launcher_env; SPACETURTLE_CONNECTOR_PORT=9000 run_launcher; echo secret-key-123 > "$SPACETURTLE_MODEL_KEY_FILE"; (unset SPACETURTLE_CONNECTOR_PORT; "$root/spaceturtle" session --unattended > "$tmp/out" 2>&1); rc=$?
+[[ $rc -eq 0 && $(<"$STUB_DIR/agent-wall") == "allow@dns,allow@host:tcp:9000,allow@host:tcp:9001,"* ]] && ! grep -qE '^remove ' "$STUB_DIR/calls"; launcher_check "the ports an Install was made with are kept with it, for the units, which have no environment" $?
+SPACETURTLE_CONNECTOR_PORT=65535 run_launcher; [[ $? -ne 0 ]]; launcher_check "a port with no port after it is refused" $?
 launcher_env; run_launcher; echo "zone-x stopped" > "$STUB_DIR/zones"; rm "$STUB_DIR/up"; : > "$STUB_DIR/calls"; "$root/spaceturtle" supervise > "$tmp/out" 2>&1
 a=$(line_no '^start --quiet zone-x$'); b=$(line_no 'exec connector-start'); [[ -n $a && -n $b && $a -lt $b ]] && ! grep -q '^create ' "$STUB_DIR/calls"
 launcher_check "what the unit runs starts a stopped zone, then the supervisor in it" $?
@@ -1283,8 +1286,14 @@ session_env; run_cmd set model other/model-x; run_cmd session; rc=$?
 [[ $rc -ne 0 && -z $(session_run) ]] && grep -q 'SPACETURTLE_MODEL_HOST' "$tmp/out"; launcher_check "a provider the launcher does not know needs its host named" $?
 SPACETURTLE_MODEL_HOST=models.example.test run_cmd session; rc=$?
 [[ $rc -eq 0 && $(<"$STUB_DIR/agent-wall") == "$BASE_WALL,allow@models.example.test:tcp:443,$SKILL_WALL" && $(session_run) == *"-e MODEL_API_KEY "* ]]; launcher_check "  and with it named, the wall holds that host" $?
-SPACETURTLE_MODEL_HOST='x.test,allow@public' run_cmd session; rc=$?
-[[ $rc -ne 0 ]] && ! grep -q 'allow@public' "$STUB_DIR/agent-wall"; launcher_check "a host that is not a host's name does not reach the wall" $?
+for not_a_host in 'x.test,allow@public' public host 192.168.1.1; do
+  SPACETURTLE_MODEL_HOST=$not_a_host run_cmd session; rc=$?
+  [[ $rc -ne 0 ]] && ! grep -qE 'allow@(public|host:tcp:443|192)' "$STUB_DIR/agent-wall"; launcher_check "'$not_a_host', which is not a host's name, does not reach the wall" $?
+done
+session_env; echo "https://public/ilp" > "$STUB_DIR/connector-url"; run_cmd session; rc=$?
+[[ $rc -eq 0 ]] && ! grep -q 'allow@public' "$STUB_DIR/agent-wall"; launcher_check "a node's record that names a group of addresses as its connector adds no rule" $?
+session_env; ps_seen=$tmp/ps-seen; ( for _ in $(seq 200); do cat /proc/[0-9]*/cmdline 2>/dev/null | tr '\0' ' ' | grep -q secret-key-123 && : > "$ps_seen"; done ) & run_cmd session; run_cmd session; kill $! 2>/dev/null; wait 2>/dev/null
+[[ ! -e $ps_seen ]]; launcher_check "the model key is no program's argument on the way" $?
 session_env; echo "https://connector.example.test/ilp" > "$STUB_DIR/connector-url"; run_cmd session
 [[ $(<"$STUB_DIR/agent-wall") == *",allow@connector.example.test:tcp:443,"* ]]; launcher_check "the agent's zone may reach the connector of the node's network, to seal a packet to it" $?
 session_env; echo "http://abcdef.anyone/ilp" > "$STUB_DIR/connector-url"; run_cmd session; rc=$?
@@ -1388,9 +1397,9 @@ u=$(grep -n 'disable --now spaceturtle-connector.service' "$STUB_DIR/systemctl-c
 launcher_check "stop turns off the unit that would start the zone again" $?
 sed -i '/^agent-x /d' "$STUB_DIR/zones"; echo "agent-x running" >> "$STUB_DIR/zones"; : > "$STUB_DIR/calls"; echo "zone-x running" >> "$STUB_DIR/zones"; sed -i '/^zone-x stopped/d' "$STUB_DIR/zones"; run_cmd stop
 grep -q '^stop .*agent-x$' "$STUB_DIR/calls"; launcher_check "stop ends a session in the agent's zone" $?
-up_env; run_cmd stop; : > "$STUB_DIR/calls"; : > "$STUB_DIR/systemctl-calls"; run_launcher; rc=$?
+up_env; echo secret-id > "$SPACETURTLE_DATA_DIR/identity"; run_cmd stop; : > "$STUB_DIR/calls"; : > "$STUB_DIR/systemctl-calls"; run_launcher; rc=$?
 [[ $rc -eq 0 ]] && grep -q '^start --quiet zone-x$' "$STUB_DIR/calls" && ! grep -qE '^create |toon init|toon wallet fund' "$STUB_DIR/calls" && grep -q connector-start "$STUB_DIR/calls" \
-  && grep -q 'enable --now spaceturtle.timer' "$STUB_DIR/systemctl-calls" && grep -q 'enable spaceturtle-connector.service' "$STUB_DIR/systemctl-calls" && [[ $(<"$SPACETURTLE_DATA_DIR/identity") == secret-id ]] 2>/dev/null || [[ ! -e $SPACETURTLE_DATA_DIR/identity ]]; launcher_check "start after stop starts the zone and the supervisor, creates and funds nothing, and turns the timer and the unit on" $?
+  && grep -q 'enable --now spaceturtle.timer' "$STUB_DIR/systemctl-calls" && grep -q 'enable spaceturtle-connector.service' "$STUB_DIR/systemctl-calls" && [[ $(<"$SPACETURTLE_DATA_DIR/identity") == secret-id ]]; launcher_check "start after stop starts the zone and the supervisor, creates and funds nothing, and turns the timer and the unit on" $?
 up_env; run_cmd timer off; run_cmd stop; : > "$STUB_DIR/systemctl-calls"; run_launcher
 ! grep -q 'enable.*spaceturtle.timer' "$STUB_DIR/systemctl-calls"; launcher_check "start after stop leaves a timer that was off, off" $?
 up_env; rm "$STUB_DIR/zones"; run_cmd stop; rc=$?
@@ -1418,6 +1427,8 @@ launcher_check "upgrade stops the unit before the zone goes, starts it for the n
 [[ $(<"$STUB_DIR/stdin") == "$PASS_TEXT" ]]; launcher_check "the passphrase reaches the new zone through standard input" $?
 ! grep -rqF "$PASS_TEXT" "$STUB_DIR/calls" "$STUB_DIR/systemctl-calls" "$tmp/out" && ! grep -rlF "$PASS_TEXT" "$tmp" /tmp --exclude-dir="$(basename "$STUB_DIR")" --exclude-dir=claude-\* 2>/dev/null | grep -q .; launcher_check "the passphrase is in no argument, output or file on the machine" $?
 grep -q '^remove .*agent-x$' "$STUB_DIR/calls"; launcher_check "upgrade clears the agent's zone so the next session uses the newest image" $?
+upg_env; echo "pull --quiet" > "$STUB_DIR/fail-on"; run_cmd upgrade; rc=$?
+[[ $rc -ne 0 ]] && grep -q 'nothing was changed' "$tmp/out" && ! grep -q '^remove ' "$STUB_DIR/calls"; launcher_check "upgrade that cannot pull the newest images removes nothing" $?
 upg_env; echo "copy --quiet zone-x" > "$STUB_DIR/fail-on"; run_cmd upgrade; rc=$?
 [[ $rc -ne 0 ]] && ! grep -q '^remove ' "$STUB_DIR/calls"; launcher_check "upgrade with a failing backup removes nothing" $?
 upg_env; echo 'cat "$HOME/.config/toon-passphrase"' > "$STUB_DIR/fail-on"; run_cmd upgrade; rc=$?

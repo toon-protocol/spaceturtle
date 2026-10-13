@@ -35,8 +35,8 @@ supervisor's output.
 The zone is made with two of its ports published on your machine's loopback, `47100` and
 `47101` (`SPACETURTLE_CONNECTOR_PORT` names the first): the supervisor's orders and the
 relay TOON app's connector, which is all the agent's zone reaches of the node. The ports are
-the zone's from when it is made: to change them, set the variable and run `spaceturtle
-upgrade`. An app whose image is not on `toon`'s list of trusted images runs under
+the zone's from when it is made, and the launcher keeps them in its settings: to change
+them, set the variable and run `spaceturtle upgrade`. An app whose image is not on `toon`'s list of trusted images runs under
 gVisor: `start` writes `runsc` to the home's `untrusted-runtime`.
 
 ## The network
@@ -137,8 +137,9 @@ definition's tools, the agent key's scope and its spending limit are what bound 
   zone. The passphrase goes from the old zone to the new one through the standard input and
   output of `msb exec`, in the launcher's memory only. `toon init` and the faucet do not run
   again. The images of the apps are pulled again, since they were on the old zone's disk. The
-  agent's zone is made again too, from the newest agent's zone image, with a new agent key;
-  what the agent kept in its two directories stays.
+  agent's zone is made again too, from the newest agent's zone image, with a new agent key
+  unless you revoked it; what the agent kept in its two directories stays. Both images are
+  pulled before anything is removed.
 - `spaceturtle backup` writes a fresh sealed backup to `~/spaceturtle-backup` and says where;
   the backup already there is replaced only once the new one has arrived whole. It needs the
   connector's zone running.
