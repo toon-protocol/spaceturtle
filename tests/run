@@ -862,9 +862,12 @@ image_check "an unchecked gVisor" "sed -i '/sha512sum -c/d' connector/Dockerfile
 image_check "an unpinned base" "sed -i 's/@\${DOCKER_AGENT_BASE_DIGEST}//' agent/Dockerfile" "not pinned by digest"
 image_check "an unpinned Go for docker-agent's build" "sed -i 's/@\${GO_IMAGE_DIGEST}//' agent/Dockerfile" "not pinned by digest"
 image_check "docker-agent's source not held to its commit" "sed -i '/rev-parse HEAD/d' agent/Dockerfile" "not held to a commit"
-# The film in the agent's zone image is the README's banner: 384 frames of twelve lines, the turtle's four widest rows in each.
+# The film in the agent's zone image: 240 frames of 64 lines, the turtle's four widest rows in each,
+# and stars on the first and the last line of the field, since the stars are to fill the chat.
 film=$(awk -f "$root/images/agent/banner.awk" "$root/docs/assets/spaceturtle-banner-dark.svg")
-[[ $(grep -c $'^\f$' <<< "$film") -eq 383 && $(grep -c -v $'^\f$' <<< "$film") -eq $((384 * 12)) && $(grep -c '███' <<< "$film") -eq $((384 * 4)) ]] && echo "ok   the banner's film is whole" || { echo "FAIL the banner's film is whole"; fails=$((fails+1)); }
+[[ $(grep -c $'^\f$' <<< "$film") -eq 239 && $(grep -c -v $'^\f$' <<< "$film") -eq $((240 * 64)) && $(grep -c '███' <<< "$film") -eq $((240 * 4)) ]] \
+  && [[ $(sed -n 1p <<< "$film") == *[▀▄█]* && $(sed -n 64p <<< "$film") == *[▀▄█]* ]] \
+  && echo "ok   the banner's film is whole, with stars to its edges" || { echo "FAIL the banner's film is whole, with stars to its edges"; fails=$((fails+1)); }
 count=$((count+1))
 image_check "a passphrase in the agent's zone" "echo 'ENV TOON_PASSPHRASE_FILE=/x' >> agent/Dockerfile" "passphrase, wallet or key"
 image_check "a toon init in the agent's zone" "echo 'RUN toon init' >> agent/Dockerfile" "passphrase, wallet or key"
@@ -1276,6 +1279,8 @@ session_env; run_cmd session; rc=$?
 run=$(session_run)
 [[ $rc -eq 0 && $run == "exec --quiet --tty -e ANTHROPIC_API_KEY -e TOON_AGENT_KEY agent-x -- docker-agent run --sandbox=false --app-name spaceturtle --model anthropic/claude-sonnet-5-5 --banner-file /usr/local/share/spaceturtle/banner.txt $GUEST_DEF" ]] && cmp -s "$(sdef)" "$root/agent/spaceturtle.yaml"
 launcher_check "a session runs docker-agent in the agent's zone, on the definition as shipped" $?
+session_env; run_cmd; rc=$?
+[[ $rc -eq 0 && $(session_run) == "$run" ]]; launcher_check "spaceturtle with nothing after it is a session" $?
 # With someone there the chat opens on the banner; nobody watches an unattended session.
 [[ $run == *" --banner-file /usr/local/share/spaceturtle/banner.txt $GUEST_DEF" ]] && ! yq -e '.agents.spaceturtle | has("welcome_message")' "$root/agent/spaceturtle.yaml" > /dev/null 2>&1
 launcher_check "a session opens on spaceturtle's banner, which a welcome message would hide" $?

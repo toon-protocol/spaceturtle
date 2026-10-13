@@ -1,23 +1,3 @@
-From b3a31f5b633183aa496c2524f8ad593f2f7d2c54 Mon Sep 17 00:00:00 2001
-From: Jonathan Green <dev.jonathan.green@gmail.com>
-Date: Tue, 13 Oct 2026 09:38:54 -0400
-Subject: [PATCH] tui: --banner-file replaces the startup banner, with frames
- that animate
-
-Signed-off-by: Jonathan Green <dev.jonathan.green@gmail.com>
----
- cmd/root/run.go                  |  10 +++
- docs/features/cli/index.md       |   2 +
- docs/features/tui/index.md       |   5 ++
- pkg/tui/banner/banner.go         | 110 +++++++++++++++++++++++++++++++
- pkg/tui/banner/banner_test.go    |  74 +++++++++++++++++++++
- pkg/tui/page/chat/banner_test.go |  91 +++++++++++++++++++++++++
- pkg/tui/page/chat/chat.go        |  53 ++++++++++++++-
- pkg/tui/tui.go                   |  11 ++++
- 8 files changed, 354 insertions(+), 2 deletions(-)
- create mode 100644 pkg/tui/banner/banner_test.go
- create mode 100644 pkg/tui/page/chat/banner_test.go
-
 diff --git a/cmd/root/run.go b/cmd/root/run.go
 index b5efa8b..ebc38cb 100644
 --- a/cmd/root/run.go
@@ -81,14 +61,14 @@ index a41b354..1e03b9b 100644
  $ docker agent run agent.yaml --disable-commands="/cost,/eval,/model"
  
 diff --git a/docs/features/tui/index.md b/docs/features/tui/index.md
-index 831f91a..0464dfc 100644
+index 831f91a..85f4e64 100644
 --- a/docs/features/tui/index.md
 +++ b/docs/features/tui/index.md
 @@ -15,6 +15,8 @@ _Docker Agent's default interface is a rich, interactive terminal UI with file a
  
  Both the full TUI and the lean TUI display a centered ASCII art Docker Agent banner on startup when the chat is empty. The banner is automatically hidden once the agent starts responding or when a custom welcome message is configured. You can disable the banner entirely from the **Appearance** tab of `/settings`, or by setting `show_banner: false` in your [user settings](../../configuration/user-settings/index.md).
  
-+To draw your own art in the full TUI instead, pass `--banner-file <path>` with a text file. A line holding only a form feed (`\f`) separates frames; a file with several frames plays them in a loop, one every 100ms, until the conversation starts. Lines may carry ANSI color sequences. The lean TUI keeps the default banner.
++To draw your own art in the full TUI instead, pass `--banner-file <path>` with a text file. A line holding only a form feed (`\f`) separates frames; a file with several frames plays them in a loop, one every 100ms, until the conversation starts. Lines may carry ANSI color sequences. Art larger than the chat area is cropped around its center, so a backdrop sized for a large terminal fills a small one. The lean TUI keeps the default banner.
 +
  ```bash
  # Launch with a config
@@ -104,7 +84,7 @@ index 831f91a..0464dfc 100644
  $ docker agent run agent.yaml --theme dracula
  
 diff --git a/pkg/tui/banner/banner.go b/pkg/tui/banner/banner.go
-index b6f28e1..f75123e 100644
+index b6f28e1..491f96e 100644
 --- a/pkg/tui/banner/banner.go
 +++ b/pkg/tui/banner/banner.go
 @@ -1,10 +1,30 @@
@@ -133,12 +113,12 @@ index b6f28e1..f75123e 100644
 +const FrameSeparator = "\f"
 +
 +// maxFileSize bounds a banner file; the art is redrawn on every frame change.
-+const maxFileSize = 4 << 20
++const maxFileSize = 16 << 20
 +
  // Lines is the Docker Agent ASCII-art startup banner.
  var Lines = []string{
  	`██████╗  ██████╗  ██████╗██╗  ██╗███████╗██████╗ `,
-@@ -21,3 +41,93 @@ var Lines = []string{
+@@ -21,3 +41,123 @@ var Lines = []string{
  	`    ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   `,
  	`    ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   `,
  }
@@ -149,6 +129,9 @@ index b6f28e1..f75123e 100644
 +	frames []string
 +	width  int
 +	height int
++	// crops marks art that is cut down to an area smaller than itself
++	// rather than left out.
++	crops bool
 +}
 +
 +// Default returns the Docker Agent banner.
@@ -198,7 +181,7 @@ index b6f28e1..f75123e 100644
 +		return Banner{}, errors.New("no banner art found")
 +	}
 +
-+	b := Banner{width: width, height: height, frames: make([]string, 0, len(frames))}
++	b := Banner{width: width, height: height, crops: true, frames: make([]string, 0, len(frames))}
 +	for _, lines := range frames {
 +		for i, line := range lines {
 +			lines[i] = line + strings.Repeat(" ", width-ansi.StringWidth(line))
@@ -213,6 +196,33 @@ index b6f28e1..f75123e 100644
 +
 +func (b Banner) Width() int  { return b.width }
 +func (b Banner) Height() int { return b.height }
++
++// Fits reports whether the banner can be drawn in the given area. Art read
++// from a file always can: it is cut down around its center, so a backdrop
++// larger than any terminal fills the area whatever its size.
++func (b Banner) Fits(width, height int) bool {
++	if width <= 0 || height <= 0 {
++		return false
++	}
++	return b.crops || (width >= b.width && height >= b.height)
++}
++
++// Crop cuts a frame down around its center to at most the given area.
++func (b Banner) Crop(frame string, width, height int) string {
++	if width >= b.width && height >= b.height {
++		return frame
++	}
++	lines := strings.Split(frame, "\n")
++	if extra := len(lines) - height; extra > 0 {
++		lines = lines[extra/2 : extra/2+height]
++	}
++	if extra := b.width - width; extra > 0 {
++		for i, line := range lines {
++			lines[i] = ansi.Cut(line, extra/2, extra/2+width)
++		}
++	}
++	return strings.Join(lines, "\n")
++}
 +
 +// Animated reports whether the banner has more than one frame.
 +func (b Banner) Animated() bool { return len(b.frames) > 1 }
@@ -234,10 +244,10 @@ index b6f28e1..f75123e 100644
 +}
 diff --git a/pkg/tui/banner/banner_test.go b/pkg/tui/banner/banner_test.go
 new file mode 100644
-index 0000000..0709038
+index 0000000..6fa8bee
 --- /dev/null
 +++ b/pkg/tui/banner/banner_test.go
-@@ -0,0 +1,74 @@
+@@ -0,0 +1,98 @@
 +package banner
 +
 +import (
@@ -247,6 +257,7 @@ index 0000000..0709038
 +	"testing"
 +	"time"
 +
++	"github.com/charmbracelet/x/ansi"
 +	"github.com/stretchr/testify/assert"
 +	"github.com/stretchr/testify/require"
 +)
@@ -284,6 +295,29 @@ index 0000000..0709038
 +	assert.Equal(t, "xyz\n   ", b.FrameAt(FrameDuration))
 +	assert.Equal(t, "\x1b[31mq\x1b[39m  \n   ", b.FrameAt(2*FrameDuration))
 +	assert.Equal(t, "ab \ncd ", b.FrameAt(3*FrameDuration), "the frames loop")
++}
++
++func TestDefaultIsLeftOutOfAnAreaTooSmallForIt(t *testing.T) {
++	t.Parallel()
++
++	b := Default()
++	assert.True(t, b.Fits(Width, Height))
++	assert.False(t, b.Fits(Width-1, Height))
++	assert.False(t, b.Fits(Width, Height-1))
++}
++
++func TestArtFromAFileIsCroppedAroundItsCenter(t *testing.T) {
++	t.Parallel()
++
++	b, err := Parse("abcdef\n\x1b[31mghijkl\x1b[39m\nmnopqr\nstuvwx")
++	require.NoError(t, err)
++	require.True(t, b.Fits(2, 2))
++	assert.False(t, b.Fits(0, 2))
++
++	frame := b.FrameAt(0)
++	assert.Equal(t, frame, b.Crop(frame, 6, 4), "an area large enough leaves the art whole")
++	assert.Equal(t, "hijk\nnopq", ansi.Strip(b.Crop(frame, 4, 2)))
++	assert.Contains(t, b.Crop(frame, 4, 2), "\x1b[31m", "colors survive the cut")
 +}
 +
 +func TestParseRejectsEmptyArt(t *testing.T) {
@@ -410,7 +444,7 @@ index 0000000..f7ffacf
 +	assert.Nil(t, ar.Continue())
 +}
 diff --git a/pkg/tui/page/chat/chat.go b/pkg/tui/page/chat/chat.go
-index 76683bd..c5ba70a 100644
+index 76683bd..ce46993 100644
 --- a/pkg/tui/page/chat/chat.go
 +++ b/pkg/tui/page/chat/chat.go
 @@ -254,6 +254,8 @@ type chatPage struct {
@@ -467,7 +501,7 @@ index 76683bd..c5ba70a 100644
  	switch msg := msg.(type) {
  	case msgtypes.PlanSidebarDataMsg:
  		updated, cmd := p.sidebar.Update(msg)
-@@ -844,11 +863,20 @@ func (p *chatPage) messagesView(sl sidebarLayout) string {
+@@ -844,11 +863,21 @@ func (p *chatPage) messagesView(sl sidebarLayout) string {
  	if messagesView != "" || !p.showStartupBanner || p.hideBanner {
  		return messagesView
  	}
@@ -477,7 +511,7 @@ index 76683bd..c5ba70a 100644
 +		// Page literals carry no banner; they get the default one.
 +		art = tuibanner.Default()
 +	}
-+	if sl.chatWidth < art.Width() || sl.chatHeight < art.Height() {
++	if !art.Fits(sl.chatWidth, sl.chatHeight) {
  		return ""
  	}
  
@@ -486,11 +520,12 @@ index 76683bd..c5ba70a 100644
 +	if art.Animated() {
 +		elapsed = p.ar.Now()
 +	}
-+	banner := styles.BaseStyle.Foreground(styles.Accent).Render(art.FrameAt(elapsed))
++	frame := art.Crop(art.FrameAt(elapsed), sl.chatWidth, sl.chatHeight)
++	banner := styles.BaseStyle.Foreground(styles.Accent).Render(frame)
  	return lipgloss.Place(
  		sl.chatWidth,
  		sl.chatHeight,
-@@ -858,6 +886,27 @@ func (p *chatPage) messagesView(sl sidebarLayout) string {
+@@ -858,6 +887,27 @@ func (p *chatPage) messagesView(sl sidebarLayout) string {
  	)
  }
  

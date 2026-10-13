@@ -54,7 +54,9 @@
 #   stake: `start` says so and asks for the word "mainnet" before it makes anything, and
 #   funds nothing, since there is no faucet.
 #
+#   spaceturtle
 #   spaceturtle session [--unattended]
+#       With nothing after it, `spaceturtle` is `spaceturtle session`.
 #       Starts a `docker-agent` session in the agent's zone, with the agent
 #       definition mounted read-only. The agent's zone reaches name resolution, the
 #       model provider's host, the host of the network's connector, where the agent's
@@ -1080,6 +1082,8 @@ cmd_remove() {
 }
 
 case ${1:-} in
+  # With nothing after it, spaceturtle is the conversation.
+  "") session ;;
   start) shift; start "$@" ;;
   session) shift; session "$@" ;;
   supervise) supervise ;;
@@ -1095,5 +1099,5 @@ case ${1:-} in
   upgrade) [[ $# -eq 1 ]] || die "usage: spaceturtle upgrade"; cmd_upgrade ;;
   backup) [[ $# -eq 1 ]] || die "usage: spaceturtle backup"; cmd_backup ;;
   remove) shift; cmd_remove "$@" ;;
-  *) die "usage: spaceturtle start [flags] | stop | upgrade | backup | remove [--delete-wallet] | session | timer | set | key | status | waiting | approve <app> | refuse <app> [reason] | agent-key show|replace|revoke|limit <amount>" ;;
+  *) die "usage: spaceturtle (a session) | start [flags] | stop | upgrade | backup | remove [--delete-wallet] | session | timer | set | key | status | waiting | approve <app> | refuse <app> [reason] | agent-key show|replace|revoke|limit <amount>" ;;
 esac

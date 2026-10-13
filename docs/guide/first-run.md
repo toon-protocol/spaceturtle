@@ -72,7 +72,7 @@ It is safe to run again: a second run creates, initialises and funds nothing, an
 interrupted run finishes the rest. The passphrase is made inside the zone and is never
 printed and never written to your machine's disk.
 
-Then give it its model key and start a session by hand with `spaceturtle session`.
+Then give it its model key and start a session by hand with `spaceturtle`.
 
 The wallet is funded with the devnet token and no gas. To pay an app on another connector
 the node must open a channel, which is a transaction: send a little Base Sepolia ETH, from

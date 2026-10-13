@@ -10,8 +10,8 @@ ARG GO_IMAGE_DIGEST
 
 # docker-agent of the same release, built again with one change: --banner-file, which draws
 # a film of frames where docker-agent's own banner would be (ADR 0005). The source is held to
-# the commit of the release, and the film is made from the banner the README shows, which the
-# build is given as the context named assets (docs/assets).
+# the commit of the release, and the film's turtle is the one of the banner the README shows,
+# which the build is given as the context named assets (docs/assets).
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine@${GO_IMAGE_DIGEST} AS docker-agent
 ARG TARGETARCH
 ARG DOCKER_AGENT_VERSION
@@ -28,7 +28,7 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
       -o /out/docker-agent .
 COPY banner.awk /tmp/
 COPY --from=assets spaceturtle-banner-dark.svg /tmp/
-RUN awk -f /tmp/banner.awk /tmp/spaceturtle-banner-dark.svg > /out/banner.txt && [ "$(grep -c "$(printf '\f')" /out/banner.txt)" = 383 ]
+RUN awk -f /tmp/banner.awk /tmp/spaceturtle-banner-dark.svg > /out/banner.txt && [ "$(grep -c "$(printf '\f')" /out/banner.txt)" = 239 ]
 
 FROM docker/docker-agent-sbx-templates:${DOCKER_AGENT_VERSION}@${DOCKER_AGENT_BASE_DIGEST}
 

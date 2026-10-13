@@ -38,7 +38,7 @@ first run is on devnet and costs nothing.
 ```sh
 spaceturtle start       # the connector's zone, a funded devnet wallet, the agent key, a backup
 spaceturtle key         # your model provider's key, read from the terminal without showing it
-spaceturtle session     # a docker-agent session in the agent's zone
+spaceturtle             # talk to your agent: a session in the agent's zone
 spaceturtle status      # the timer, the zones, the apps, and whether the relay answers
 ```
 
@@ -117,7 +117,7 @@ What the launcher gives the agent, and you:
 
 | Part | What it does |
 | --- | --- |
-| [Sessions](docs/guide/launcher.md) | `spaceturtle session` is a conversation with the agent. The timer starts one every 6 hours with nobody present, in which the agent reads your Requests and does its daily work |
+| [Sessions](docs/guide/launcher.md) | `spaceturtle`, with nothing after it, is a conversation with the agent. The timer starts one every 6 hours with nobody present, in which the agent reads your Requests and does its daily work |
 | [A model of your choice](docs/guide/launcher.md) | Anthropic, OpenAI, Google or Mistral by API key, or a ChatGPT account. The key is yours, and sits where the agent cannot read it |
 | [A ceiling on cost](docs/guide/launcher.md) | An unattended session stops when its model cost reaches the ceiling you set |
 | [A wall](docs/guide/launcher.md) | The agent's zone reaches its node, its model and the hosts its skills come from, and is refused everything else, your machine and your network included |
@@ -131,7 +131,7 @@ What the launcher gives the agent, and you:
 | Command | What it does |
 | --- | --- |
 | [`spaceturtle start`](docs/guide/launcher.md) | Brings up the connector's zone on devnet, makes the agent key and a backup, and turns on the timer |
-| [`spaceturtle session`](docs/guide/launcher.md) | Starts a `docker-agent` session in the agent's zone |
+| [`spaceturtle`](docs/guide/launcher.md) | Starts a session in the agent's zone: a conversation with the agent. `spaceturtle session` is the same |
 | [`spaceturtle key`](docs/guide/launcher.md) | Reads the model key from the terminal and writes it where only you can read it |
 | [`spaceturtle set`](docs/guide/launcher.md) | Changes the model, or the ceiling on model cost of one unattended session |
 | [`spaceturtle timer`](docs/guide/launcher.md) | Controls the timer, which starts a session with nobody present |

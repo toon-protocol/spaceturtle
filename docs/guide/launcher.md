@@ -71,8 +71,9 @@ refused and changes nothing: `toon` has no command that moves a home to another 
 Install on another network is another Install (`spaceturtle remove --delete-wallet`, then
 `start` with the flags; an Install's wallet is made for it, so fund it with little).
 
-`spaceturtle session` starts a `docker-agent` session in the agent's zone, which is made
-from the agent's zone image (`SPACETURTLE_AGENT_IMAGE`), on a copy of
+`spaceturtle`, with nothing after it, or `spaceturtle session`, starts a `docker-agent`
+session in the agent's zone, which is made from the agent's zone image
+(`SPACETURTLE_AGENT_IMAGE`), on a copy of
 `agent/spaceturtle.yaml` that the zone mounts read-only. The zone is stopped when the
 session ends, and one session runs at a time. No session starts while the connector's zone
 is not running.

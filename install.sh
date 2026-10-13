@@ -110,4 +110,4 @@ step() { echo "  $n. $*"; n=$((n + 1)); }
 case ":$PATH:" in *":$bin:"*) ;; *) step "export PATH=\"$bin:\$PATH\"     (and add it to your shell's profile)" ;; esac
 step "spaceturtle start     (about a minute; makes the Install on devnet)"
 step "spaceturtle key       (your model provider's key, read without showing it)"
-step "spaceturtle session   (talk to your agent)"
+step "spaceturtle           (talk to your agent)"
