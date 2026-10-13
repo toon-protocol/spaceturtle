@@ -1,7 +1,7 @@
 # Install
 
 This guide installs the panel, the optional way to watch an Install on Omarchy. To get the
-agent itself running, from nothing, read the [README](../../README.md): what must be
+agent itself running, from nothing, read [The first run](first-run.md): what must be
 installed and signed in to first, then `spaceturtle start`.
 
 ## What you need

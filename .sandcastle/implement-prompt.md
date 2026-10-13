@@ -35,7 +35,7 @@ push, open a PR or close the issue. The runner does all three once you finish.
   in the bar.
 - The plugin only observes: it holds no passphrase and runs no `toon` command that opens
   the keystore. Never run `toon up`, create or fund a wallet, or publish an event.
-- Everything from a profile is untrusted input (`README.md`, "How it gets its data"): it is
+- Everything from a profile is untrusted input (`docs/guide/data.md`, "What it treats as untrusted"): it is
   rendered as plain text, a picture loads only from an `http(s)` URL, and a copied value
   reaches `wl-copy` as an argument, never through a shell. Keep those three properties.
 
