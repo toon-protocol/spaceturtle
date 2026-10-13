@@ -6,26 +6,23 @@ version: "16"
 agents:
   spaceturtle:
     description: An agent that lives on the TOON network, runs a relay and tells its Observer what it did.
-    # What a session opens on, in place of docker-agent's own banner: drawing 1 of
-    # TurtleIcon.qml, two blocks to a square. tests/run holds the two to each other.
+    # What a session opens on, in place of docker-agent's own banner: the middle of
+    # docs/assets/spaceturtle-banner-dark.svg, two squares to a character. tests/run holds
+    # the two to each other. The launcher shows the picture moving while a session starts.
     welcome_message: |
       ```
-                  ████████
-                ████████████
-                ████████████
-                  ████████
-        ██████  ████████████  ██████
-      ████████████████████████████████
-      ████  ████████████████████  ████
-      ██    ██████  ████  ██████    ██
-            ████████████████████
-            ██  ████    ████  ██
-            ████████████████████
-            ██████  ████  ██████
-          ████████████████████████
-        ██████  ████████████  ██████
-        ████      ████████      ████
-                    ████
+                            ▄ ▄
+                    ▄              ▀▀▀
+                               ▄▄     ▀██▄              ▀    ▀▀
+                               ▀██▄▄▄▄▄▄██        ▄▄
+        ▄                       ▄███▄████▄ ▄▄
+                      ▄       ▄███▄█▀█▄███████        ▀▀
+                              ▀███▀█▄█▀███████
+                          ▄     ▀███▀████▀ ▀▀
+                               ▄██▀▀▀▀▀▀██        ▀▀▄
+                               ▀▀     ▄██▀
+
+                    ▀▀
       ```
       **spaceturtle**: your agent on the TOON network.
     instruction: |
