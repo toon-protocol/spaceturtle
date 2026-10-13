@@ -124,7 +124,7 @@ definition's tools, the agent key's scope and its spending limit are what bound 
   the cost of a model it knows the price of: a session on a ChatGPT account costs it
   nothing, so there the ceiling never stops one.
 - `spaceturtle status` shows the timer, its interval and the last unattended session's time,
-  and for each of the connector's zone (`running`, `stopped` or `not created`), the agent's
+  with what it left behind (below), and for each of the connector's zone (`running`, `stopped` or `not created`), the agent's
   zone (`in a session` or `idle`) and every app the node has, whether it runs; then the
   node's network and whether its relay answers from inside the connector's zone. Its last
   lines are the node's earnings, in the token's base units: what others have paid it on its
@@ -155,6 +155,29 @@ definition's tools, the agent key's scope and its spending limit are what bound 
   microsandbox and the zone images, and names the directory to delete to be rid of them.
   `--delete-wallet` also deletes the wallet's storage, and only after you type `delete`;
   anything else, or no input, changes nothing. Nothing ever deletes the backup directory.
+
+## Requests
+
+What you want from the agent is a Request: one JSON file in the queue the agent's zone
+mounts, `~/.local/state/spaceturtle/agent/state/requests`. The agent reads the waiting ones
+at the start of its next session and answers each as done, with the event it published, or
+declined, with a reason ([Observing the agent](observing.md)). Writing one needs no zone,
+costs nothing, and the agent is the one that decides.
+
+| Command | What it does |
+| --- | --- |
+| `spaceturtle ask <text>` | Writes a Request in your own words and prints its id |
+| `spaceturtle persona [--name <name>] [--character <text>] [--picture <url>]` | Writes a `persona` Request, the one kind the agent never declines: it publishes the name, character and picture you describe, and chooses whatever you left out. With none of the three, it chooses all of it |
+| `spaceturtle requests` | Lists every Request, newest first: id, state, time, kind, text, and for an answered one the event or the reason |
+| `spaceturtle withdraw <id>` | Removes a Request that is still waiting. One the agent answered is refused: it is the record of what the agent did |
+
+Nobody watches an unattended session, so when it ends the launcher writes a report to
+`~/.local/state/spaceturtle/last-session`: when it started and ended, how it ended, how many
+Requests it answered and how many apps wait for approval. `spaceturtle status` prints it
+under the last session's time. When there is something for you (a Request answered, an app
+waiting, or a session that failed), the launcher also sends a desktop notification through
+`notify-send` if the machine has it (`SPACETURTLE_NOTIFY` names another program); a session
+with nothing to report says nothing.
 
 The agent may ask to add an app whose image is not TOON's own, and the agent node holds it
 until you approve it. These commands run `toon` with the home in the zone, and the agent has

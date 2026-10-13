@@ -62,7 +62,9 @@ spaceturtle status      # the timer, the zones, the apps, and whether the relay 
 [microsandbox](https://github.com/superradcompany/microsandbox), which the zones run in,
 beside it. It needs no root and no account, and starts nothing.
 [The first run](docs/guide/first-run.md) lists what to have ready: a Linux machine with
-KVM, systemd, and a model provider's key.
+KVM, systemd, and a model provider's key. The harness runs on Linux with KVM, since a zone
+is a virtual machine. The agent's definition on its own runs wherever `docker-agent` and
+`toon` run, which today is Linux as well.
 
 ## Your app, served from your machine
 
@@ -115,8 +117,8 @@ what the agent can be talked into is bounded:
   nothing, and an interrupted run finishes the rest.
 - **Nothing deletes your backup.** `start` writes a sealed backup of the wallet to
   `~/spaceturtle-backup`. Keep it.
-- **Nothing is signed or paid from the panel.** It only watches
-  ([ADR 0001](docs/adr/0001-the-ui-never-acts-for-the-agent.md)).
+- **Nothing is signed or paid by whoever watches.** You ask with a Request, and the agent
+  decides ([ADR 0001](docs/adr/0001-the-ui-never-acts-for-the-agent.md)).
 
 The connector's zone is different. It holds the wallet, and whoever breaks into it holds
 everything in the wallet's settlement addresses and channels. The limit does not stop them.
@@ -163,6 +165,7 @@ What the launcher gives the agent, and you:
 | Part | What it does |
 | --- | --- |
 | [Sessions](docs/guide/launcher.md) | `spaceturtle`, with nothing after it, is a conversation with the agent. The timer starts one every 6 hours with nobody present, in which the agent reads your Requests and does its daily work |
+| [Requests](docs/guide/observing.md) | `spaceturtle ask` writes one in your own words; the agent answers it in its next session as done or declined. `spaceturtle status` and a desktop notification say what an unattended session did and whether an app waits for you |
 | [A view of the money](docs/guide/launcher.md) | A session's sidebar shows what the node has earned, what the agent key may still spend today, and each app and whether it runs |
 | [A model of your choice](docs/guide/launcher.md) | Anthropic, OpenAI, Google or Mistral by API key, or a ChatGPT account. The key is yours, and sits where the agent cannot read it |
 | [A ceiling on cost](docs/guide/launcher.md) | An unattended session stops when its model cost reaches the ceiling you set |
@@ -181,8 +184,9 @@ What the launcher gives the agent, and you:
 | [`spaceturtle key`](docs/guide/launcher.md) | Reads the model key from the terminal and writes it where only you can read it |
 | [`spaceturtle set`](docs/guide/launcher.md) | Changes the model, or the ceiling on model cost of one unattended session |
 | [`spaceturtle timer`](docs/guide/launcher.md) | Controls the timer, which starts a session with nobody present |
-| [`spaceturtle status`](docs/guide/launcher.md) | Shows the timer, the zones, the apps, the node's network, whether its relay answers, and what the node has earned |
+| [`spaceturtle status`](docs/guide/launcher.md) | Shows the timer, what the last unattended session did, the zones, the apps, the node's network, whether its relay answers, and what the node has earned |
 | [`spaceturtle waiting`, `approve`, `refuse`](docs/guide/launcher.md) | Lists, starts or discards the apps the agent node holds until you approve them. `approve` takes from you each secret the app names |
+| [`spaceturtle ask`, `persona`, `requests`, `withdraw`](docs/guide/launcher.md#requests) | Writes a Request in your words, or one that describes the agent's Persona; lists every Request with its answer; withdraws one that is still waiting |
 | [`spaceturtle agent-key`](docs/guide/launcher.md) | Shows, replaces, revokes or limits the agent key |
 | [`spaceturtle start --network mainnet`](docs/guide/launcher.md#the-network) | Makes the Install on mainnet, once you type `mainnet`; the chain's endpoint, chain id and token are flags too |
 | [`spaceturtle backup`](docs/guide/launcher.md) | Writes a fresh sealed backup of the wallet |
@@ -190,20 +194,20 @@ What the launcher gives the agent, and you:
 | [`spaceturtle stop`](docs/guide/launcher.md) | Stops the timer's unit, a session and the connector's zone, and loses nothing |
 | [`spaceturtle remove`](docs/guide/launcher.md) | Removes both zones and the settings; keeps the wallet's storage and the backup directory |
 
-## The panel
+## Watching
 
-spaceturtle began as this panel, and it is now optional. On Omarchy you can watch the agent
-from the bar: a turtle in the bar, and a panel that opens on what the agent did. The panel
-only watches, and an Install runs without it.
+Everything the agent does for you is in files it shares with you, and the launcher reads and
+writes them: `spaceturtle requests` lists what you asked and what the agent answered, and
+`spaceturtle status` says what the last unattended session did.
+[Observing the agent](docs/guide/observing.md) describes those files, so that anything can
+watch an agent through them.
 
-```sh
-omarchy plugin add https://github.com/toon-protocol/spaceturtle.git --enable
-```
-
-The panel reads an agent node through `toon` on your machine's `PATH`. Reading the agent
-node of an Install, inside the connector's zone, is not designed yet.
-[The panel: an optional way to watch](docs/guide/watching.md) has the setup, the six
-sections, Requests and the keys.
+One thing already does: [spaceturtle-panel](https://github.com/toon-protocol/spaceturtle-panel),
+a turtle in the Omarchy bar and a panel that opens on what the agent did and what the rest
+of the relay is saying. It is optional, in its own repository, and only watches
+([ADR 0006](docs/adr/0006-the-panel-is-its-own-repository.md)). Today it reads an agent
+node through `toon` on your machine; reading the node of an Install, inside the connector's
+zone, is its first piece of work.
 
 ## Agent skills
 
@@ -217,7 +221,7 @@ npx skills add toon-protocol/spaceturtle
 
 | Skill | What it teaches |
 | --- | --- |
-| [`being-observed`](skills/being-observed/SKILL.md) | Write the public key where the panel reads it, publish and live by the Persona, read the waiting Requests at the start of a session, answer each as done or declined |
+| [`being-observed`](skills/being-observed/SKILL.md) | Write the public key where the Observer reads it, publish and live by the Persona, read the waiting Requests at the start of a session, answer each as done or declined |
 
 ## Guides
 
@@ -226,11 +230,7 @@ npx skills add toon-protocol/spaceturtle
 | [Concepts](docs/guide/concepts.md) | Observer, Operator, Install, Persona, the zones, the agent key, and how the money is kept safe |
 | [The first run](docs/guide/first-run.md) | What to have ready, and what `spaceturtle start` does on devnet, step by step |
 | [The launcher](docs/guide/launcher.md) | Every command of the launcher, and what it changes |
-| [The panel: an optional way to watch](docs/guide/watching.md) | The short setup, the six sections, asking the agent for something, and the common keys |
-| [Install](docs/guide/install.md) | The panel's full setup, the settings and updating |
-| [The panel](docs/guide/panel.md) | Each section in detail, and every key |
-| [How it gets its data](docs/guide/data.md) | Every command it runs and every file it reads |
-| [Renderers](docs/guide/renderers.md) | How the agent teaches the panel to show a new type of event |
+| [Observing the agent](docs/guide/observing.md) | The files the agent shares with its Observer: the public key, the Requests and the Renderers, and who writes what |
 
 ## Reference
 
@@ -241,6 +241,4 @@ npx skills add toon-protocol/spaceturtle
 - [`docs/development.md`](docs/development.md): the tests, the files, and notes on building
   an Omarchy plugin.
 - [`docs/releasing.md`](docs/releasing.md): how a release is published.
-- [`docs/demo/`](docs/demo/README.md): a made-up network and a stand-in `toon`, for showing
-  the panel without an agent node.
 - [`LICENSE`](LICENSE): MIT.

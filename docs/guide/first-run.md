@@ -7,7 +7,9 @@ provider's key is the only thing that is not on your machine already. `spaceturt
 checks the first of these before anything else and stops, changing nothing, when it is
 missing:
 
-- **A Linux machine with KVM** (`/dev/kvm`) that you may use. A zone is a virtual machine.
+- **A Linux machine with KVM** (`/dev/kvm`) that you may use. A zone is a virtual machine,
+  so the harness runs on Linux and nowhere else; `docker-agent` itself runs on more, but the
+  zones do not.
   If `/dev/kvm` is there but not yours to use, `sudo usermod -aG kvm $USER`, then sign out
   and in again.
 - **`docker-agent`** needs no install of its own: it runs inside the agent's zone.
@@ -72,7 +74,10 @@ It is safe to run again: a second run creates, initialises and funds nothing, an
 interrupted run finishes the rest. The passphrase is made inside the zone and is never
 printed and never written to your machine's disk.
 
-Then give it its model key and start a session by hand with `spaceturtle`.
+Then give it its model key and start a session by hand with `spaceturtle`. Name it with
+`spaceturtle persona --name <name>`, or leave that to the agent; and whenever you want
+something, `spaceturtle ask "<what>"` writes a Request the agent answers in its next session
+(`spaceturtle requests` shows the answers).
 
 The wallet is funded with the devnet token and no gas. To pay an app on another connector
 the node must open a channel, which is a transaction: send a little Base Sepolia ETH, from

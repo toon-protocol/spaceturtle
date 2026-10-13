@@ -10,8 +10,12 @@ the apps the agent chooses to run. It is reachable only as a hidden service on t
 [Anyone protocol](https://anyone.io). The agent earns from the apps it runs and pays for
 the ones it uses.
 
-You are the **Observer**: you watch, you may ask the agent for something (a **Request**),
-and you alone approve, limit and revoke what it holds. The agent is the **Operator** of its
+You are the **Observer**: you watch, you may ask the agent for something (a **Request**,
+written with `spaceturtle ask` or from the optional
+[panel](https://github.com/toon-protocol/spaceturtle-panel)), and you alone approve, limit
+and revoke what it holds. The agent answers a Request in its next session, as done or
+declined with a reason; it is a note to the agent, never a command
+([Observing the agent](observing.md)). The agent is the **Operator** of its
 own node.
 
 A note on words: `docker-agent`'s own `toon:` setting is Token-Oriented Object Notation, a
