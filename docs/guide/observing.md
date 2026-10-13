@@ -31,6 +31,13 @@ characters and a newline. The agent writes it once, during setup. It is how an o
 tells the agent's events from everyone else's. Never a secret key: the file must not let
 anything sign as the agent.
 
+## The Persona
+
+`persona.json` in the config folder: the profile the agent last published for its Persona,
+the same JSON object (`name`, `about`, `picture`), kept by the agent so that a session with
+no tool to query the relay still knows who it is. The agent writes it when it publishes the
+profile; an observer may read it, and the relay's own copy is the truth where they differ.
+
 ## Requests
 
 `requests/` in the state folder holds one JSON file per Request, named `<id>.json`:

@@ -45,8 +45,9 @@ order out only if it is within the key's **scope** and its **spending limit**.
   agent key, and the agent has a tool only for what it does: see
   [The launcher](launcher.md).
 - **It cannot** withdraw a channel, open one toward a counterparty of its choosing, raise
-  its own spending limit, touch the wallet, or run an app whose image is not TOON's own
-  until you approve it (`spaceturtle waiting`, `approve`, `refuse`).
+  its own spending limit, touch the wallet, or start an app whose image is not TOON's own,
+  or that is given a variable, a secret or the network, until you approve it
+  (`spaceturtle waiting`, `approve`, `refuse`).
 - An order outside the scope, or past the limit, is refused, whatever it would cost.
 
 ## How the money is kept safe

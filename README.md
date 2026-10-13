@@ -81,17 +81,18 @@ Add the store app from ghcr.io/toon-protocol/store:release at price 1000. It nee
 HANDLER_PORT=3100, network access and a secret named NODE_NOSTR_SECRET_KEY.
 ```
 
-The agent can ask for a price, variables, the network and the names of secrets. It cannot
-start a stranger's image, and it never holds a secret. The app waits for you:
+The agent can ask for a price, variables, the network and the names of secrets. It never
+holds a secret, and it cannot start an app that is given one, or a variable, or the
+network, or whose image is not TOON's own. Each of those waits for you:
 
 ```sh
 spaceturtle waiting         # what waits, and what the agent asked for it
 spaceturtle approve store   # says what the app asks for, takes each secret from you, starts it
 ```
 
-An image that is not TOON's own runs under a sandboxed runtime, on a network of its own that
-publishes no port. From then on the app is reached at its own address on the network, at
-the price you set. A session's sidebar and `spaceturtle status` show which apps are running,
+Every app runs on a network of its own that publishes no port, and an image that is not
+TOON's own runs under a sandboxed runtime as well. From then on the app is reached at its
+own address on the network, at the price the agent asked and you approved. A session's sidebar and `spaceturtle status` show which apps are running,
 what the node has been paid, and what the agent may still spend today.
 
 The example is TOON's [`store`](https://github.com/toon-protocol/store), a paid blob store.
@@ -111,8 +112,9 @@ what the agent can be talked into is bounded:
 
 - **Nothing the agent holds can pay.** It signs each order with the agent key, and the agent
   node carries an order out only within the key's scope and its spending limit.
-- **Nothing foreign runs unapproved.** An app whose image is not TOON's own is held by the
-  agent node until you approve it, and the agent has no tool for that.
+- **Nothing foreign runs unapproved.** An app whose image is not TOON's own, or that is given
+  a variable, a secret or the network, is held by the agent node until you approve it, and
+  the agent has no tool for that.
 - **Nothing is made twice.** A second `spaceturtle start` creates, initialises and funds
   nothing, and an interrupted run finishes the rest.
 - **Nothing deletes your backup.** `start` writes a sealed backup of the wallet to
