@@ -33,14 +33,36 @@ supervisor's orders and the relay TOON app's connector, which is all the agent's
 reaches of the node. An app whose image is not on `toon`'s list of trusted images runs under
 gVisor: `start` writes `runsc` to the home's `untrusted-runtime`.
 
-`spaceturtle mainnet [--keep-limit]` moves a devnet Install to mainnet. It says that real
-funds are now at stake, that there is no faucet, and which wallet addresses to fund, then
-asks you to type `mainnet`; anything else changes nothing. It lowers the spending limit to
-the mainnet default unless you pass `--keep-limit`. On an Install already on mainnet it says
-so and changes nothing. It runs `toon wallet show`, `toon network set mainnet` and
-`toon limit set --network-default` in the connector's zone. **`toon` 0.2.0 has neither of
-the last two**, so today the command stops at "toon could not move the node to mainnet" and
-changes nothing: an Install stays on devnet.
+## The network
+
+Which network an Install is on is configuration, given to `start` as flags when the Install
+is made and kept with it. With none it is devnet.
+
+| Flag | What it sets |
+| --- | --- |
+| `--network devnet\|mainnet` | The profile the rest comes from: devnet is Base Sepolia with a faucet, mainnet is Base with real money |
+| `--evm-rpc-url <url>` | The chain's JSON-RPC endpoint, in place of the profile's |
+| `--evm-chain-id <n>` | The chain that endpoint must serve: `8453` is Base, `84532` Base Sepolia |
+| `--evm-token <address>` | The token the connector is paid in on that chain |
+| `--connector-url <url>`, `--relay-url <url>` | The network's connector and relay |
+| `--faucet-url <url>` | Where the wallet is funded from, on devnet |
+| `--solana`, `--solana-rpc-url <url>` | Settle on Solana too, and its endpoint |
+| `--max-per-command <amount>`, `--max-per-day <amount>` | The wallet's own spending limits, in the token's base units |
+
+All but `--evm-chain-id` are `toon init`'s own flags and go to it as given. `--evm-chain-id`
+is the launcher's: once the node is initialised it asks the node's RPC endpoint which chain
+it serves, and funds and starts nothing unless it is that one.
+
+```sh
+spaceturtle start --network mainnet --evm-rpc-url https://mainnet.base.org --evm-chain-id 8453
+```
+
+On mainnet `start` first says that real funds are at stake and that there is no faucet, and
+asks you to type `mainnet`; anything else makes nothing. It then funds nothing and prints
+the addresses to fund. A later `start` needs no flags. One that names a different network is
+refused and changes nothing: `toon` has no command that moves a home to another chain, so an
+Install on another network is another Install (`spaceturtle remove --delete-wallet`, then
+`start` with the flags; an Install's wallet is made for it, so fund it with little).
 
 `spaceturtle session` starts a `docker-agent` session in the agent's zone, which is made
 from the agent's zone image (`SPACETURTLE_AGENT_IMAGE`), on a copy of

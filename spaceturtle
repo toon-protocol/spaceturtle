@@ -1,15 +1,18 @@
 #!/bin/bash
 # The launcher: the one program a person runs to have a spaceturtle.
 #
-#   spaceturtle start
+#   spaceturtle start [--network devnet|mainnet] [--evm-rpc-url <url>] [--evm-chain-id <n>]
+#                     [--evm-token <address>] [--connector-url <url>] [--relay-url <url>]
+#                     [--faucet-url <url>] [--solana] [--solana-rpc-url <url>]
+#                     [--max-per-command <amount>] [--max-per-day <amount>]
 #       Brings the connector's zone up, step by step, and does only the steps
 #       not yet done, so a run that was interrupted finishes the rest when run
 #       again and a second run creates, initialises and funds nothing:
 #         1. zone        a detached Docker Sandboxes virtual machine made from the
 #                        connector's zone image, with an any-address rule scoped to
 #                        that zone alone; nothing is copied into it from the machine
-#         2. node        the agent node, initialised on devnet inside it
-#         3. faucet      the wallet funded from the devnet faucet
+#         2. node        the agent node, initialised inside it on the network chosen
+#         3. faucet      the wallet funded from the faucet, on devnet
 #         4. agent key   one agent key, its private half placed in the agent's zone
 #         5. supervisor  the image's `connector-start` (the container engine, the
 #                        forwarders, then `toon up`), run by a systemd user unit that
@@ -42,13 +45,15 @@
 #       backup directory. --delete-wallet also deletes the wallet's storage, after the
 #       word "delete" is typed; anything else changes nothing.
 #
-#   spaceturtle mainnet [--keep-limit]
-#       Moves the Install from devnet to mainnet, once the person running it has
-#       typed "mainnet" to confirm. It first says what changes: real funds are now at
-#       stake, there is no faucet, and which addresses to fund. Without the typed
-#       word nothing changes. It lowers the spending limit to the mainnet default
-#       unless --keep-limit is given. On an Install already on mainnet it says so
-#       and changes nothing.
+#   The network is configuration, chosen when the Install is made and kept with it: a
+#   profile (--network, devnet unless named), and whatever of it a flag replaces, which is
+#   mostly the chain's RPC endpoint. The flags are `toon init`'s own and go to it as given.
+#   --evm-chain-id is the launcher's: after the node is initialised it asks the node's RPC
+#   endpoint for its chain id, and goes no further unless it is that one. A later `start`
+#   needs no flags; one that names a different network is refused and changes nothing, since
+#   `toon` has no command that moves a home to another chain. On mainnet real funds are at
+#   stake: `start` says so and asks for the word "mainnet" before it makes anything, and
+#   funds nothing, since there is no faucet.
 #
 #   spaceturtle session [--unattended]
 #       Starts a `docker-agent` session in the agent's zone, with the agent
@@ -242,10 +247,29 @@ publish_ports() {
 
 step_node() {
   done_ node && return
-  say "initialising the agent node on devnet"
+  say "initialising the agent node on $network"
+  # Split on spaces alone: a URL may hold a character the shell would take for a pattern.
+  local flag flags= kept=()
+  read -ra kept <<<"$(conf_get init "")"
+  for flag in "${kept[@]}"; do
+    [[ $flag == --network || $flag == "$network" ]] && continue
+    flags+=" $(sh_quote "$flag")"
+  done
   in_zone '{ [ -s "$TOON_PASSPHRASE_FILE" ] || { umask 077 && head -c 32 /dev/urandom | base64 > "$TOON_PASSPHRASE_FILE"; }; } &&
-    toon init --accept-anyone-terms --network devnet --json >/dev/null' || die "toon init failed in the zone"
+    toon init --accept-anyone-terms --network '"$network$flags"' --json >/dev/null' || die "toon init failed in the zone"
   mark node
+}
+
+# The chain the node's RPC endpoint serves must be the one the Observer named, before anything is funded or started.
+step_chain() {
+  local want got
+  want=$(conf_get chain_id "")
+  [[ -n $want ]] || return 0
+  done_ chain && return
+  got=$(in_zone 'curl -s --max-time 20 -H "content-type: application/json" --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_chainId\",\"params\":[]}" --url "$(jq -r ".toon_apps[0].evm.rpc_url" '"$toon_home"'/state.json)"' | jq -r '.result // empty' 2>/dev/null)
+  [[ $got =~ ^0x[0-9a-fA-F]+$ ]] || die "the node's RPC endpoint did not say which chain it serves, so nothing was funded or started. Run it again; if it is the wrong endpoint, 'spaceturtle remove --delete-wallet' and 'start' with --evm-rpc-url makes the Install again."
+  (( got == want )) || die "the node's RPC endpoint serves chain $((got)), not $want, so nothing was funded or started. 'spaceturtle remove --delete-wallet' and 'start' with the right --evm-rpc-url makes the Install again."
+  mark chain
 }
 
 # An app whose image is not on toon's list of trusted images runs under gVisor, which the
@@ -258,8 +282,13 @@ step_runtime() {
 
 step_faucet() {
   done_ faucet && return
-  say "funding the wallet from the faucet"
-  in_zone 'toon wallet fund --json >/dev/null' || die "toon wallet fund failed in the zone"
+  if [[ $network == devnet ]]; then
+    say "funding the wallet from the faucet"
+    in_zone 'toon wallet fund --json >/dev/null' || die "toon wallet fund failed in the zone"
+  else
+    say "there is no faucet on $network, so nothing is funded for you. Fund only what you can afford to lose, at these addresses:"
+    in_zone 'toon wallet show' | sed 's/^/      /' || die "the wallet's addresses could not be read from the zone"
+  fi
   mark faucet
 }
 
@@ -340,54 +369,6 @@ step_backup() {
 # The network the node is on, from the home's record of it; empty when it cannot be read.
 node_network() {
   in_zone "cat $toon_home/state.json" 2>/dev/null | jq -r '.network // empty' 2>/dev/null
-}
-
-mainnet() {
-  local keep_limit=0 arg network addresses answer
-  for arg in "$@"; do
-    case $arg in
-      --keep-limit) keep_limit=1 ;;
-      *) die "usage: spaceturtle mainnet [--keep-limit]" ;;
-    esac
-  done
-  preflight
-  zone_exists || die "there is no connector's zone yet. Run 'spaceturtle start' first."
-  command -v jq >/dev/null 2>&1 || die "jq is not installed, and it is needed to read the node's network."
-  network=$(node_network)
-  [[ -n $network ]] || die "the network the node is on could not be read from the zone. Run 'spaceturtle start' and try again."
-  if [[ $network == mainnet ]]; then
-    say "this Install is already on mainnet. Nothing was changed."
-    return 0
-  fi
-  addresses=$(in_zone 'toon wallet show') || die "the wallet's addresses could not be read from the zone"
-  [[ -n $addresses ]] || die "the zone listed no address to fund"
-  cat <<EOF2
-spaceturtle: this moves the Install from $network to mainnet.
-  - Real funds are now at stake: whoever breaks into the connector's zone holds what is in these addresses.
-  - There is no faucet on mainnet. Nothing is funded for you.
-  - Fund only what you can afford to lose, at these addresses:
-$(sed 's/^/      /' <<<"$addresses")
-EOF2
-  if (( keep_limit )); then
-    say "the spending limit is kept as it is (--keep-limit)."
-  else
-    say "the spending limit will be lowered to the mainnet default."
-  fi
-  printf 'spaceturtle: type "mainnet" to go on: '
-  IFS= read -r answer || answer=
-  if [[ $answer != mainnet ]]; then
-    echo
-    say "not confirmed. Nothing was changed."
-    return 1
-  fi
-  say "moving the node to mainnet"
-  in_zone 'toon network set mainnet --json >/dev/null' || die "toon could not move the node to mainnet"
-  if (( ! keep_limit )); then
-    in_zone 'toon limit set --network-default --json >/dev/null' || die "the node is on mainnet, but the spending limit could not be lowered. Lower it before funding anything: $sbx exec $zone sh -c 'TOON_PASSPHRASE_FILE=\$HOME/.config/toon-passphrase toon limit set --network-default'"
-  fi
-  network=$(node_network)
-  [[ $network == mainnet ]] || die "the node did not report mainnet afterwards (it says '${network:-nothing}')"
-  say "the Install is on mainnet. Fund the addresses above."
 }
 
 # --- settings: `name=value` lines in launcher.conf ---
@@ -576,10 +557,55 @@ key() {
   say "the model key is saved in $key_file"
 }
 
+# start's flags: `toon init`'s own, taken as given, and --evm-chain-id. They are kept in the
+# settings as the Install's network, so a run that was interrupted goes on with them.
+choose_network() {
+  local given=() chain= name answer
+  while (($#)); do
+    case $1 in
+      --solana) given+=("$1") ;;
+      --network)
+        [[ ${2:-} == devnet || ${2:-} == mainnet ]] || die "usage: spaceturtle start --network devnet|mainnet"
+        given+=("$1" "$2"); shift ;;
+      --evm-chain-id)
+        [[ ${2:-} =~ ^[1-9][0-9]*$ ]] || die "usage: spaceturtle start --evm-chain-id <a whole number>"
+        chain=$2; shift ;;
+      --evm-rpc-url|--evm-token|--connector-url|--relay-url|--faucet-url|--solana-rpc-url|--max-per-command|--max-per-day)
+        [[ ${2:-} =~ ^[A-Za-z0-9][A-Za-z0-9._:/@%+=,?\&~*-]*$ ]] || die "usage: spaceturtle start $1 <value>"
+        given+=("$1" "$2"); shift ;;
+      *) die "usage: spaceturtle start [--network devnet|mainnet] [--evm-rpc-url <url>] [--evm-chain-id <n>] [--evm-token <address>] [--connector-url <url>] [--relay-url <url>] [--faucet-url <url>] [--solana] [--solana-rpc-url <url>] [--max-per-command <amount>] [--max-per-day <amount>]" ;;
+    esac
+    shift
+  done
+  if (( ${#given[@]} )) || [[ -n $chain ]]; then
+    if done_ node; then
+      [[ "${given[*]}" == "$(conf_get init "")" && $chain == "$(conf_get chain_id "")" ]] \
+        || die "this Install's node is already initialised, with: $(conf_get init "--network devnet"). A network is chosen when an Install is made, and toon cannot move one. Nothing was changed. 'spaceturtle remove --delete-wallet' and 'start' with the flags makes another."
+    else
+      conf_set init "${given[*]}"
+      conf_set chain_id "$chain"
+    fi
+  fi
+  network=$(sed -n 's/.*--network \([a-z]*\).*/\1/p' <<<"$(conf_get init "")")
+  network=${network:-devnet}
+  if [[ $network == mainnet ]] && ! done_ node; then
+    cat <<EOF2
+spaceturtle: this makes an Install on mainnet.
+  - Real funds are at stake: whoever breaks into the connector's zone holds what is in the wallet's addresses.
+  - There is no faucet on mainnet. Nothing is funded for you; the addresses to fund are printed once the wallet is made.
+EOF2
+    printf 'spaceturtle: type "mainnet" to go on: '
+    IFS= read -r answer || answer=
+    [[ $answer == mainnet ]] || { echo; die "not confirmed. Nothing was changed."; }
+  fi
+}
+
 start() {
   preflight
+  choose_network "$@"
   step_zone
   step_node
+  step_chain
   step_runtime
   step_faucet
   # The key comes first: the supervisor listens for orders only once the node has one.
@@ -881,6 +907,7 @@ cmd_upgrade() {
     die "the new zone ($zone) is made, but the passphrase could not be placed in it. The backup at $backup_dir/wallet-backup is the way back."
   fi
   pass=
+  network=$(node_network); network=${network:-devnet}
   step_node
   step_runtime
   step_faucet
@@ -949,8 +976,7 @@ cmd_remove() {
 }
 
 case ${1:-} in
-  start) start ;;
-  mainnet) shift; mainnet "$@" ;;
+  start) shift; start "$@" ;;
   session) shift; session "$@" ;;
   supervise) supervise ;;
   timer) shift; timer "$@" ;;
@@ -965,5 +991,5 @@ case ${1:-} in
   upgrade) [[ $# -eq 1 ]] || die "usage: spaceturtle upgrade"; cmd_upgrade ;;
   backup) [[ $# -eq 1 ]] || die "usage: spaceturtle backup"; cmd_backup ;;
   remove) shift; cmd_remove "$@" ;;
-  *) die "usage: spaceturtle start | stop | upgrade | backup | remove [--delete-wallet] | mainnet [--keep-limit] | session | timer | set | key | status | waiting | approve <app> | refuse <app> [reason] | agent-key show|replace|revoke|limit <amount>" ;;
+  *) die "usage: spaceturtle start [flags] | stop | upgrade | backup | remove [--delete-wallet] | session | timer | set | key | status | waiting | approve <app> | refuse <app> [reason] | agent-key show|replace|revoke|limit <amount>" ;;
 esac

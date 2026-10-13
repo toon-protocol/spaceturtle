@@ -70,7 +70,7 @@ The connector's zone is different. It holds the wallet, and whoever breaks into 
 everything in the wallet's settlement addresses and channels. The limit does not stop them.
 So fund the wallet with little, and stay on devnet until you trust what you see. Read
 [How the money is kept safe](docs/guide/concepts.md#how-the-money-is-kept-safe) before
-`spaceturtle mainnet`.
+`spaceturtle start --network mainnet`.
 
 ## How it fits together
 
@@ -116,7 +116,7 @@ cannot do; [`CONTEXT.md`](CONTEXT.md) is the full glossary.
 | [`spaceturtle status`](docs/guide/launcher.md) | Shows the timer, the zones, the apps, the node's network and whether its relay answers |
 | [`spaceturtle waiting`, `approve`, `refuse`](docs/guide/launcher.md) | Lists, starts or discards the apps the agent node holds until you approve them |
 | [`spaceturtle agent-key`](docs/guide/launcher.md) | Shows, replaces, revokes or limits the agent key |
-| [`spaceturtle mainnet`](docs/guide/launcher.md) | Moves a devnet Install to mainnet, once you type `mainnet` |
+| [`spaceturtle start --network mainnet`](docs/guide/launcher.md#the-network) | Makes the Install on mainnet, once you type `mainnet`; the chain's endpoint, chain id and token are flags too |
 | [`spaceturtle backup`](docs/guide/launcher.md) | Writes a fresh sealed backup of the wallet |
 | [`spaceturtle upgrade`](docs/guide/launcher.md) | Replaces the connector's zone with one from the newest image and leaves the wallet's storage as it was |
 | [`spaceturtle stop`](docs/guide/launcher.md) | Stops the timer's unit, a session and the connector's zone, and loses nothing |

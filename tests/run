@@ -995,7 +995,7 @@ STUB
   # An sbx that records its calls. `ls` lists the zones in $STUB_DIR/zones and fails
   # when $STUB_DIR/signed-out exists; a call whose arguments contain the text in
   # $STUB_DIR/fail-on fails, `toon status --json` prints $STUB_DIR/status, the home's
-  # state.json names the network in $STUB_DIR/network, `ports` lists and publishes in
+  # state.json names the network in $STUB_DIR/network, the RPC endpoint says its chain id is the one in $STUB_DIR/chain-id, `ports` lists and publishes in
   # $STUB_DIR/ports, `policy init` fails once $STUB_DIR/policy-set exists, and `cp` out
   # of the zone writes a file.
   cat > "$SPACETURTLE_SBX" <<'STUB'
@@ -1008,10 +1008,10 @@ echo "$*" >> "$STUB_DIR/calls"
 [[ $1 == ports ]] && { cat "$STUB_DIR/ports" 2>/dev/null; exit 0; }
 [[ $* == *"exec connector-start"* ]] && { : > "$STUB_DIR/up"; exit 0; }
 [[ $* == *pgrep* ]] && { [[ -e $STUB_DIR/up ]]; exit; }
+[[ $* == *eth_chainId* ]] && { [[ -r $STUB_DIR/chain-id ]] && echo "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"$(cat "$STUB_DIR/chain-id")\"}"; exit 0; }
 [[ $* == *"toon status --json"* ]] && { cat "$STUB_DIR/status" 2>/dev/null || echo "{}"; exit 0; }
 [[ $* == *"state.json"* ]] && { echo "{\"network\":\"$(cat "$STUB_DIR/network" 2>/dev/null || echo devnet)\",\"connector_url\":\"$(cat "$STUB_DIR/connector-url" 2>/dev/null)\"}"; exit 0; }
 [[ $* == *"toon wallet show"* ]] && { echo "evm 0xAAA111"; echo "solana SoLBBB222"; exit 0; }
-[[ $* == *"toon network set mainnet"* ]] && echo mainnet > "$STUB_DIR/network"
 [[ $* == *"toon agent-key create"* ]] && { touch "$STUB_DIR/keys"; n=$(( $(wc -l < "$STUB_DIR/keys") + 1 )); echo "key-$n" >> "$STUB_DIR/keys"; echo "PRIVATE-HALF-$n" > "$STUB_DIR/agentkeyfile"; exit 0; }
 [[ $* == *"toon agent-key list"* ]] && { touch "$STUB_DIR/keys"; jq -Rn '{agent_keys: [inputs | {public_key: ., scope: ["send","peer"], spending_limit: {per_command: 10, per_day: 100}, private_key: "PRIVATE-LEAK"}]}' "$STUB_DIR/keys"; exit 0; }
 [[ $* == *"toon agent-key revoke"* ]] && { [[ $* =~ revoke\ --\ \'([^\']*)\' ]]; id=${BASH_REMATCH[1]}; sed -i "/^$id$/d" "$STUB_DIR/keys"; exit 0; }
@@ -1117,30 +1117,49 @@ launcher_env; SPACETURTLE_SBX=$tmp/bin/missing run_launcher; rc=$?
 [[ $rc -ne 0 ]] && grep -qi 'not installed' "$tmp/out" && grep -q 'github.com/docker/sbx-releases' "$tmp/out" \
   && [[ ! -e $SPACETURTLE_STATE_DIR/launcher && ! -e $SPACETURTLE_DATA_DIR && ! -e $SPACETURTLE_BACKUP_DIR ]]; launcher_check "with sbx missing it stops before doing anything, with cause and remedy" $?
 
-# --- the launcher: spaceturtle mainnet ---
-run_mainnet() { printf '%s\n' "$1" | "$root/spaceturtle" mainnet "${@:2}" > "$tmp/out" 2>&1; }
-changed_nothing() { ! grep -qE 'toon network set|toon limit set' "$STUB_DIR/calls"; }
+# --- the launcher: the network is start's flags, kept with the Install ---
+start_with() { printf '%s\n' "$1" | "$root/spaceturtle" start "${@:2}" > "$tmp/out" 2>&1; } # the typed answer, then the flags
+init_line() { grep 'toon init' "$STUB_DIR/calls"; }
+made_nothing() { ! grep -qE '^create |toon init|toon wallet|agent-key' "$STUB_DIR/calls" 2>/dev/null; }
 
-launcher_env; echo "zone-x running" > "$STUB_DIR/zones"
-run_mainnet "yes"; rc=$?
-[[ $rc -ne 0 ]] && changed_nothing; launcher_check "mainnet without the typed word changes nothing" $?
-grep -q 0xAAA111 "$tmp/out" && grep -q SoLBBB222 "$tmp/out" && grep -qi 'no faucet' "$tmp/out" && grep -qi 'real funds' "$tmp/out"
-launcher_check "the message names the addresses to fund and says there is no faucet" $?
-: > "$STUB_DIR/calls"; run_mainnet ""; rc=$?
-[[ $rc -ne 0 ]] && changed_nothing; launcher_check "mainnet with no answer changes nothing" $?
-: > "$STUB_DIR/calls"; run_mainnet "mainnet"; rc=$?
-launcher_check "mainnet with the typed word succeeds" $rc
-grep -q 'toon network set mainnet' "$STUB_DIR/calls" && grep -q 'toon limit set --network-default' "$STUB_DIR/calls"; launcher_check "it moves the node and lowers the limit" $?
-s=$(grep -n 'state.json' "$STUB_DIR/calls" | tail -1 | cut -d: -f1); n=$(line_no 'toon network set mainnet')
-[[ -n $s && -n $n && $s -gt $n ]] && grep -q 'is on mainnet' "$tmp/out"; launcher_check "after it, status shows mainnet" $?
-: > "$STUB_DIR/calls"; run_mainnet "mainnet"; rc=$?
-[[ $rc -eq 0 ]] && grep -qi 'already on mainnet' "$tmp/out" && changed_nothing; launcher_check "on mainnet already, it says so and changes nothing" $?
-launcher_env; echo "zone-x running" > "$STUB_DIR/zones"; run_mainnet "mainnet" --keep-limit; rc=$?
-[[ $rc -eq 0 ]] && grep -q 'toon network set mainnet' "$STUB_DIR/calls" && ! grep -q 'toon limit set' "$STUB_DIR/calls"; launcher_check "--keep-limit leaves the limit alone" $?
-launcher_env; echo "zone-x running" > "$STUB_DIR/zones"; echo 'toon limit set' > "$STUB_DIR/fail-on"; run_mainnet "mainnet"; rc=$?
-[[ $rc -ne 0 ]] && grep -q 'limit could not be lowered' "$tmp/out" && grep -q 'toon limit set --network-default' "$tmp/out"; launcher_check "a failed limit stops and says how to lower it" $?
-launcher_env; run_mainnet "mainnet"; rc=$?
-[[ $rc -ne 0 ]] && changed_nothing; launcher_check "with no zone it stops and changes nothing" $?
+launcher_env; start_with "" --evm-rpc-url 'https://rpc.example.test/v1?key=a*b' --evm-token 0xAbC --solana --max-per-day 500; rc=$?
+[[ $rc -eq 0 && $(init_line) == *"toon init --accept-anyone-terms --network devnet '--evm-rpc-url' 'https://rpc.example.test/v1?key=a*b' '--evm-token' '0xAbC' '--solana' '--max-per-day' '500' --json"* ]]
+launcher_check "start's flags go to toon init as given, on devnet unless a network is named" $?
+: > "$STUB_DIR/calls"; start_with ""; rc=$?
+[[ $rc -eq 0 ]] && ! grep -q 'toon init' "$STUB_DIR/calls"; launcher_check "a later start needs no flags" $?
+start_with "" --evm-rpc-url 'https://rpc.example.test/v1?key=a*b' --evm-token 0xAbC --solana --max-per-day 500; launcher_check "a later start with the same flags is accepted" $?
+: > "$STUB_DIR/calls"; start_with "" --evm-rpc-url https://other.example.test; rc=$?
+[[ $rc -ne 0 ]] && grep -q 'already initialised' "$tmp/out" && grep -q 'rpc.example.test' "$tmp/out" && [[ ! -s $STUB_DIR/calls || -z $(grep -vE '^ls$' "$STUB_DIR/calls") ]]
+launcher_check "a later start that names another network is refused, says what the Install has, and changes nothing" $?
+launcher_env; echo "toon init" > "$STUB_DIR/fail-on"; start_with "" --evm-token 0xAbC; rm "$STUB_DIR/fail-on"; start_with ""; rc=$?
+[[ $rc -eq 0 && $(init_line | tail -1) == *"'--evm-token' '0xAbC'"* ]]; launcher_check "a run that was interrupted goes on with the network it was given" $?
+for bad_flags in "--network testnet" "--evm-rpc-url" "--evm-rpc-url it's" "--evm-chain-id base" "--everything"; do
+  launcher_env; start_with "" $bad_flags; rc=$?
+  [[ $rc -ne 0 ]] && grep -q 'usage: spaceturtle start' "$tmp/out" && made_nothing; launcher_check "start refuses '$bad_flags' with the usage and makes nothing" $?
+done
+
+launcher_env; start_with "yes" --network mainnet; rc=$?
+[[ $rc -ne 0 ]] && grep -qi 'real funds' "$tmp/out" && grep -qi 'no faucet' "$tmp/out" && made_nothing; launcher_check "mainnet without the typed word makes nothing" $?
+start_with "" --network mainnet; rc=$?
+[[ $rc -ne 0 ]] && made_nothing; launcher_check "mainnet with no answer makes nothing" $?
+start_with "mainnet" --network mainnet; rc=$?
+[[ $rc -eq 0 && $(init_line) == *"toon init --accept-anyone-terms --network mainnet --json"* ]]; launcher_check "mainnet with the typed word initialises the node on mainnet" $?
+! grep -q 'toon wallet fund' "$STUB_DIR/calls" && grep -q 0xAAA111 "$tmp/out" && grep -q SoLBBB222 "$tmp/out" && grep -qi 'no faucet' "$tmp/out"
+launcher_check "on mainnet nothing is funded, and the addresses to fund are named" $?
+: > "$STUB_DIR/calls"; "$root/spaceturtle" start < /dev/null > "$tmp/out" 2>&1; rc=$?
+[[ $rc -eq 0 ]] && ! grep -q 'type "mainnet"' "$tmp/out" && ! grep -q 'toon wallet' "$STUB_DIR/calls"; launcher_check "a later start of a mainnet Install asks nothing and funds nothing" $?
+
+launcher_env; echo 0x2105 > "$STUB_DIR/chain-id"; start_with "" --evm-chain-id 8453 --evm-rpc-url https://rpc.example.test; rc=$?
+c=$(line_no eth_chainId); f=$(line_no 'toon wallet fund'); [[ $rc -eq 0 && -n $c && -n $f && $c -lt $f ]] && ! grep -q -- '--evm-chain-id' <(init_line)
+launcher_check "the chain id is asked of the node's RPC endpoint before anything is funded, and is not one of toon's flags" $?
+: > "$STUB_DIR/calls"; start_with "" --evm-chain-id 8453 --evm-rpc-url https://rpc.example.test; ! grep -q eth_chainId "$STUB_DIR/calls"; launcher_check "a chain that was checked is not asked again" $?
+launcher_env; echo 0x14a34 > "$STUB_DIR/chain-id"; start_with "" --evm-chain-id 8453; rc=$?
+[[ $rc -ne 0 ]] && grep -q 'serves chain 84532, not 8453' "$tmp/out" && ! grep -qE 'toon wallet fund|agent-key create|connector-start' "$STUB_DIR/calls"
+launcher_check "an endpoint that serves another chain stops the run before anything is funded or started" $?
+: > "$STUB_DIR/calls"; start_with ""; rc=$?
+[[ $rc -ne 0 ]] && ! grep -q 'toon wallet fund' "$STUB_DIR/calls"; launcher_check "  and so does the next run" $?
+launcher_env; start_with "" --evm-chain-id 8453; rc=$?
+[[ $rc -ne 0 ]] && grep -q 'did not say which chain' "$tmp/out" && ! grep -q 'toon wallet fund' "$STUB_DIR/calls"; launcher_check "an endpoint that does not answer stops the run too" $?
 
 # --- sessions and the timer ---
 # A launcher whose connector's zone is running, with a model key.

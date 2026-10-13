@@ -51,4 +51,4 @@ spend more than the agent key's limit.
 **The connector's zone is different.** It holds the wallet. Whoever breaks into it holds
 everything in the wallet's settlement addresses and channels, and the limit does not stop
 them. So **fund the wallet with little**, and stay on devnet until you trust what you see.
-`spaceturtle mainnet` says so again before it changes anything.
+`spaceturtle start --network mainnet` says so again before it makes anything.

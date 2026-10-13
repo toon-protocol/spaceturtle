@@ -19,7 +19,7 @@ changing nothing, when one is missing:
 - **`bash`, `jq` and `curl`.**
 - **A little money in mind.** The first run is on devnet and costs nothing. Mainnet is real
   money: read [How the money is kept safe](concepts.md#how-the-money-is-kept-safe)
-  first.
+  first. The network is `start`'s flags: see [The network](launcher.md#the-network).
 
 The launcher is the file [`spaceturtle`](../../spaceturtle) in this repository. Clone the
 repository once and put that file on your `PATH`.
