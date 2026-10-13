@@ -1004,7 +1004,7 @@ STUB
 echo "$*" >> "$STUB_DIR/calls"
 name=${@: -1}
 [[ $1 == ls ]] && { [[ -e $STUB_DIR/broken ]] && exit 1
-  jq -Rn '[reduce (inputs | split(" ")) as $l ({}; .[$l[0]] = $l[1]) | to_entries[] | {name: .key, status: (.value[0:1] | ascii_upcase) + .value[1:]}]' "$STUB_DIR/zones" 2>/dev/null || echo '[]'; exit 0; }
+  jq -Rn '[reduce (inputs | split(" ")) as $l ({}; .[$l[0]] = $l[1]) | to_entries[] | {name: .key, status: ((.value[0:1] | ascii_upcase) + .value[1:])}]' "$STUB_DIR/zones" 2>/dev/null || echo '[]'; exit 0; }
 [[ -r $STUB_DIR/fail-on && $* == *"$(cat "$STUB_DIR/fail-on")"* ]] && exit 1
 [[ $1 == inspect && $2 == agent-x ]] && { jq -n --arg w "$(cat "$STUB_DIR/agent-wall" 2>/dev/null)" '{config: {labels: {"spaceturtle.wall": $w}}}'; exit 0; }
 [[ $1 == inspect ]] && { jq -Rn '{config: {network: {ports: [inputs | {host_port: tonumber}]}}}' "$STUB_DIR/ports" 2>/dev/null; exit 0; }
