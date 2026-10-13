@@ -89,6 +89,20 @@
 #       pipe and is never the agent's.
 #   spaceturtle refuse <app> [reason]
 #       Refuses a waiting app and discards it.
+#   spaceturtle ask <text>
+#       Writes a Request: something the Observer asks of the agent, in their own words.
+#       One JSON file in the queue the agent's zone mounts; the agent reads the waiting
+#       ones at the start of its next session and answers each as done or declined
+#       (skills/being-observed). Prints the Request's id. Needs no zone and costs nothing.
+#   spaceturtle persona [--name <name>] [--character <text>] [--picture <url>]
+#       Writes a `persona` Request, the one kind the agent never declines: the Observer
+#       describes the agent's Persona, or, with none of the three, leaves it to the agent.
+#   spaceturtle requests
+#       Lists every Request, newest first: its id, state, time, kind and text, and for an
+#       answered one the event it published or the reason it declined.
+#   spaceturtle withdraw <id>
+#       Removes a Request that is still waiting. One the agent has answered is refused:
+#       it is the record of what the agent did.
 #   spaceturtle status
 #       The timer's state and interval, when the last unattended session started,
 #       the model and the ceiling; the connector's zone (running, stopped, not created),
@@ -570,7 +584,7 @@ rewall_agent_zone() { # the wall wanted
 }
 
 session() {
-  local unattended=0
+  local unattended=0 rc started before
   case ${1:-} in
     "") ;;
     --unattended) unattended=1 ;;
@@ -605,6 +619,7 @@ session() {
   # agent key may still pay today and the node's apps, both as the agent key is told of them.
   local attach=(--tty) run=(--banner-file /usr/local/share/spaceturtle/banner.txt --sidebar-section "Earnings=cat /home/agent/session/earnings" --sidebar-section "Spending limit=spaceturtle-limit" --sidebar-section "TOON apps=spaceturtle-apps" "$def")
   if (( unattended )); then
+    started=$(date +%s); before=$(waiting_requests)
     date -u +%Y-%m-%dT%H:%M:%SZ > "$state_dir/last-unattended" || die "cannot write $state_dir/last-unattended"
     # Nobody answers a prompt, and the definition's tools are the whole of what the agent may do.
     attach=(--no-stdin)
@@ -621,6 +636,135 @@ session() {
     exec "$msb" exec --quiet "${attach[@]}" -e "$key_var" -e TOON_AGENT_KEY \
       "$agent_zone" -- docker-agent run --sandbox=false --app-name spaceturtle --model "$model" "${run[@]}"
   ) 9>&-
+  rc=$?
+  # Nobody saw an unattended session, so it leaves a report, and says so on the desktop.
+  if (( unattended )); then session_report "$started" "$rc" "$before"; fi
+  return "$rc"
+}
+
+# --- Requests: what the Observer asks of the agent ---
+# One JSON file each, in the queue the agent's zone mounts. The agent reads the waiting ones
+# at the start of a session and is the only one to change state, answered_at, result and
+# reason (skills/being-observed). Writing one needs no zone and costs nothing.
+queue=$agent_dir/state/requests
+
+write_request() { # kind, text; prints the id
+  local now id tmp
+  mkdir -p "$queue" || die "cannot create $queue"
+  now=$(date +%s); id=$now-$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')
+  # Written aside and moved into place, so the agent never reads half a file.
+  tmp=$queue/.$id.tmp
+  jq -n --arg id "$id" --argjson at "$now" --arg kind "$1" --arg text "$2" \
+    '{id: $id, created_at: $at, kind: $kind, subject: {pubkey: null, event: null},
+      text: $text, state: "waiting", answered_at: null, result: null, reason: null}' > "$tmp" \
+    && mv "$tmp" "$queue/$id.json" || { rm -f "$tmp"; die "cannot write the Request"; }
+  echo "$id"
+}
+
+cmd_ask() {
+  [[ $# -eq 1 ]] || die "usage: spaceturtle ask <text>"
+  [[ -n ${1//[[:space:]]/} ]] || die "a Request needs text"
+  write_request free "$1"
+}
+
+# The text is "Name: …", "Character: …" and "Picture: …" lines, or "Leave it to the agent."
+cmd_persona() {
+  local name= character= picture= text= field
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --name) field=name ;; --character) field=character ;; --picture) field=picture ;;
+      *) die "usage: spaceturtle persona [--name <name>] [--character <text>] [--picture <url>]" ;;
+    esac
+    [[ $# -ge 2 ]] || die "$1 needs a value"
+    # A line break would let one field pose as another; blank is the same as left out.
+    printf -v "$field" '%s' "${2//$'\n'/ }"; [[ -n ${!field//[[:space:]]/} ]] || printf -v "$field" ''
+    shift 2
+  done
+  if [[ -z $name && -z $character && -z $picture ]]; then
+    text="Leave it to the agent."
+  else
+    [[ -z $name ]] || text+="Name: $name"$'\n'
+    [[ -z $character ]] || text+="Character: $character"$'\n'
+    [[ -z $picture ]] || text+="Picture: $picture"$'\n'
+    text=${text%$'\n'}
+  fi
+  write_request persona "$text"
+}
+
+cmd_requests() {
+  local f n=0 waiting=0 line
+  while IFS= read -r f; do
+    [[ -n $f ]] || continue
+    line=$(jq -r '[.id, .state, (.created_at | strftime("%Y-%m-%d %H:%M")), .kind, (.text | gsub("\n"; " ")),
+      (if .state == "done" then "event " + (.result.event // "?") elif .state == "declined" then "reason: " + (.reason // "") else "" end)] | @tsv' "$f" 2>/dev/null) \
+      || { say "$f is not a Request; skipped"; continue; }
+    printf '%s\n' "$line"; n=$((n + 1))
+    [[ $line != *$'\t'waiting$'\t'* ]] || waiting=$((waiting + 1))
+  done < <(find "$queue" -maxdepth 1 -name '*.json' 2>/dev/null | sort -r)
+  if ((n == 0)); then say "no Requests. 'spaceturtle ask <text>' writes one."
+  else say "$waiting waiting; the agent answers them in its next session"; fi
+}
+
+cmd_withdraw() {
+  [[ $# -eq 1 ]] || die "usage: spaceturtle withdraw <id>"
+  # The id becomes part of a path: nothing but what write_request makes.
+  [[ $1 =~ ^[0-9]+-[0-9a-f]+$ ]] || die "not a Request id: $1"
+  local file=$queue/$1.json
+  [[ -f $file ]] || die "no such Request: $1"
+  jq -e '.state == "waiting"' "$file" > /dev/null 2>&1 || die "Request $1 is not waiting, so it cannot be withdrawn: it is the record of what the agent did"
+  rm -f "$file" || die "cannot remove $file"
+  say "Request $1 withdrawn"
+}
+
+# --- what an unattended session leaves behind ---
+# Nobody watched it, so it writes when it started and ended, how it ended, how many Requests
+# it answered and how many apps wait for approval, to $state_dir/last-session. `status` prints
+# that, and a desktop notification says it when there is something for the Observer to do.
+notify() { # summary, body
+  local cmd=${SPACETURTLE_NOTIFY:-notify-send}
+  command -v "$cmd" > /dev/null 2>&1 || return 0
+  "$cmd" --app-name spaceturtle "$1" "$2" > /dev/null 2>&1 || true
+}
+
+# The ids of the Requests that wait, one to a line.
+waiting_requests() {
+  local f
+  for f in "$queue"/*.json; do
+    [[ -f $f ]] || continue
+    jq -e '.state == "waiting"' "$f" > /dev/null 2>&1 && basename "$f" .json
+  done
+}
+
+session_report() { # started (seconds), exit code, the ids that were waiting when it started
+  local ended answered=0 waiting lines id body
+  ended=$(date +%s)
+  # Answered: what was waiting when the session started and is not now. A clock is no
+  # measure of it, since an answer and the start may fall in the same second.
+  while IFS= read -r id; do
+    [[ -n $id && -f $queue/$id.json ]] || continue
+    jq -e '.state != "waiting"' "$queue/$id.json" > /dev/null 2>&1 && answered=$((answered + 1))
+  done <<<"$3"
+  if lines=$(waiting_apps 2> /dev/null); then waiting=$(grep -c . <<<"$lines"); else waiting=unknown; fi
+  printf 'started=%s\nended=%s\nexit=%s\nanswered=%s\nwaiting=%s\n' "$1" "$ended" "$2" "$answered" "$waiting" > "$state_dir/last-session.new" \
+    && mv "$state_dir/last-session.new" "$state_dir/last-session" || say "cannot write $state_dir/last-session"
+  body=$(session_report_lines | tail -n +2 | paste -sd ' ')
+  if (( $2 != 0 )); then notify "The session failed (exit $2)" "$body"
+  elif (( answered > 0 )) || [[ $waiting != 0 && $waiting != unknown ]]; then notify "The session ended" "$body"; fi
+}
+
+session_report_lines() {
+  local started ended exit_ answered waiting
+  [[ -s $state_dir/last-session ]] || return 0
+  started=$(sed -n 's/^started=//p' "$state_dir/last-session"); ended=$(sed -n 's/^ended=//p' "$state_dir/last-session")
+  exit_=$(sed -n 's/^exit=//p' "$state_dir/last-session"); answered=$(sed -n 's/^answered=//p' "$state_dir/last-session"); waiting=$(sed -n 's/^waiting=//p' "$state_dir/last-session")
+  if [[ $exit_ == 0 ]]; then echo "it ended at $(date -u -d "@$ended" +%Y-%m-%dT%H:%M:%SZ), after $(( (ended - started) / 60 )) min"
+  else echo "it failed (exit $exit_) at $(date -u -d "@$ended" +%Y-%m-%dT%H:%M:%SZ). 'journalctl --user -u spaceturtle' says why"; fi
+  echo "$answered Request(s) answered. 'spaceturtle requests' lists them"
+  case $waiting in
+    unknown) echo "whether an app waits for approval could not be read" ;;
+    0) echo "no app waits for approval" ;;
+    *) echo "$waiting app(s) wait for approval. 'spaceturtle waiting' lists them" ;;
+  esac
 }
 
 # --- the timer: a systemd user timer that runs an unattended session ---
@@ -1025,6 +1169,7 @@ cmd_status() {
   [[ -s $state_dir/last-unattended ]] && last=$(<"$state_dir/last-unattended")
   echo "timer: $(conf_get timer on), every $(conf_get interval 6h)"
   echo "last unattended session: $last"
+  session_report_lines | sed 's/^/  /'
   echo "model: $(conf_get model anthropic/claude-sonnet-5-5)"
   echo "ceiling: $(conf_get ceiling 1) per unattended session"
   state=$(zone_state)
@@ -1184,7 +1329,7 @@ cmd_remove() {
   rm -f "$unit_dir/spaceturtle.timer" "$unit_dir/spaceturtle.service" "$unit_dir/spaceturtle-connector.service"
   "$systemctl_" --user daemon-reload
   rm -rf "$marks"
-  rm -f "$state_dir/last-unattended" "$state_dir/session.lock" "$conf" "$conf.new" "$key_file"
+  rm -f "$state_dir/last-unattended" "$state_dir/last-session" "$state_dir/session.lock" "$conf" "$conf.new" "$key_file"
   rm -rf "$session_dir" "$agent_dir"
   rmdir "$state_dir" "$config_dir" "$(dirname "$key_file")" 2>/dev/null
   if (( delete )); then
@@ -1211,11 +1356,15 @@ case ${1:-} in
   waiting) cmd_waiting ;;
   approve) shift; approve "$@" ;;
   refuse) refuse "${2:-}" "${3:-}" ;;
+  ask) shift; cmd_ask "$@" ;;
+  persona) shift; cmd_persona "$@" ;;
+  requests) [[ $# -eq 1 ]] || die "usage: spaceturtle requests"; cmd_requests ;;
+  withdraw) shift; cmd_withdraw "$@" ;;
   status) cmd_status ;;
   agent-key) shift; cmd_agent_key "$@" ;;
   stop) [[ $# -eq 1 ]] || die "usage: spaceturtle stop"; cmd_stop ;;
   upgrade) [[ $# -eq 1 ]] || die "usage: spaceturtle upgrade"; cmd_upgrade ;;
   backup) [[ $# -eq 1 ]] || die "usage: spaceturtle backup"; cmd_backup ;;
   remove) shift; cmd_remove "$@" ;;
-  *) die "usage: spaceturtle (a session) | start [flags] | stop | upgrade | backup | remove [--delete-wallet] | session | timer | set | key | status | waiting | approve <app> | refuse <app> [reason] | agent-key show|replace|revoke|limit <amount>" ;;
+  *) die "usage: spaceturtle (a session) | start [flags] | stop | upgrade | backup | remove [--delete-wallet] | session | timer | set | key | status | ask <text> | persona | requests | withdraw <id> | waiting | approve <app> | refuse <app> [reason] | agent-key show|replace|revoke|limit <amount>" ;;
 esac

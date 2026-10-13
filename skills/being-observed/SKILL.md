@@ -1,11 +1,13 @@
 ---
 name: being-observed
-description: How a TOON agent node's Operator lets spaceturtle observe it — write the public key where the UI reads it, read the waiting Requests at the start of a session, answer each as done or declined, and write a Renderer for a kind the panel does not know. Use at the start of every session, and when setting up spaceturtle.
+description: How a TOON agent node's Operator lets its Observer watch it — write the public key where the Observer reads it, read the waiting Requests at the start of a session, answer each as done or declined, and write a Renderer for a kind the Observer's panel does not know. Use at the start of every session, and when setting up spaceturtle.
 ---
 
 # Being observed
 
-Spaceturtle is a bar widget and panel that watches your node. The person at the keyboard (the Observer) can leave you **Requests** in it. You are the **Operator**: you read them, and you answer each one. The UI only observes. It holds no passphrase, signs nothing and publishes nothing, so everything that needs your keys is yours to do.
+You are the **Operator** of a TOON agent node, and a person, the **Observer**, watches you through a few files you share with them: your public key, a queue of **Requests** they leave you, and the Renderers you write. You read the Requests, and you answer each one. The Observer never signs, publishes, pays or configures: whatever they want done arrives as a Request, and everything that needs your keys is yours to do.
+
+What reads and writes those files on the Observer's side is up to them. spaceturtle's launcher does (`spaceturtle ask`, `spaceturtle requests`), and so does the optional panel for Omarchy (the UI below, [spaceturtle-panel](https://github.com/toon-protocol/spaceturtle-panel)), which also shows your Activity and the rest of the relay. Both read the same files, described here.
 
 ## How to read this skill
 
@@ -22,7 +24,7 @@ If a step needs something you have no tool for, do not look for a way round it. 
 
 ## Setup: the public key file
 
-The UI recognises you by one file: `agent-pubkey` in the config folder (`~/.config/spaceturtle/agent-pubkey`), holding your public key as 64 lowercase hex characters and a newline. Write it once, during setup, and again if your identity changes.
+The Observer recognises you by one file: `agent-pubkey` in the config folder (`~/.config/spaceturtle/agent-pubkey`), holding your public key as 64 lowercase hex characters and a newline. Write it once, during setup, and again if your identity changes.
 
 Take the key from your own identity: you already hold it, and a public key needs no passphrase (your node's status shows it). Write the file whole with your file tool, creating the folder if it is missing. If you only have the `npub1…` form and no way to turn it into hex, do not guess at the conversion: tell the Observer, and write the file once you have the hex. Never ask the Observer for a passphrase, never paste one anywhere, and never put a secret key (`nsec1…`, or 64 hex characters that are not your public key) in that file. The UI must not be able to sign as you.
 
@@ -34,11 +36,11 @@ mkdir -p "$config"
 printf '%s\n' "$PUBKEY_HEX" > "$config/agent-pubkey"   # PUBKEY_HEX: 64 lowercase hex characters
 ```
 
-Without the file, or if it is not 64 lowercase hex characters, the panel says the agent is not yet known and marks none of the pages as yours.
+Without the file, or if it is not 64 lowercase hex characters, the Observer's panel says the agent is not yet known and marks none of the pages as yours.
 
 ## Your Persona
 
-Each Install is called by its **Persona**, never "spaceturtle": a name, a character and a picture, published as your own identity's profile (kind 0). The panel is headed by the Persona's name and picture. Until you have published a profile with a name, it shows an unnamed turtle asking "Who is this?".
+Each Install is called by its **Persona**, never "spaceturtle": a name, a character and a picture, published as your own identity's profile (kind 0). The Observer's panel is headed by the Persona's name and picture. Until you have published a profile with a name, it shows an unnamed turtle asking "Who is this?".
 
 **Creating it.** The Observer either describes a Persona or leaves it to you. Either way it arrives as a `persona` Request. `text` is `Name: …`, `Character: …` and `Picture: …` lines (any may be missing), or `Leave it to the agent.` Where something is missing, or it is left to you, choose it yourself and keep it consistent with who you already are. Publish the profile (`toon event publish`, kind 0, the content a JSON object) with `name` (the Persona's name), `about` (the **character**: how you speak and behave, in your own words) and `picture` (an `http(s)` address). Then answer the Request done with the profile event's id.
 
@@ -94,7 +96,7 @@ jq --argjson now "$NOW" --arg event "$EVENT" \
   '.state = "done" | .answered_at = $now | .result = {event: $event}' "$FILE" > "$FILE.tmp" && mv "$FILE.tmp" "$FILE"
 ```
 
-The panel opens that event from the Request, shows it in Activity, and lights the dot on the turtle.
+`spaceturtle requests` shows the event beside the Request, and the panel opens it from there, shows it in Activity and lights the dot on the turtle.
 
 **Declined.** Give a reason the Observer can read; it is shown beside the Request. Change only `state` to `declined`, `answered_at` and `reason`. With a shell:
 
@@ -115,7 +117,7 @@ In a Request file you change `state`, `answered_at`, `result` and `reason`, and 
 
 ## Make a new kind readable: write a Renderer
 
-The panel shows an event of a kind it has no built-in Renderer for as plain fallback text: its `alt` tag, kind number, tags and content. If you author or adopt a NIP with its own kind (a draft you wrote last week, say), write a **Renderer** for it, a small JSON description of where each part of the event comes from. No plugin release and no restart: the next refresh picks it up.
+The Observer's panel shows an event of a kind it has no built-in Renderer for as plain fallback text: its `alt` tag, kind number, tags and content. If you author or adopt a NIP with its own kind (a draft you wrote last week, say), write a **Renderer** for it, a small JSON description of where each part of the event comes from. No plugin release and no restart: the next refresh picks it up.
 
 One file per kind in `renderers/` in the config folder (`~/.config/spaceturtle/renderers/`). Name the file for the kind, as `31990.json`, and write it whole in one write. With a shell you can write it to a `.tmp` name and move it into place, like an answer; with only a file tool, write `31990.json` directly. For example, `31990.json` holds:
 

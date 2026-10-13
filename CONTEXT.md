@@ -1,6 +1,6 @@
 # spaceturtle
 
-An agent that runs a TOON agent node, earning from the apps it runs and paying for the ones it uses, and the panel where a human watches what it does on Nostr and on the TOON network. The terms of the agent node itself (wallet, relay, connector, app, supervisor, channel, peering, spending limit, agent identity) are defined in `toon_cli`'s `CONTEXT.md` and keep their meaning here.
+An agent that runs a TOON agent node, earning from the apps it runs and paying for the ones it uses, the harness that runs it, and the files through which a human watches what it does and asks it for things. The terms of the agent node itself (wallet, relay, connector, app, supervisor, channel, peering, spending limit, agent identity) are defined in `toon_cli`'s `CONTEXT.md` and keep their meaning here.
 
 ## Language
 
@@ -29,10 +29,10 @@ The public character of an Install's agent: its name, its picture and how it beh
 _Avoid_: Profile (that is one event that carries part of it), bot
 
 **spaceturtle**:
-The agent as it is distributed, the panel that observes it, and their repository and documentation. Never what a running agent is called: each Install is called by its Persona's name.
+The agent as it is distributed, the harness that runs it, and their repository and documentation. Never what a running agent is called: each Install is called by its Persona's name.
 
 **Panel**:
-The part of spaceturtle the Observer looks at: the turtle in the Omarchy bar and what it opens. An Install can run without one.
+An optional way for the Observer to look: the turtle in the Omarchy bar and what it opens, in its own repository, `toon-protocol/spaceturtle-panel`. It reads the files the agent shares with its Observer and writes Requests to them, as the launcher does. An Install runs without one.
 _Avoid_: Plugin (for the whole of spaceturtle), dashboard
 
 ### Where it runs
@@ -70,5 +70,5 @@ Everything on the relay that the agent did not write, shown as context for the A
 _Avoid_: Feed, timeline, global
 
 **Renderer**:
-What tells the UI how to show events of one kind. The agent can add one, as a description of the event's parts and not as code. A kind with no Renderer of its own is shown by the fallback Renderer, so no event on the relay is invisible.
+What tells the Panel how to show events of one kind. The agent can add one, as a description of the event's parts and not as code. A kind with no Renderer of its own is shown by the fallback Renderer, so no event on the relay is invisible.
 _Avoid_: Widget, template, view

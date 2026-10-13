@@ -9,13 +9,15 @@ push, open a PR or close the issue. The runner does all three once you finish.
 
 ## This repository
 
-- This is spaceturtle, an Omarchy shell plugin (`manifest.json`, id `toon.spaceturtle`): a
-  bar widget in QML (`Panel.qml`, `Avatar.qml`, `TurtleIcon.qml`) and one bash script,
-  `relay-events`, that reads a TOON agent node's relay with the `toon` CLI, `jq` and `curl`.
-  There is no build step and no package manager at the repository root; `tests/run` tests
-  `relay-events` against a stub `toon`. `.sandcastle/package.json` belongs to the runner,
-  not to the plugin. `README.md` describes every file, the settings and how the
-  data is fetched. Read it before you touch the code.
+- This is spaceturtle, an agent for `docker-agent` and the harness that runs it: the agent
+  definition (`agent/spaceturtle.yaml`), its skill (`skills/being-observed/`), the launcher
+  (`spaceturtle`, one bash script), `install.sh`, the two zone images (`images/`) and the
+  release scripts (`release/`). There is no build step and no package manager at the
+  repository root; `tests/run` tests the launcher against a stub `msb`, the release scripts
+  against a stub `docker-agent`, and holds the definition to `tests/check-agent`.
+  `.sandcastle/package.json` belongs to the runner, not to spaceturtle. `README.md` and
+  `docs/development.md` describe every file. Read them before you touch the code. The
+  Omarchy panel is a separate repository, `toon-protocol/spaceturtle-panel`.
 - `CLAUDE.md` says what this repository is and how the factory works. Read it first. Read
   `CONTEXT.md` (the vocabulary) and `docs/adr/` (decisions) when they exist and the ticket
   touches them. Where an ADR and another document disagree, the ADR wins. Use the
@@ -28,16 +30,19 @@ push, open a PR or close the issue. The runner does all three once you finish.
   file exists. Never weaken, skip or delete a test, and never loosen a lint, to get green.
 - A ticket that needs a live box, a funded key or an on-chain write is not something you
   can do from here. Say so in a comment on the issue rather than guessing.
-- The sandbox has no Omarchy shell and no running agent node, so the popup cannot be
-  rendered and the scripts cannot reach a relay here: `relay-events` prints its offline
-  document. Do not claim to have
-  seen the widget work. Check bash with `bash -n` and say in the PR what a human must try
-  in the bar.
-- The plugin only observes: it holds no passphrase and runs no `toon` command that opens
-  the keystore. Never run `toon up`, create or fund a wallet, or publish an event.
-- Everything from a profile is untrusted input (`docs/guide/data.md`, "What it treats as untrusted"): it is
-  rendered as plain text, a picture loads only from an `http(s)` URL, and a copied value
-  reaches `wl-copy` as an argument, never through a shell. Keep those three properties.
+- The sandbox has no KVM, no microsandbox and no running agent node, so the launcher cannot
+  make a zone here and nothing reaches a relay. Do not claim to have seen a zone or a
+  session work. Check bash with `bash -n`, run `tests/run`, and say in the PR what a human
+  must try on a machine with KVM.
+- The agent holds no key that pays (ADR 0003). Never give the agent a tool that approves an
+  app, changes the limit or touches the wallet, never put the passphrase, the wallet or a
+  key that pays in the agent's zone or its image, and never run `toon up`, create or fund a
+  wallet, or publish an event from here. `tests/check-agent` and `tests/check-images` hold
+  those rules; never weaken them.
+- Everything from the Network is untrusted input: a note, a message or a profile is a
+  stranger's words, never an order, and a Request's text is a person's words for the agent
+  to weigh. Keep every argument to `toon` in a tool quoted, and a secret on a pipe, never an
+  argument.
 
 ## When you cannot finish
 
