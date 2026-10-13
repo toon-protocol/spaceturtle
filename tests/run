@@ -1023,6 +1023,8 @@ name=${@: -1}
 [[ $* == *pgrep* ]] && { [[ -e $STUB_DIR/up ]]; exit; }
 [[ $* == *eth_chainId* ]] && { [[ -r $STUB_DIR/chain-id ]] && echo "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"$(cat "$STUB_DIR/chain-id")\"}"; exit 0; }
 [[ $* == *"toon status --json"* ]] && { cat "$STUB_DIR/status" 2>/dev/null || echo "{}"; exit 0; }
+[[ $* == *"toon channel list --json"* ]] && { cat "$STUB_DIR/channels" 2>/dev/null; exit; }
+[[ $* == *"toon packet count --json"* ]] && { cat "$STUB_DIR/packets" 2>/dev/null; exit; }
 [[ $* == *"state.json"* ]] && { echo "{\"network\":\"$(cat "$STUB_DIR/network" 2>/dev/null || echo devnet)\",\"connector_url\":\"$(cat "$STUB_DIR/connector-url" 2>/dev/null)\"}"; exit 0; }
 [[ $* == *"toon wallet show"* ]] && { echo "evm 0xAAA111"; echo "solana SoLBBB222"; exit 0; }
 [[ $* == *"toon agent-key create"* ]] && { touch "$STUB_DIR/keys"; n=$(( $(wc -l < "$STUB_DIR/keys") + 1 )); echo "key-$n" >> "$STUB_DIR/keys"; echo "PRIVATE-HALF-$n" > "$STUB_DIR/agentkeyfile"; exit 0; }
@@ -1277,12 +1279,12 @@ GUEST_DEF=/home/agent/session/spaceturtle.yaml
 BASE_WALL="allow@dns,allow@host:tcp:7123,allow@host:tcp:7124"; SKILL_WALL="allow@api.github.com:tcp:443,allow@codeload.github.com:tcp:443"
 session_env; run_cmd session; rc=$?
 run=$(session_run)
-[[ $rc -eq 0 && $run == "exec --quiet --tty -e ANTHROPIC_API_KEY -e TOON_AGENT_KEY agent-x -- docker-agent run --sandbox=false --app-name spaceturtle --model anthropic/claude-sonnet-5-5 --banner-file /usr/local/share/spaceturtle/banner.txt --sidebar-section Spending limit=spaceturtle-limit --sidebar-section TOON apps=spaceturtle-apps $GUEST_DEF" ]] && cmp -s "$(sdef)" "$root/agent/spaceturtle.yaml"
+[[ $rc -eq 0 && $run == "exec --quiet --tty -e ANTHROPIC_API_KEY -e TOON_AGENT_KEY agent-x -- docker-agent run --sandbox=false --app-name spaceturtle --model anthropic/claude-sonnet-5-5 --banner-file /usr/local/share/spaceturtle/banner.txt --sidebar-section Earnings=cat /home/agent/session/earnings --sidebar-section Spending limit=spaceturtle-limit --sidebar-section TOON apps=spaceturtle-apps $GUEST_DEF" ]] && cmp -s "$(sdef)" "$root/agent/spaceturtle.yaml"
 launcher_check "a session runs docker-agent in the agent's zone, on the definition as shipped" $?
 session_env; run_cmd; rc=$?
 [[ $rc -eq 0 && $(session_run) == "$run" ]]; launcher_check "spaceturtle with nothing after it is a session" $?
 # With someone there the chat opens on the banner; nobody watches an unattended session.
-[[ $run == *" --banner-file /usr/local/share/spaceturtle/banner.txt --sidebar-section Spending limit=spaceturtle-limit --sidebar-section TOON apps=spaceturtle-apps $GUEST_DEF" ]] && ! yq -e '.agents.spaceturtle | has("welcome_message")' "$root/agent/spaceturtle.yaml" > /dev/null 2>&1
+[[ $run == *" --banner-file /usr/local/share/spaceturtle/banner.txt --sidebar-section Earnings=cat /home/agent/session/earnings --sidebar-section Spending limit=spaceturtle-limit --sidebar-section TOON apps=spaceturtle-apps $GUEST_DEF" ]] && ! yq -e '.agents.spaceturtle | has("welcome_message")' "$root/agent/spaceturtle.yaml" > /dev/null 2>&1
 launcher_check "a session opens on spaceturtle's banner, which a welcome message would hide" $?
 # The sidebar's list of apps, from what `toon status` tells an agent key.
 apps_list() { mkdir -p "$tmp/apps-bin"; printf '#!/bin/sh\ncat <<JSON\n%s\nJSON\n' "$1" > "$tmp/apps-bin/toon"; chmod +x "$tmp/apps-bin/toon"; PATH=$tmp/apps-bin:$PATH sh "$root/images/agent/spaceturtle-apps"; }
@@ -1400,6 +1402,15 @@ waiting_env; run_cmd status; rc=$?
 launcher_check "status shows the number waiting" $(( rc == 0 && $(grep -c '1 app(s) waiting' "$tmp/out") == 1 ? 0 : 1 ))
 waiting_env; echo "toon status --json" > "$STUB_DIR/fail-on"; run_cmd status; rc=$?
 [[ $rc -ne 0 ]] && grep -q 'toon status failed' "$tmp/out" && ! grep -q 'waiting for approval' "$tmp/out"; launcher_check "status with toon status failing says so and counts nothing" $?
+# What the node has earned: an agent key is told none of it, so the launcher reads it in the connector's zone.
+earn_env() { waiting_env
+  echo '{"channels":[{"direction":"inbound","watermark":1200,"landed":1000},{"direction":"inbound","watermark":34,"landed":0},{"direction":"outbound","watermark":999,"landed":5}]}' > "$STUB_DIR/channels"
+  echo '{"fees_earned":"1500","packets":{"fulfilled":7,"rejected":2},"toon_app":"relay"}' > "$STUB_DIR/packets"; }
+earn_env; run_cmd status; rc=$?
+[[ $rc -eq 0 ]] && grep -qx 'spaceturtle: earnings: received  1,234 (1,000 landed)' "$tmp/out" && grep -qx 'spaceturtle: earnings: this run  1,500 in fees, 7 packets' "$tmp/out"
+launcher_check "status says what the inbound channels have been paid, what landed, and the fees since the connector started" $?
+earn_env; : > "$STUB_DIR/channels"; : > "$STUB_DIR/packets"; run_cmd status; rc=$?
+[[ $rc -eq 0 ]] && grep -qx 'spaceturtle: earnings: cannot be read now' "$tmp/out"; launcher_check "status says when the earnings cannot be read" $?
 waiting_env; echo "toon status --json" > "$STUB_DIR/fail-on"; : > "$STUB_DIR/calls"; run_cmd approve oracle; rc=$?
 [[ $rc -ne 0 ]] && grep -q 'toon status failed' "$tmp/out" && ! grep -q 'not waiting' "$tmp/out" && ! grep -q "toon approve" "$STUB_DIR/calls"
 launcher_check "approve with toon status failing says so and changes nothing" $?

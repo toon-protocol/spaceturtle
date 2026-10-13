@@ -88,7 +88,9 @@
 #       The timer's state and interval, when the last unattended session started,
 #       the model and the ceiling; the connector's zone (running, stopped, not created),
 #       the agent's zone (in a session, idle), the network, each app and whether the
-#       relay answers; whether the supervisor runs and how many apps wait. Exits 0
+#       relay answers; whether the supervisor runs, how many apps wait, and what the
+#       node has earned: what others have paid it on its channels and how much of that
+#       has landed, and the fees and packets since the connector last started. Exits 0
 #       when the connector's zone is stopped or missing.
 #   spaceturtle agent-key show
 #       Prints the agent key's scope, limits and what is left today (read from the
@@ -454,6 +456,37 @@ need_ports() {
     || die "the connector's zone ($zone) is running, but ports $connector_port and $relay_port of this machine do not both lead to it, so the agent cannot reach the node. Another program may have held one when the zone started. Run 'spaceturtle stop', then 'spaceturtle start'."
 }
 
+# What the node has earned, in two lines, for `status` and for the chat's sidebar. What others
+# have paid it is the sum of its inbound channels' watermarks, which a restart does not lose,
+# and how much of that has landed on the chain; the fees and the packets are the connector's
+# own count since it last started. An agent key is told none of this, so the launcher reads
+# it in the connector's zone. Reading it pays nothing and needs no passphrase.
+earnings_lines() {
+  local channels counts
+  channels=$(in_zone 'toon channel list --json' 2>/dev/null) || channels=
+  counts=$(in_zone 'toon packet count --json' 2>/dev/null) || counts=
+  jq -rn --arg channels "$channels" --arg counts "$counts" '
+    def commas: tostring | explode | reverse | [range(0; length; 3) as $i | .[$i:$i + 3] | implode] | join(",") | explode | reverse | implode;
+    ($channels | try fromjson catch null) as $c | ($counts | try fromjson catch null) as $p |
+    if ($c | type) != "object" and ($p | type) != "object" then "cannot be read now"
+    else
+      (if ($c | type) == "object" then [$c.channels[]? | select(.direction == "inbound")] as $in
+         | "received  \([$in[].watermark // 0] | add // 0 | commas) (\([$in[].landed // 0] | add // 0 | commas) landed)"
+       else empty end),
+      (if ($p | type) == "object" then "this run  \($p.fees_earned // 0 | commas) in fees, \($p.packets.fulfilled // 0 | commas) packets"
+       else empty end)
+    end'
+}
+
+# While someone is in a session the sidebar shows the earnings, from a file in the directory
+# the agent's zone mounts read-only, written again every quarter of a minute.
+watch_earnings() {
+  while :; do
+    earnings_lines > "$session_dir/earnings.new" 2>/dev/null && mv -f "$session_dir/earnings.new" "$session_dir/earnings"
+    sleep 15
+  done
+}
+
 # The definition a session reads, written fresh each time into the directory the agent's zone
 # mounts read-only. An unattended one carries the ceiling as docker-agent's run-wide budget.
 write_session_def() { # 1 when unattended
@@ -552,22 +585,25 @@ session() {
   write_session_def "$unattended"
   wall=$(agent_wall) || exit 1
   # No program in a zone is given the lock (9>&-), so it is free once this launcher ends.
-  trap '"$msb" stop --quiet --timeout 60 "$agent_zone" >/dev/null 2>&1 9>&-' EXIT
+  # The trap runs after this function has gone, so what it names is not local.
+  earnings_watcher=
+  trap '[[ -z ${earnings_watcher:-} ]] || kill "$earnings_watcher" 2>/dev/null; "$msb" stop --quiet --timeout 60 "$agent_zone" >/dev/null 2>&1 9>&-' EXIT
   if [[ $(agent_zone_wall) != "$wall" ]]; then rewall_agent_zone "$wall" 9>&-
   elif [[ $state == stopped ]]; then "$msb" start --quiet "$agent_zone" 9>&- || die "the agent's zone could not be started"
   fi
   local def=/home/agent/session/spaceturtle.yaml
   # With someone there, the chat opens on the banner the README shows, moving: the agent's zone
   # image holds it as a film of frames, and its docker-agent is built to play one (ADR 0005).
-  # Its sidebar shows what the agent key may still pay today and lists the node's apps, both
-  # as the agent key is told of them.
-  local attach=(--tty) run=(--banner-file /usr/local/share/spaceturtle/banner.txt --sidebar-section "Spending limit=spaceturtle-limit" --sidebar-section "TOON apps=spaceturtle-apps" "$def")
+  # Its sidebar shows what the node has earned, which the launcher reads for it, and what the
+  # agent key may still pay today and the node's apps, both as the agent key is told of them.
+  local attach=(--tty) run=(--banner-file /usr/local/share/spaceturtle/banner.txt --sidebar-section "Earnings=cat /home/agent/session/earnings" --sidebar-section "Spending limit=spaceturtle-limit" --sidebar-section "TOON apps=spaceturtle-apps" "$def")
   if (( unattended )); then
     date -u +%Y-%m-%dT%H:%M:%SZ > "$state_dir/last-unattended" || die "cannot write $state_dir/last-unattended"
     # Nobody answers a prompt, and the definition's tools are the whole of what the agent may do.
     attach=(--no-stdin)
     run=(--exec --yolo "$def" "Begin a session: read the waiting Requests and answer them, then do your daily work.")
   fi
+  if (( ! unattended )); then watch_earnings > /dev/null 2>&1 9>&- & earnings_watcher=$!; fi
   # The key reaches the process by name (-e), never as an argument of any program: it is
   # exported by the shell itself, in a subshell that becomes msb.
   # The agent key's path, not the key, goes in the environment; the file is in the agent's zone.
@@ -944,6 +980,8 @@ cmd_status() {
   fi
   lines=$(waiting_apps "$doc") || exit 1
   say "$(grep -c . <<<"$lines") app(s) waiting for approval"
+  # In the token's base units.
+  while IFS= read -r l; do say "earnings: $l"; done < <(earnings_lines)
 }
 
 # Stops everything and loses nothing: the timer's unit (its setting stays), a session in the

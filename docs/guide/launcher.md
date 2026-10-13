@@ -126,7 +126,10 @@ definition's tools, the agent key's scope and its spending limit are what bound 
 - `spaceturtle status` shows the timer, its interval and the last unattended session's time,
   and for each of the connector's zone (`running`, `stopped` or `not created`), the agent's
   zone (`in a session` or `idle`) and every app the node has, whether it runs; then the
-  node's network and whether its relay answers from inside the connector's zone. While the
+  node's network and whether its relay answers from inside the connector's zone. Its last
+  lines are the node's earnings, in the token's base units: what others have paid it on its
+  channels and how much of that has landed on the chain, and the fees and packets since the
+  connector last started. A session's sidebar shows the same. While the
   connector's zone is stopped or not created it says those cannot be read, and still exits 0.
 - `spaceturtle stop` stops the timer's unit (its on/off setting stays), a session in the
   agent's zone, the unit that keeps the connector's zone running and then that zone, and
@@ -162,7 +165,7 @@ no tool for any of them:
 | `spaceturtle waiting` | Lists each waiting app with its image or URL, and how long it has waited when `toon` says (0.2.0 does not, so it reads `unknown`) |
 | `spaceturtle approve <app>` | Starts it; an image that is not TOON's own runs under the sandboxed runtime |
 | `spaceturtle refuse <app> [reason]` | Discards it |
-| `spaceturtle status` | Also says whether the supervisor is running and how many apps are waiting |
+| `spaceturtle status` | Also says whether the supervisor is running, how many apps are waiting and what the node has earned |
 | `spaceturtle agent-key show` | The agent key's scope, limits and what is left today; never the private half |
 | `spaceturtle agent-key replace` | Makes a new key, revokes the old one, places the new private half in the agent's zone; the wallet is untouched |
 | `spaceturtle agent-key revoke` | Removes the key from the agent node's list and deletes its private half from the agent's zone; the agent's next order is refused |
