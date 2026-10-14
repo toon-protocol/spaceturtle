@@ -7,11 +7,7 @@
 
 # spaceturtle
 
-**An agent that serves your apps from your own machine, and is paid for each request.**
-
-*No cloud, no domain, no open port.* spaceturtle runs a node on the TOON network, reached
-as a hidden service. It runs the apps you give it, earns from them, and holds no key that
-pays. One line installs it, with no root and no account.
+**Your app, served from your own machine and paid for every request, with no cloud, no domain and no open port, by an agent that cannot spend more than you allow.**
 
 [![Release](https://img.shields.io/github/v/release/toon-protocol/spaceturtle?style=flat-square&color=c9a24a&label=release)](https://github.com/toon-protocol/spaceturtle/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/toon-protocol/spaceturtle/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/toon-protocol/spaceturtle/actions/workflows/ci.yml)
@@ -24,6 +20,23 @@ curl -fsSL https://raw.githubusercontent.com/toon-protocol/spaceturtle/main/inst
 ```
 
 </div>
+
+---
+
+That line installs the launcher and starts nothing. Then three commands:
+
+```sh
+spaceturtle start   # your node on devnet, with a funded wallet and a sealed backup
+spaceturtle key     # your model provider's key, typed once, kept where only you can read it
+spaceturtle         # a conversation with your agent: ask it to add your app
+```
+
+- **Free to try.** The first run is on devnet and costs nothing. Mainnet only when you ask for it, by typing `mainnet`.
+- **The agent holds no key that pays.** You set what it may spend, approve anything foreign it wants to run, and can revoke its key at any time.
+- **One install, no root, no account.** A Linux machine with KVM and systemd, and a key from your model provider.
+- **MIT.** The agent, the harness and the guides are all in this repository.
+
+How it works, and why it is shaped this way, is below.
 
 ---
 
@@ -44,27 +57,18 @@ on their own machines.
 The harness is one program, the **launcher**. It makes the Install, starts the agent's
 sessions by hand and on a timer, and keeps the agent away from the money. The agent itself
 is a definition for [`docker-agent`](https://docs.docker.com/ai/docker-agent/), on the
-model you choose. The first run is on devnet and costs nothing.
+model you choose.
 
 <p align="center">
   <img src="docs/assets/spaceturtle-session.gif" alt="A session: the agent is asked to add the store app, the app waits, the Observer approves it in a terminal, and the sidebar shows it running" width="100%">
 </p>
 
-```sh
-spaceturtle start       # the connector's zone, a funded devnet wallet, the agent key, a backup
-spaceturtle key         # your model provider's key, read from the terminal without showing it
-spaceturtle             # talk to your agent: a session in the agent's zone
-spaceturtle status      # the timer, the zones, the apps, and whether the relay answers
-```
-
 [`install.sh`](install.sh) checks the machine, puts the launcher of the latest release in
 `~/.local/share/spaceturtle/launcher` with a link in `~/.local/bin`, and puts
 [microsandbox](https://github.com/superradcompany/microsandbox), which the zones run in,
-beside it. It needs no root and no account, and starts nothing.
-[The first run](docs/guide/first-run.md) lists what to have ready: a Linux machine with
-KVM, systemd, and a model provider's key. The harness runs on Linux with KVM, since a zone
-is a virtual machine. The agent's definition on its own runs wherever `docker-agent` and
-`toon` run, which today is Linux as well.
+beside it. [The first run](docs/guide/first-run.md) lists what to have ready. The harness
+runs on Linux with KVM, since a zone is a virtual machine. The agent's definition on its
+own runs wherever `docker-agent` and `toon` run, which today is Linux as well.
 
 ## Your app, served from your machine
 
