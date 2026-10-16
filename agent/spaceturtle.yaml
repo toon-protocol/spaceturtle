@@ -80,7 +80,7 @@ agents:
                 description: "ILP address to send the packet to."
               connector:
                 type: string
-                description: "The /ilp URL of the connector the app is behind, such as https://proxy.relay.devnet.toonprotocol.dev/ilp."
+                description: "The /ilp URL of the connector the app is behind, such as https://toonprotocol.dev/ilp, the devnet's connector."
               amount:
                 type: string
                 description: "Amount to pay, in the token's base units, as a whole number."
