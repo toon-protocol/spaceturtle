@@ -1,0 +1,155 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 24" width="1280" height="240" shape-rendering="crispEdges" role="img" aria-label="spaceturtle: a pixel turtle swimming through space">
+  <title>spaceturtle</title>
+  <!-- For a dark page; no background. Drawing 1 of TurtleIcon.qml and its stroke, head to
+       the right. The stars stream past in two layers and the flippers paddle. -->
+  <g fill="#56628f">
+    <animateTransform attributeName="transform" type="translate" from="0 0" to="-128 0" dur="36s" repeatCount="indefinite"/>
+    <rect x="82" y="4" width="1" height="1"/>
+    <rect x="101" y="20" width="1" height="1"/>
+    <rect x="12" y="2" width="1" height="1"/>
+    <rect x="24" y="11" width="1" height="1"/>
+    <rect x="14" y="16" width="1" height="1"/>
+    <rect x="54" y="1" width="1" height="1"/>
+    <rect x="22" y="13" width="1" height="1"/>
+    <rect x="107" y="2" width="1" height="1"/>
+    <rect x="61" y="2" width="1" height="1"/>
+    <rect x="108" y="1" width="1" height="1"/>
+    <rect x="31" y="7" width="1" height="1"/>
+    <rect x="15" y="18" width="1" height="1"/>
+    <rect x="101" y="1" width="1" height="1"/>
+    <rect x="56" y="1" width="1" height="1"/>
+    <rect x="34" y="9" width="1" height="1"/>
+    <rect x="107" y="4" width="1" height="1"/>
+    <rect x="30" y="18" width="1" height="1"/>
+    <rect x="78" y="17" width="1" height="1"/>
+    <rect x="46" y="3" width="1" height="1"/>
+    <rect x="48" y="11" width="1" height="1"/>
+    <rect x="24" y="17" width="1" height="1"/>
+    <rect x="16" y="18" width="1" height="1"/>
+    <rect x="15" y="19" width="1" height="1"/>
+    <rect x="52" y="15" width="1" height="1"/>
+    <rect x="109" y="10" width="1" height="1"/>
+    <rect x="119" y="18" width="1" height="1"/>
+    <rect x="210" y="4" width="1" height="1"/>
+    <rect x="229" y="20" width="1" height="1"/>
+    <rect x="140" y="2" width="1" height="1"/>
+    <rect x="152" y="11" width="1" height="1"/>
+    <rect x="142" y="16" width="1" height="1"/>
+    <rect x="182" y="1" width="1" height="1"/>
+    <rect x="150" y="13" width="1" height="1"/>
+    <rect x="235" y="2" width="1" height="1"/>
+    <rect x="189" y="2" width="1" height="1"/>
+    <rect x="236" y="1" width="1" height="1"/>
+    <rect x="159" y="7" width="1" height="1"/>
+    <rect x="143" y="18" width="1" height="1"/>
+    <rect x="229" y="1" width="1" height="1"/>
+    <rect x="184" y="1" width="1" height="1"/>
+    <rect x="162" y="9" width="1" height="1"/>
+    <rect x="235" y="4" width="1" height="1"/>
+    <rect x="158" y="18" width="1" height="1"/>
+    <rect x="206" y="17" width="1" height="1"/>
+    <rect x="174" y="3" width="1" height="1"/>
+    <rect x="176" y="11" width="1" height="1"/>
+    <rect x="152" y="17" width="1" height="1"/>
+    <rect x="144" y="18" width="1" height="1"/>
+    <rect x="143" y="19" width="1" height="1"/>
+    <rect x="180" y="15" width="1" height="1"/>
+    <rect x="237" y="10" width="1" height="1"/>
+    <rect x="247" y="18" width="1" height="1"/>
+  </g>
+  <g fill="#aab6e0">
+    <animateTransform attributeName="transform" type="translate" from="0 0" to="-128 0" dur="16s" repeatCount="indefinite"/>
+    <rect x="116" y="11" width="2" height="1"/>
+    <rect x="76" y="7" width="2" height="1"/>
+    <rect x="46" y="22" width="2" height="1"/>
+    <rect x="62" y="2" width="2" height="1"/>
+    <rect x="76" y="16" width="2" height="1"/>
+    <rect x="126" y="10" width="2" height="1"/>
+    <rect x="114" y="9" width="2" height="1"/>
+    <rect x="18" y="3" width="2" height="1"/>
+    <rect x="107" y="5" width="2" height="1"/>
+    <rect x="87" y="4" width="2" height="1"/>
+    <rect x="125" y="13" width="2" height="1"/>
+    <rect x="10" y="21" width="2" height="1"/>
+    <rect x="19" y="17" width="2" height="1"/>
+    <rect x="80" y="10" width="2" height="1"/>
+    <rect x="244" y="11" width="2" height="1"/>
+    <rect x="204" y="7" width="2" height="1"/>
+    <rect x="174" y="22" width="2" height="1"/>
+    <rect x="190" y="2" width="2" height="1"/>
+    <rect x="204" y="16" width="2" height="1"/>
+    <rect x="254" y="10" width="2" height="1"/>
+    <rect x="242" y="9" width="2" height="1"/>
+    <rect x="146" y="3" width="2" height="1"/>
+    <rect x="235" y="5" width="2" height="1"/>
+    <rect x="215" y="4" width="2" height="1"/>
+    <rect x="253" y="13" width="2" height="1"/>
+    <rect x="138" y="21" width="2" height="1"/>
+    <rect x="147" y="17" width="2" height="1"/>
+    <rect x="208" y="10" width="2" height="1"/>
+  </g>
+  <g fill="#ffffff">
+    <animate attributeName="visibility" values="visible;hidden" dur="0.9s" calcMode="discrete" repeatCount="indefinite"/>
+    <rect x="64" y="4" width="3" height="1"/>
+    <rect x="57" y="5" width="2" height="1"/>
+    <rect x="65" y="5" width="3" height="1"/>
+    <rect x="57" y="6" width="3" height="1"/>
+    <rect x="66" y="6" width="2" height="1"/>
+    <rect x="58" y="7" width="10" height="1"/>
+    <rect x="59" y="8" width="3" height="1"/>
+    <rect x="63" y="8" width="4" height="1"/>
+    <rect x="58" y="9" width="10" height="1"/>
+    <rect x="69" y="9" width="2" height="1"/>
+    <rect x="57" y="10" width="3" height="1"/>
+    <rect x="61" y="10" width="3" height="1"/>
+    <rect x="65" y="10" width="7" height="1"/>
+    <rect x="56" y="11" width="6" height="1"/>
+    <rect x="63" y="11" width="9" height="1"/>
+    <rect x="56" y="12" width="6" height="1"/>
+    <rect x="63" y="12" width="9" height="1"/>
+    <rect x="57" y="13" width="3" height="1"/>
+    <rect x="61" y="13" width="3" height="1"/>
+    <rect x="65" y="13" width="7" height="1"/>
+    <rect x="58" y="14" width="10" height="1"/>
+    <rect x="69" y="14" width="2" height="1"/>
+    <rect x="59" y="15" width="3" height="1"/>
+    <rect x="63" y="15" width="4" height="1"/>
+    <rect x="58" y="16" width="10" height="1"/>
+    <rect x="57" y="17" width="3" height="1"/>
+    <rect x="66" y="17" width="2" height="1"/>
+    <rect x="57" y="18" width="2" height="1"/>
+    <rect x="65" y="18" width="3" height="1"/>
+    <rect x="64" y="19" width="3" height="1"/>
+  </g>
+  <g fill="#ffffff" visibility="hidden">
+    <animate attributeName="visibility" values="hidden;visible" dur="0.9s" calcMode="discrete" repeatCount="indefinite"/>
+    <rect x="62" y="4" width="3" height="1"/>
+    <rect x="63" y="5" width="3" height="1"/>
+    <rect x="57" y="6" width="2" height="1"/>
+    <rect x="65" y="6" width="2" height="1"/>
+    <rect x="58" y="7" width="9" height="1"/>
+    <rect x="59" y="8" width="3" height="1"/>
+    <rect x="63" y="8" width="4" height="1"/>
+    <rect x="58" y="9" width="10" height="1"/>
+    <rect x="69" y="9" width="2" height="1"/>
+    <rect x="57" y="10" width="3" height="1"/>
+    <rect x="61" y="10" width="3" height="1"/>
+    <rect x="65" y="10" width="7" height="1"/>
+    <rect x="56" y="11" width="6" height="1"/>
+    <rect x="63" y="11" width="9" height="1"/>
+    <rect x="56" y="12" width="6" height="1"/>
+    <rect x="63" y="12" width="9" height="1"/>
+    <rect x="57" y="13" width="3" height="1"/>
+    <rect x="61" y="13" width="3" height="1"/>
+    <rect x="65" y="13" width="7" height="1"/>
+    <rect x="58" y="14" width="10" height="1"/>
+    <rect x="69" y="14" width="2" height="1"/>
+    <rect x="59" y="15" width="3" height="1"/>
+    <rect x="63" y="15" width="4" height="1"/>
+    <rect x="58" y="16" width="9" height="1"/>
+    <rect x="57" y="17" width="2" height="1"/>
+    <rect x="65" y="17" width="2" height="1"/>
+    <rect x="63" y="18" width="3" height="1"/>
+    <rect x="62" y="19" width="3" height="1"/>
+  </g>
+</svg>
